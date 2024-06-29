@@ -1,2 +1,39 @@
-<h1>Hello!</h1>
-<h1>你好！</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cards Practice</title>
+
+    <!-- Fonts -->
+    <!-- Roboto Mono, for 10 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,100..900;1,100..900&family=Roboto+Mono:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="dapu.css">
+    <link rel="stylesheet" href="card.css">
+</head>
+<body>
+    <div class="container">
+        <div class="nscontainer">
+            <div class="corner" id="corner-lt"></div>
+            <div class="nshand" id="nhand"></div>
+            <div class="corner" id="corner-rt"></div>
+        </div>
+        <div class="middle-container">
+            <div class="ewhand" id="whand"></div>
+            <div class="desk"></div>
+            <div class="ewhand" id="ehand"></div>
+        </div>
+        <div class="nscontainer">
+            <div class="corner" id="corner-lb"></div>
+            <div class="nshand" id="shand"></div>
+            <div class="corner" id="corner-rb"></div>
+        </div>
+        <div class="toolbar"></div>
+    </div>
+
+    <script src="cards.js"></script>
+</body>
+</html>

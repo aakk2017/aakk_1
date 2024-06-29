@@ -1,0 +1,123 @@
+/* 
+    must give --card-height and --card-width
+    usually aspect ratio is 3/2
+*/
+
+/* import fonts */
+@font-face {
+    font-family: 'joker';
+    src: url('./font_zanf5jk7tv/iconfont.ttf?t=1717531063653') format('truetype');
+}
+
+.hand {
+    height: var(--card-height);
+    overflow-y: visible;
+    display: flex;
+}
+
+.card-container {
+    /* card-container determines the position of cards */
+    height: var(--card-height);
+    width: calc(var(--card-width) / 3);
+    /* transition: all 0.2s; */
+    overflow: hidden;
+}
+.card-container:last-child {
+    /* last child has the full card width */
+    width: var(--card-width);
+    flex-shrink: 0;
+}
+.card-container:hover {
+    flex-shrink: 0;
+}
+/* set colors for different suits */
+.card-container[suit="s"] {
+    color: #006;
+}
+.card-container[suit="h"] {
+    color: #a00;
+}
+.card-container[suit="d"] {
+    color: #c30;
+}
+.card-container[suit="c"] {
+    color: #222;
+}
+.card-container[rank="W"] {
+    color: #c03;
+}
+.card-container[rank="V"] {
+    color: #525;
+}
+/* special font for jokers */
+.card-container[suit="w"] .card-suit {
+    font-family: "joker";
+    font-size: calc(var(--card-width) / 4);
+    transform: translateY(-0.7vh);
+}
+.card-container[suit="w"] .card-face {
+    font-family: "joker";
+    font-size: calc(var(--card-height) / 2);
+    transform: translateY(calc(var(--card-height) / 9 * (-1)));
+}
+.card-container[suit="w"] span.joker::after {
+    content: '\e612';
+}
+/* special styles for tens */
+.card-container[rank="X"] .card-rank {
+    letter-spacing: -0.1em;
+    transform: scaleX(0.7) translateX(-0.1em);
+}
+/* styles for different show modes */
+.card-container[card-show='hide'] .card {
+    background-color: red;
+}
+.card-container[card-show='selected'] .card {
+    background-color: green;
+}
+.card-container[card-show='played'] .card {
+    background-color: #aaa;
+}
+.card-container[card-show='played'] .card div {
+    opacity: 0.5;
+}
+
+.card {
+    width: var(--card-width);
+    height: var(--card-height);
+    border: 1px solid black;
+    border-radius: calc(var(--card-width) / 20);
+    box-sizing: border-box;
+    background-color: #eee;
+    position: relative;
+    box-shadow: 0 0 0.3vh #eee;
+    transition: all 0.2s;
+}
+.card:hover {
+    background-color: #fff;
+    transform: scale(1.01);
+    box-shadow: 0 0 1.2vh #888;
+}
+
+.card-rank,
+.card-suit {
+    width: calc(var(--card-width) / 3);
+    /* padding-left: 0; */
+    text-align: center;
+    font-family: "Roboto Mono", monospace;
+    font-size: calc(var(--card-width) / 3);
+    font-weight: 400;
+    font-style: normal;
+}
+.card-suit {
+    transform: translateY(-2vh);
+}
+.card-face {
+    font-size: var(--card-width);
+    font-family: "Roboto Mono", monospace;
+    font-weight: 400;
+    font-style: normal;
+    position: absolute;
+    right: calc(var(--card-width) * 0.06);
+    bottom: calc(var(--card-height) / 9 * (-1));
+}

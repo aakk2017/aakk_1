@@ -1,0 +1,16 @@
+{
+  "id": "",
+  "name": "",
+  "font_family": "iconfont",
+  "css_prefix_text": "icon-",
+  "description": "",
+  "glyphs": [
+    {
+      "icon_id": "9251672",
+      "name": "05-小猫",
+      "font_class": "-xiaomao",
+      "unicode": "e612",
+      "unicode_decimal": 58898
+    }
+  ]
+}

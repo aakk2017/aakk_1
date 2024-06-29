@@ -1,0 +1,88 @@
+/* reset styles */
+* {
+    margin: 0;
+}
+
+/* clear float */
+.clearfix::after {
+    content: '';
+    display: block;
+    clear: both;
+}
+
+/* define key heights and widths */
+:root {
+    --container-width: 177vh;
+    --card-height: 18vh;
+    --card-width: 12vh;
+}
+
+/* container: 100vh by 177vh (9 : 16) if aspect ratio < 9/16 */
+body {
+    height: 100vh;
+}
+.container {
+    height: 100vh;
+    width: var(--container-width);
+    margin: 0 auto;
+    padding: 1vh;
+    box-sizing: border-box;
+    background-color: bisque;
+}
+
+/* the top row */
+.nscontainer {
+    height: var(--card-height);
+    width: calc(var(--container-width) - 2vh);
+    background-color: skyblue;
+    display: flex;    
+    justify-content: space-between;
+}
+.corner {
+    height: var(--card-height);
+    width: 32.5vh;
+    background-color: orange;
+}
+.nshand {
+    height: var(--card-height);
+    width: calc(9 * var(--card-width));
+    background-color: aqua;
+    display: flex;
+    justify-content: center;
+}
+
+.middle-container {
+    height: calc(3 * var(--card-height));
+    width: 175vh;
+    background-color: skyblue;
+    margin: 1vh 0;
+    display: flex;
+    justify-content: space-between;
+}
+
+.ewhand {
+    height: calc(3 * var(--card-height));
+    width: calc(4 * var(--card-width));
+    background-color: greenyellow;
+}
+.ewhand .hand {
+    height: calc(0.5 * var(--card-height));
+}
+.ewhand .hand:last-child {
+    height: var(--card-height);
+}
+#whand .hand {
+    justify-content: end;
+}
+
+.desk {
+    height: calc(3 * var(--card-height));
+    width: 77vh;
+    background-color: yellow;
+}
+
+.toolbar {
+    height: 6vh;
+    margin-top: 1vh;
+    background-color: gray;
+}
