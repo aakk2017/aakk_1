@@ -91,6 +91,10 @@
 .card-container[card-show='show-ondesk'] .card {
     background-color: aqua;
 }
+.card-container[card-show='show-revoked'] .card {
+    background-color: #525;
+    color: #d66;
+}
 .card-container[card-show='folded'] {
     width: 0;
     opacity: 0;

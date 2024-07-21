@@ -32,6 +32,7 @@ var shiftDown = false;
 // view
 var showHands = [];
 var statusbar = document.getElementById('statusbar');
+var errorbar = document.getElementById('errorbar');
 var infoSection = document.getElementById('corner-lt');
 var scoringSection = document.getElementById('corner-rt');
 var dipaiSection = document.getElementById('corner-lb');
@@ -159,7 +160,7 @@ class Move {
         this.comment = "";
     }
 
-    prevMove(){}
+    previousMove(){}
     nextMove(){}
     nextMoveList(){}
 
@@ -174,7 +175,7 @@ function isPrevious(id1, id2) {
 
 }
 
-function prevLetter(l) {
+function previousLetter(l) {
     let a = l.charCodeAt(0) - 1;
     return String.fromCharCode(a);
 }
@@ -234,27 +235,9 @@ function renderHands() {
 }
 
 // card-play
+// game-specified js file must include functions goToNextMove() and goToPreviousMove()
 function getCurrentMove() {
     return moves.find((m) => m.moveId === currentMoveId);
-}
-function goToPreviousMove() {
-
-}
-function goToNextMove() {
-    let currentMove = getCurrentMove();
-    let nextMove = currentMove ? currentMove.nextMove() : moves[0];
-    if(nextMove.isLead) {
-        handElements.forEach((e) => {
-            e.querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
-                c.setAttribute('card-show', 'folded');
-            });
-        });
-    }
-    nextMove.moveCards.forEach((c) => {
-        let qs = '[suit="' + c.suitName + '"][rank="' + c.rankName + '"][card-show="show-inhand"]';
-        handElements[nextMove.player].querySelector(qs).setAttribute('card-show', 'show-ondesk');
-    })
-    currentMoveId = nextMove.moveId;
 }
 function goToMove(mid) {
     // input: the moveId of a move

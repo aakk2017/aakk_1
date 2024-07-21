@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,7 +23,27 @@
         </div>
         <div class="middle-container">
             <div class="ewhand" id="whand"></div>
-            <div class="desk"></div>
+            <div class="desk">
+                <div class="table-record-container" id="table-record-container" area-show="show">
+                    <div class="input-container">
+                        <input type="file" id="open-file" onchange="viewFile()" />
+                        <div id="file-text"></div>
+                    </div>
+                    <table id="table-record">
+                        <!-- <caption>table record</caption> -->
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>庄</th>
+                                <th>右</th>
+                                <th>前</th>
+                                <th>左</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
             <div class="ewhand" id="ehand"></div>
         </div>
         <div class="nscontainer">
@@ -31,9 +51,33 @@
             <div class="nshand" id="shand"></div>
             <div class="corner" id="corner-rb"></div>
         </div>
-        <div class="toolbar"></div>
+        <div class="footer">
+            <menu class="menubar">
+                <li id="menu-open"><div class="key">1</div>打开</li>
+                <li id="menu-save"><div class="key">2</div>保存</li>
+                <li id="menu-settings"><div class="key">3</div>设置</li>
+                <li id="menu-display"><div class="key">4</div>显示</li>
+                <li id="menu-play"><div class="key">5</div>行牌</li>
+                <li id="menu-edit"><div class="key">6</div>打谱</li>
+                <li id="menu-help"><div class="key">0</div>指南</li>
+            </menu>
+            <menu class="toolbar">
+                <li id="to-start" title="回到开始">&#8617;</li>
+                <li id="prev-round" title="上一轮">&#8810;</li>
+                <li id="prev-move" title="上一步">&lt;</li>
+                <li id="next-move" title="下一步">&gt;</li>
+                <li id="next-round" title="下一轮">&#8811;</li>
+            </menu>
+            <div id="statusbar">
+                <div id="errorbar"></div>
+                状态栏
+            </div>
+        </div>
+        <div class="comment" id="comment" area-show="hide"></div>
+        <div class="tree-record" id="tree-record" area-show="hide"></div>
     </div>
-
-    <script src="cards.js"></script>
+    
+    <script src="dapu.js"></script>
+    <script src="shengji.js"></script>
 </body>
 </html>

@@ -1,3 +1,6 @@
+// code for shengji specifically
+// code for game must include goToPreviousMove(), goToNextMove()
+
 // game info
 var zhuangPosition = 0;
 var level = 5;
@@ -149,8 +152,8 @@ class ShengjiMove extends Move {
       let ids2 = m.split('-');
       let mid1 = ids1[ids1.length - 1];
       let mid2 = ids2[ids2.length - 1];
-      let branch1 = ids1.splice(ids1.length - 1, 1).join('-');
-      let branch2 = ids2.splice(ids2.length - 1, 1).join('-');
+      let branch1 = ids1.toSpliced(ids1.length - 1, 1).join('-');
+      let branch2 = ids2.toSpliced(ids2.length - 1, 1).join('-');
       let a = false;
       if(mid2 !== '_') {
         if(mid1 === '_' || mid1[0] < mid2[0] || (mid1[0] === mid2[0] && mid1[1] < mid2[1])) {
@@ -159,10 +162,10 @@ class ShengjiMove extends Move {
       }
       return branch2.includes(branch1) && a;
     }
-    prevMove() {
-      return moves.find((m) => m.moveId === prevMoveId(this.moveId));
+    previousMove() {
+      return moves.find((m) => m.moveId === previousMoveId(this.moveId));
     }
-    // prevMoveId() {
+    // previousMoveId() {
     //   // temporary
     // }
     nextMove() {
@@ -173,36 +176,36 @@ class ShengjiMove extends Move {
     // nextMoveIdList(){}
 }
 
-function prevMoveId(mid) {
+function previousMoveId(mid) {
   // temporary
   // input: moveId of a move, string
   let ids = mid.split('-');
   let ending = ids[ids.length - 1];
+  let previousEnding;
   switch(ending) {
     case 'a0':
-      ending = '_';
+      previousEnding = '_';
       break;
     case '_':
-      ending = '^';
+      previousEnding = '^';
       break;
     case '^':
     case '':
-      ending = '^';
+      previousEnding = '^';
       break;
     default:
       if(ending[1] === '0') {
-        ending[1] = '3';
-        ending[0] = String.fromCharCode(ending.charCodeAt(0) - 1);
+        previousEnding = String.fromCharCode(ending.charCodeAt(0) - 1) + '3';
       } else {
-        ending[1] = String.fromCharCode(ending.charCodeAt(1) - 1);
+        previousEnding = ending[0] + String.fromCharCode(ending.charCodeAt(1) - 1);
       }
   }
   if(ids.length === 1) {
-    return ending;
+    return previousEnding;
   }
-  let parentNodeTail = ids[ids.length - 2];
-  if(ending === parentNodeTail.slice(0, parentNodeTail.length-1)) {
-    ids[ids.length - 2] = ending;
+  let parentNodeEnding = ids[ids.length - 2];
+  if(previousEnding === parentNodeEnding.slice(0, parentNodeEnding.length-1)) {
+    ids[ids.length - 2] = previousEnding;
     ids.splice(ids.length-1, 1);
   }
   return ids.join('-');
@@ -236,6 +239,69 @@ function nextMoveId(mid) {
     return mid + currentBranch.replace(mid, '')[0] + '-' + nextEnding;
   }
   return branch + '-' + nextEnding;
+}
+function goToPreviousMove() {
+  let currentMove = getCurrentMove();
+  let previousMove = currentMove ? currentMove.previousMove() : moves[0];
+  if(currentMove) {
+    handElements[currentMove.player].querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
+      c.setAttribute('card-show', 'show-inhand');
+    });
+    handElements[currentMove.player].querySelectorAll('[card-show="show-revoked"]').forEach((c) => {
+      c.setAttribute('card-show', 'show-inhand');
+    });
+    if(currentMove.isLead) {
+      if(currentMove.moveId.endsWith('a0')) {
+        handElements[previousMove.player].querySelector('[card-show="folded-dipai"]').forEach((c) => {
+          c.setAttribute('card-show', 'show-ondesk');
+        });
+      } else {
+        let m = previousMove;
+        for(let i = 0; i < 4; i++) {
+          m.moveCards.forEach((c) => {
+            let qs = '[suit="' + c.suitName + '"][rank="' + c.rankName + '"][card-show="folded"]';
+            handElements[m.player].querySelector(qs).setAttribute('card-show', 'show-ondesk');
+          });
+          if(m.revokedCards) {
+            m.revokedCards.forEach((c) => {
+              let qs = '[suit="' + c.suitName + '"][rank="' + c.rankName + '"][card-show="show-inhand"]';
+              handElements[m.player].querySelector(qs).setAttribute('card-show', 'show-revoked');
+            });
+          }
+          m = m.previousMove();
+        }
+      }
+    }
+    currentMoveId = previousMove.moveId;
+  }
+}
+function goToNextMove() {
+  let currentMove = getCurrentMove();
+  let nextMove = currentMove ? currentMove.nextMove() : moves[0];
+  if(nextMove) {
+    if(nextMove.isLead) {
+      let cardShow = nextMove.moveId.endsWith("a0") ? "folded-dipai" : "folded";
+      handElements.forEach((e) => {
+          e.querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
+              c.setAttribute('card-show', cardShow);
+          });
+          e.querySelectorAll('[card-show="show-revoked"]').forEach((c) => {
+            c.setAttribute('card-show', 'show-inhand');
+          });
+      });
+    }
+    nextMove.moveCards.forEach((c) => {
+        let qs = '[suit="' + c.suitName + '"][rank="' + c.rankName + '"][card-show="show-inhand"]';
+        handElements[nextMove.player].querySelector(qs).setAttribute('card-show', 'show-ondesk');
+    });
+    nextMove.revokedCards.forEach((c) => {
+        let qs = '[suit="' + c.suitName + '"][rank="' + c.rankName + '"][card-show="show-inhand"]';
+        handElements[nextMove.player].querySelector(qs).setAttribute('card-show', 'show-revoked');
+    });
+    currentMoveId = nextMove.moveId;
+  } else {
+    // handle error
+  }
 }
 
 
