@@ -9,6 +9,16 @@
     src: url('./font_zanf5jk7tv/iconfont.ttf?t=1717531063653') format('truetype');
 }
 
+/* colors */
+:root {
+    --s-color: #006;
+    --h-color: #a00;
+    --d-color: #c30;
+    --c-color: #222;
+    --w-color: #c03;
+    --v-color: #525;
+}
+
 .hand {
     height: var(--card-height);
     overflow-y: visible;
@@ -19,10 +29,10 @@
     /* card-container determines the position of cards */
     height: var(--card-height);
     width: calc(var(--card-width) / 3);
-    /* transition: all 0.2s; */
+    transition: all 0.1s;
     overflow: hidden;
 }
-.card-container:last-child {
+.card-container[card-show^="show"]:not(:has(~ .card-container[card-show^="show"])) {
     /* last child has the full card width */
     width: var(--card-width);
     flex-shrink: 0;
@@ -32,22 +42,22 @@
 }
 /* set colors for different suits */
 .card-container[suit="s"] {
-    color: #006;
+    color: var(--s-color);
 }
 .card-container[suit="h"] {
-    color: #a00;
+    color: var(--h-color);
 }
 .card-container[suit="d"] {
-    color: #c30;
+    color: var(--d-color);
 }
 .card-container[suit="c"] {
-    color: #222;
+    color: var(--c-color);
 }
 .card-container[rank="W"] {
-    color: #c03;
+    color: var(--w-color);
 }
 .card-container[rank="V"] {
-    color: #525;
+    color: var(--v-color);
 }
 /* special font for jokers */
 .card-container[suit="w"] .card-suit {
@@ -69,17 +79,24 @@
     transform: scaleX(0.7) translateX(-0.1em);
 }
 /* styles for different show modes */
-.card-container[card-show='hide'] .card {
-    background-color: red;
-}
-.card-container[card-show='selected'] .card {
+.card-container[card-show='show-selected'] .card {
     background-color: green;
 }
-.card-container[card-show='played'] .card {
+.card-container[card-show='show-played'] .card {
     background-color: #aaa;
 }
-.card-container[card-show='played'] .card div {
+.card-container[card-show='show-played'] .card div {
     opacity: 0.5;
+}
+.card-container[card-show='show-ondesk'] .card {
+    background-color: aqua;
+}
+.card-container[card-show='folded'] {
+    width: 0;
+    opacity: 0;
+}
+.card-container[card-show='folded-dipai'] {
+    width: 0;
 }
 
 .card {
@@ -95,7 +112,7 @@
 }
 .card:hover {
     background-color: #fff;
-    transform: scale(1.01);
+    /* transform: scale(1.01); */
     box-shadow: 0 0 1.2vh #888;
 }
 

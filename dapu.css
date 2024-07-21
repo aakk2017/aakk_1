@@ -27,7 +27,7 @@ body {
     margin: 0 auto;
     padding: 1vh;
     box-sizing: border-box;
-    background-color: bisque;
+    background-color: aquamarine;
 }
 
 /* the top row */
@@ -54,7 +54,7 @@ body {
 .middle-container {
     height: calc(3 * var(--card-height));
     width: 175vh;
-    background-color: skyblue;
+    /* background-color: skyblue; */
     margin: 1vh 0;
     display: flex;
     justify-content: space-between;
@@ -78,11 +78,128 @@ body {
 .desk {
     height: calc(3 * var(--card-height));
     width: 77vh;
-    background-color: yellow;
+    overflow: hidden;
+}
+.table-record-container {
+    height: 0;
+    background-color: #eee;
+    transition: all 0.2s;
+    overflow: scroll;
+}
+.table-record-container[area-show="show"] {
+    height: calc(3 * var(--card-height)); 
+    /* height: calc(3 * var(--card-height));  real one*/
+    padding-top: 2vh;
+    padding-bottom: 2vh;
+    box-sizing: border-box;
+}
+#table-record {
+    width: 71vh;
+    border: 1px solid #333;
+    background-color: #fff;
+    margin: 0 auto;
+    font-size: 2.5vh;
+    font-family: 'Roboto Mono', monospace;
+}
+#table-record tbody tr:nth-child(odd) {
+    background-color: #eee;
+}
+#table-record tbody td {
+    text-align: center;
+}
+#table-record td.td-lead {
+    background-color: #ffd;
+}
+#table-record tr:nth-child(odd) td.td-lead {
+    background-color: #eec;
 }
 
-.toolbar {
+.footer {
     height: 6vh;
     margin-top: 1vh;
     background-color: gray;
+    display: flex;
+    justify-content: space-between;
+}
+menu {
+    list-style: none;
+    display: flex;
+    cursor: default;
+}
+.menubar {
+    height: 6vh;
+    padding-left: 0;
+}
+.menubar li {
+    height: 6vh;
+    padding-left: 2vh;
+    padding-right: 2vh;
+    margin: auto 0;
+    font-size: 2vh;
+    color: #eee;
+    border-right: solid 1px #ccc;
+    line-height: 6vh;
+    display: flex;
+}
+/* .menubar li:first-child {
+    margin-left: 0;
+} */
+.menubar li .key {
+    height: 1.5vh;
+    width: 1.5vh;
+    font-size: 1.5vh;
+    font-family: 'Courier New', Courier, monospace;
+    color: #eee;
+    border: solid 1px #eee;
+    border-radius: 0.3vh;
+    margin: auto 0.5vh;
+    margin-left: 0;
+    text-align: center;
+    line-height: 1.5vh;
+}
+.menubar li[show='unfolded'] {
+    background-color: #eee;
+    color: #666;
+}
+.menubar li[show='unfolded'] .key {
+    color: #666;
+    border-color: #666;
+}
+.toolbar {
+    margin: auto;
+}
+.toolbar li {
+    font-size: 3vh;
+    color: #eee;
+    margin: auto 2vh;
+}
+#statusbar {
+    height: 6vh;
+    width: 40vh;
+    padding: 0.2vh 0.5vh;
+    border-left: 1pt solid #eee;
+    font-size: 2vh;
+    color: #eee;
+    line-height: 3vh;
+}
+
+.comment {
+    width: 177vh;
+    height: 100vh;
+    background-color: aqua;
+    opacity: 0.5;
+    position: fixed;
+    right: calc(50vw - 88.5vh);
+    bottom: -100vh;
+    transition: all 0.2s;
+}
+.comment[area-show="show"] {
+    transform: translateY(-100vh);
+}
+
+
+
+#file-text {
+    /* height: 50vh; */
+    overflow: scroll;
 }
