@@ -2,14 +2,16 @@
 // code for game must include goToPreviousMove(), goToNextMove()
 
 // game info
-var zhuangPosition = 0;
-var level = 5;
-var strain = 2;
+let zhuangPosition = 0;
+let level = 5;
+let strain = 2;
 
-var isQiangzhuang = true;
-var declarations = [];
+let isQiangzhuang = true;
+let declarations = [];
 
-var theDeck = createDeck();
+let typeOfCurrentRound = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+let theDeck = createDeck();
 // var zHand = [], zInitialHand = [];
 // var tSuit = -1;
 const numberToDivisionName = ["d", "c", "h", "s", "t"];
@@ -111,10 +113,14 @@ class ShengjiMove extends Move {
       this.isDipai = isDipai;
       this.isLead = isLead;
       this.revokedCards = [];
+      this.moveString = '';
     }
 
     setId(newId) {
       this.moveId = newId;
+    }
+    setMoveString(isLead, leadType) {
+
     }
 
     isTypeFollow(){}
@@ -174,6 +180,26 @@ class ShengjiMove extends Move {
     // nextMoveId(){}
     // nextMoveList(){}
     // nextMoveIdList(){}
+}
+
+class ShengjiType {
+  constructor() {
+    this.n = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    this.typeString = '';
+  }
+
+  setType(typeArray) {
+    if(Array.isArray(typeArray)) {
+      if(typeArray.length <= 13 && typeArray.every(t => typeof t === 'number' && t >= 0)) {
+        typeArray.forEach((t, index) => {
+          this.n[index] = t;
+        });
+      }
+    }
+  }
+  setTypeFromCards(cards) {
+    // input: an Array of ShengjiCard
+  }
 }
 
 function previousMoveId(mid) {
@@ -242,7 +268,7 @@ function nextMoveId(mid) {
 }
 function goToPreviousMove() {
   let currentMove = getCurrentMove();
-  let previousMove = currentMove ? currentMove.previousMove() : moves[0];
+  // let previousMove = currentMove ? currentMove.previousMove() : moves[0];
   if(currentMove) {
     handElements[currentMove.player].querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
       c.setAttribute('card-show', 'show-inhand');
@@ -250,9 +276,10 @@ function goToPreviousMove() {
     handElements[currentMove.player].querySelectorAll('[card-show="show-revoked"]').forEach((c) => {
       c.setAttribute('card-show', 'show-inhand');
     });
+    let previousMove = currentMove.previousMove();
     if(currentMove.isLead) {
       if(currentMove.moveId.endsWith('a0')) {
-        handElements[previousMove.player].querySelector('[card-show="folded-dipai"]').forEach((c) => {
+        handElements[previousMove.player].querySelectorAll('[card-show="folded-dipai"]').forEach((c) => {
           c.setAttribute('card-show', 'show-ondesk');
         });
       } else {
@@ -272,12 +299,23 @@ function goToPreviousMove() {
         }
       }
     }
-    currentMoveId = previousMove.moveId;
+    if(previousMove) {
+      currentMoveId = previousMove.moveId;
+    } else {
+      currentMoveId = '^';
+    }
+    // currentMoveId = previousMove.moveId;
   }
 }
 function goToNextMove() {
   let currentMove = getCurrentMove();
-  let nextMove = currentMove ? currentMove.nextMove() : moves[0];
+  // let nextMove = currentMove ? currentMove.nextMove() : moves[0];
+  let nextMove;
+  if(currentMoveId === '^' || currentMoveId === '') {
+    nextMove = moves[0];
+  } else {
+    nextMove = currentMove ? currentMove.nextMove() : undefined;
+  }
   if(nextMove) {
     if(nextMove.isLead) {
       let cardShow = nextMove.moveId.endsWith("a0") ? "folded-dipai" : "folded";
@@ -303,7 +341,10 @@ function goToNextMove() {
     // handle error
   }
 }
-
+function goToRoundShengji(rid) {
+  // input: String rid is the moveId without the last char, e.g. "a"
+  // alert(rid);
+}
 
 function createDeck(){
   let deck = [];
@@ -376,20 +417,6 @@ function setStrain(s) {
     }
 }
 
-function shuffle(deck){
-  for (i=deck.length-1; i>0; --i){
-    let j = Math.floor((i + 1) * Math.random());
-    let k = deck[j];
-    deck[j] = deck[i];
-    deck[i] = k;
-  }
-//       item.division = item.suit;
-//     }
-//     if(item.order == 12){
-//       item.order = 13;
-//     }
-//   });
-}
 
 function compareSuits(s1, s2) {
     return ((s1 < 4 && s1 > strain) ? s1 - 4 : s1) - ((s2 < 4 && s2 > strain) ? s2 - 4 : s2);
@@ -436,60 +463,21 @@ function createHandElement(sortGroup) {
     return hand;
 }
 
-
-function selectCard(hand, i){
-  hand[i].played = -hand[i].played;
-  if(hand[i].played != 0){
-    document.getElementById("card"+i.toString()).style.bottom =
-      document.getElementById("card"+i.toString()).style.bottom == "100px" ? "60px" : "100px";
-    //this.style.bottom = (this.style.bottom == "100px" ? "60px" : "100px");
-  }
-}
-
-
-function test() {
-    shuffle(theDeck);
-    setLevel(level);
-    setStrain(strain);
-    const nhand = theDeck.slice(0,25);
-    const whand = theDeck.slice(25,50);
-    const ehand = theDeck.slice(50,75);
-    const shand = theDeck.slice(75,108);
-    sortHand(nhand);
-    sortHand(shand);
-    sortHand(whand);
-    sortHand(ehand);
-    nhandElement.innerHTML = "";
-    shandElement.innerHTML = "";
-    ehandElement.innerHTML = "";
-    whandElement.innerHTML = "";
-    generateEwhandHtml();
-    for(const card of nhand) {
-        nhandElement.appendChild(createCardContainer(card));
-    }
-    for(const card of shand) {
-        shandElement.appendChild(createCardContainer(card));
-    }
-    for(const card of whand) {
-        let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
-        let row = whandElement.querySelector("[sort-group='" + sortGroup + "']");
-        row.appendChild(createCardContainer(card));
-    }
-    for(const card of ehand) {
-        let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
-        let row = ehandElement.querySelector("[sort-group='" + sortGroup + "']");
-        row.appendChild(createCardContainer(card));
-    }
-}
-
-
-
+// function selectCard(hand, i){
+//   hand[i].played = -hand[i].played;
+//   if(hand[i].played != 0){
+//     document.getElementById("card"+i.toString()).style.bottom =
+//       document.getElementById("card"+i.toString()).style.bottom == "100px" ? "60px" : "100px";
+//     //this.style.bottom = (this.style.bottom == "100px" ? "60px" : "100px");
+//   }
+// }
 
 // file reading functions
+//
 function cardsToString(c) {
   // c is an Array of ShengjiCards
 }
-function resolveMove(m) {
+function resolveLead(m) {
   // return: an object {type: Array[13], elements: ShengjiCard[][]}
   let type = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   let pairs = [];
@@ -525,8 +513,17 @@ function resolveMove(m) {
   });
   return {
     type: type,
-    elements: elements
+    elements: elements,
+    moveString: ''
   };
+}
+function resolveFollow(m, leadType) {
+  return {
+    isDivisionFollow: true,
+    isRuff: false,
+    elements: '',
+    moveString: ''
+  }
 }
 function normalizeMoves(m) {
   // m is an array of ShengjiMove object
@@ -535,21 +532,23 @@ function normalizeMoves(m) {
     for(let j = 0; j < 4; j++) {
       m[i+j].setId(roundId + j);
     }
-    roundId = nextChar(roundId);
     m[i].isLead = true;
-    let leadInfo = resolveMove(m[i]);
+    let leadInfo = resolveLead(m[i]);
     if(m[i].moveCards.length > m[i+1].moveCards.length) {
       let actualCards = leadInfo.elements.findLast((a) => a.length === m[i+1].moveCards.length);
       m[i].revokedCards = m[i].moveCards.filter((a) => !actualCards.includes(a));
       m[i].moveCards = actualCards;
     }
+    roundId = nextChar(roundId);
   }
 }
-function generateInitHands(m) {
+function generateInitialHands(m) {
   // m is an Array of ShengjiMove
   initHands = [[], [], [], []]; // index is the absolute position in upg file
   for(let move of m) {
-    initHands[move.player] = initHands[move.player].concat(move.moveCards);
+    if(!move.isStart){
+      initHands[move.player] = initHands[move.player].concat(move.moveCards);
+    }
   }
   for(let hand of initHands) {
     sortHand(hand);
@@ -568,6 +567,8 @@ function generateTableRecord(m) {
       }
       roundTds[0].innerText = i + 1;
       roundTds[0].className = 'round-number';
+      roundTds[0].id = 'td-' + String.fromCharCode(i + 97);
+      roundTds[0].onclick = handleClickOnRoundNumber;
       for(let j = 0; j < 4; j++) {
         if(aMove.nextMove()) {
           aMove = aMove.nextMove();
@@ -576,7 +577,7 @@ function generateTableRecord(m) {
             moveString += (c.suitName + c.rankName);
           }
           roundTds[(aMove.player+4-zhuangPosition) % 4 +1].innerHTML = moveString;
-          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].id = aMove.moveId;
+          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].id = 'td-' + aMove.moveId;
           roundTds[(aMove.player+4-zhuangPosition) % 4 +1].onclick = handleClickOnTd;
           if(j === 0) {
             roundTds[(aMove.player+4-zhuangPosition) % 4 +1].className = 'td-lead';
@@ -649,7 +650,7 @@ function readDipai(b) {
   }
   let dipaiMove = new ShengjiMove(zhuangPosition, '_', dipai, true, false);
   dipaiMove.deskScore = 0;
-  moves = [dipaiMove].concat(moves);
+  moves.splice(0, 0, dipaiMove);
   moves[moves.length - 1].deskScore = b[5];
 }
 function read8218(b) {
@@ -704,11 +705,12 @@ function readUpg(file) {
     const bodyBuffer = reader.result.slice(265, length);
     const intInfo = new Int32Array(infoBuffer);
     const intBody = new Int32Array(bodyBuffer);
-    window.date = new Date(bufferToString(dateTimeBuffer) + 'GMT+0800');
+    dateTime = new Date(bufferToString(dateTimeBuffer) + 'GMT+0800');
     for(let i = 0; i < 4; i++) {
-      window.playerNames[i] = bufferToString(nameBuffer.slice(i * 20, (i+1)*20));
+      playerNames[i] = bufferToString(nameBuffer.slice(i * 20, (i+1)*20));
     }
     mainPlayerPosition = intInfo[0];
+    observedPlayerPosition = intInfo[0];
     handElements = new Array(4);
     handElements[mainPlayerPosition] = shandElement;
     handElements[(mainPlayerPosition + 1) %4] = ehandElement;
@@ -721,7 +723,7 @@ function readUpg(file) {
     }
     parseUpgBodyBuffer(intBody);
     normalizeMoves(moves);
-    generateInitHands(moves);
+    generateInitialHands(moves);
     generateTableRecord(moves);
     renderHands();
   });
@@ -735,6 +737,7 @@ function viewFile() {
   declarations = [];
   initHands = [];
   moves = [];
+  // moves.push(Move.startMove());
   dipai = [];
   score = 0;
   currentMoveId = "^";
@@ -743,4 +746,55 @@ function viewFile() {
   readUpg(file);
 
   theDeck = createDeck();
+}
+
+
+// test
+function shuffle(deck){
+  for (i=deck.length-1; i>0; --i){
+    let j = Math.floor((i + 1) * Math.random());
+    let k = deck[j];
+    deck[j] = deck[i];
+    deck[i] = k;
+  }
+//       item.division = item.suit;
+//     }
+//     if(item.order == 12){
+//       item.order = 13;
+//     }
+//   });
+}
+function test() {
+    shuffle(theDeck);
+    setLevel(level);
+    setStrain(strain);
+    const nhand = theDeck.slice(0,25);
+    const whand = theDeck.slice(25,50);
+    const ehand = theDeck.slice(50,75);
+    const shand = theDeck.slice(75,108);
+    sortHand(nhand);
+    sortHand(shand);
+    sortHand(whand);
+    sortHand(ehand);
+    nhandElement.innerHTML = "";
+    shandElement.innerHTML = "";
+    ehandElement.innerHTML = "";
+    whandElement.innerHTML = "";
+    generateEwhandHtml();
+    for(const card of nhand) {
+        nhandElement.appendChild(createCardContainer(card));
+    }
+    for(const card of shand) {
+        shandElement.appendChild(createCardContainer(card));
+    }
+    for(const card of whand) {
+        let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
+        let row = whandElement.querySelector("[sort-group='" + sortGroup + "']");
+        row.appendChild(createCardContainer(card));
+    }
+    for(const card of ehand) {
+        let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
+        let row = ehandElement.querySelector("[sort-group='" + sortGroup + "']");
+        row.appendChild(createCardContainer(card));
+    }
 }

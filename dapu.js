@@ -7,56 +7,67 @@ ehandElement = document.getElementById("ehand");
 handElements = []
 
 // game info
-var dateTime;
-var playerNames = []; 
-var mainPlayerPosition = 0; 
+let dateTime;
+let playerNames = []; 
+let mainPlayerPosition = 0; 
+let observedPlayerPosition = 0;
 
 // game parameters
-var game = "shengji";
-var initHands = [];
-var moves = [];
-var dipai = [];
-var score = 0;
+let gameName = "shengji";
+let initHands = [];
+let moves = [];
+let dipai = [];
+let score = 0;
 
 // true when writing comments or typing hands. controlling shortcuts will not trigger if true.
-var isTyping = false;
-var keyboardModeOn = false;
+let isTyping = false;
+let keyboardModeOn = true;
 
 // controlling key events
-var controlDown = false;
-var altDown = false;
-var metaDown = false;
-var tabDown = false;
-var shiftDown = false;
+let controlDown = false;
+let altDown = false;
+let metaDown = false;
+let tabDown = false;
+let shiftDown = false;
 
 // view
-var showHands = [];
-var statusbar = document.getElementById('statusbar');
-var errorbar = document.getElementById('errorbar');
-var infoSection = document.getElementById('corner-lt');
-var scoringSection = document.getElementById('corner-rt');
-var dipaiSection = document.getElementById('corner-lb');
-var tableRecord = document.getElementById('table-record');
-var tableRecordBody = tableRecord.getElementsByTagName('tbody')[0];
+let showHands = [];
+const statusbar = document.getElementById('statusbar');
+const errorbar = document.getElementById('errorbar');
+const infoSection = document.getElementById('corner-lt');
+const scoringSection = document.getElementById('corner-rt');
+const dipaiSection = document.getElementById('corner-lb');
+const tableRecord = document.getElementById('table-record');
+const tableRecordBody = tableRecord.getElementsByTagName('tbody')[0];
+
+// toolbar items
+const toStartButton = document.getElementById('button-to-start');
+const previousOfObservedButton = document.getElementById('button-previous-of-observed');
+const previousMoveButton = document.getElementById('button-previous-move');
+previousMoveButton.onclick = handlePreviousMove;
+const nextMoveButton = document.getElementById('button-next-move');
+nextMoveButton.onclick = handleNextMove;
+const nextOfObservedButton = document.getElementById('button-next-of-observed');
 
 // view options
-var showTableRecordOn = false;
-var showPlayedOn = false;
-var showOnDeskOn = false;
-var markTrumpsOn = false;
-var markHighestOn = false;
-var markCounterCardsOn = false;
+let showTableRecordOn = false;
+let showPlayedOn = false;
+let showOnDeskOn = false;
+let markTrumpsOn = false;
+let markHighestOn = false;
+let markCounterCardsOn = false;
+let currentStage = 'play';
 
 // card selection
-var selectedSuit = -1;
-var selectedRank = -1;
-var selectedCards = [];
+let selectedSuit = -1;
+let selectedRank = -1;
+let selectedCards = [];
 
 // card play
-var currentMoveId = "^";
-var currentPlayer = -1;
-var currentRound = "";
-var currentBranch = "";
+let currentMoveId = "^";
+let currentPlayer = -1;
+let currentRound = "";
+let currentBranch = "";
 
 // cards
 const numberToSuitName = ['d', 'c', 'h', 's', 'w'];
@@ -150,6 +161,12 @@ class Move {
         this.comment = "";
     }
 
+    static startMove() {
+        let s = new Move(-1, '^', []);
+        s.isStart = true;
+        return s;
+    }
+
     writeComment(c) {
         this.comment = c;
     }
@@ -236,11 +253,24 @@ function renderHands() {
 
 // card-play
 // game-specified js file must include functions goToNextMove() and goToPreviousMove()
+function updateTableRecordHighlight() {
+    const currentMoveTd = document.getElementById('td-' + currentMoveId);
+    const highlightedMoveTd = tableRecordBody.querySelector('[highlight="current"]');
+    if(highlightedMoveTd) {
+        highlightedMoveTd.removeAttribute('highlight');
+        highlightedMoveTd.blur();
+    }
+    if(currentMoveTd) {
+        currentMoveTd.setAttribute('highlight', 'current');
+        currentMoveTd.focus();
+    }
+}
 function getCurrentMove() {
     return moves.find((m) => m.moveId === currentMoveId);
 }
 function goToMove(mid) {
     // input: the moveId of a move
+    let currentMoveTd = document.getElementById('td-' + currentMoveId);
     let targetMove = moves.find((m) => m.moveId === mid);
     if(targetMove.isAfter(currentMoveId)) {
         for(let i = 0; i < 104; i++) {
@@ -255,16 +285,111 @@ function goToMove(mid) {
             }
         }
     } else {}
+    updateTableRecordHighlight();
+}
+function handlePreviousMove() {
+    goToPreviousMove();
+    updateTableRecordHighlight();
+}
+function handlePreviousOfObserved() {
+    // let p = getCurrentMove().player;
+    for(let i = 0; i < 8; i++) {
+        if(currentMoveId === '^' || currentMoveId === '') {
+            updateTableRecordHighlight();
+            return;
+        }
+        goToPreviousMove();
+        if(getCurrentMove().player === observedPlayerPosition) {
+            updateTableRecordHighlight();
+            return;
+        }
+    }
+    // updateTableRecordHighlight();
+}
+function handleNextMove() {
+    goToNextMove();
+    updateTableRecordHighlight();
+}
+function handleNextOfObserved() {
+    // let p = getCurrentMove().player;
+    for(let i = 0; i < 8; i++) {
+        // if(getCurrentMove().isEnd) return;
+        goToNextMove();
+        if(getCurrentMove().player === observedPlayerPosition) break;
+    }
+    updateTableRecordHighlight();
 }
 
 // table record handlers
 function handleClickOnTd(e) {
-    goToMove(e.target.id);
+    const mid = e.target.id.slice(3);
+    goToMove(mid);
+}
+function handleClickOnRoundNumber(e) {
+    switch(gameName) {
+        case 'shengji':
+            const rid = e.target.id.slice(3);
+            goToRoundShengji(rid);
+            break;
+    }
+}
+
+// view handlers
+function handleShowTableRecord() {
+    let tableRecord = document.getElementById("table-record-container");
+    let areaShow = tableRecord.getAttribute("area-show") === "hide" ? "show" : "hide";
+    tableRecord.setAttribute("area-show", areaShow);
+}
+function handleShowComment() {
+    let commentElement = document.getElementById("comment");
+    let areaShow = commentElement.getAttribute("area-show") === "hide" ? "show" : "hide";
+    commentElement.setAttribute("area-show", areaShow);
 }
 
 // keyboard events handlers
-
-function handleKeyboardMode(e) {
+function handleKeyDown(e) {
+    if(tabDown) {
+        return;
+    }
+    if(shiftDown) {
+        handleShiftCombinations(e);
+        return;
+    }
+    if(altDown) {
+        return;
+    }
+    if(controlDown) {
+        return;
+    }
+    if(metaDown) {
+        return;
+    }
+    handleSingleKeyDown(e);
+}
+function handleKeyUp(e) {
+    switch (e.code) {
+        case 'Tab':
+            tabDown = false;
+            break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+            shiftDown = false;
+            break;
+        case 'ControlLeft':
+        case 'ControlRight':
+            controlDown = false;
+            break;
+        case 'AltLeft':
+        case 'AltRight':
+            altDown = false;
+            break;
+        case 'MetaLeft':
+        case 'MetaRight':
+            metaDown = false;
+            break;
+    }
+}
+function handleSingleKeyDown(e) {
     switch (e.code) {
         case 'Quote':
             handleShowTableRecord();
@@ -275,11 +400,62 @@ function handleKeyboardMode(e) {
         case 'KeyQ':
             test();
             break;
+        case 'ArrowLeft':
+            handlePreviousMove();
+            break;
+        case 'ArrowRight':
+            handleNextMove();
+            break;
+        case 'ArrowUp':
+            handlePreviousOfObserved();
+            break;
+        case 'ArrowDown':
+            handleNextOfObserved();
+            break;
         case 'Backquote':
             handleExitKeyboardMode();
             break;
+        case 'Tab':
+            tabDown = true;
+            break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+            shiftDown = true;
+            break;
+        case 'ControlLeft':
+        case 'ControlRight':
+            controlDown = true;
+            break;
+        case 'AltLeft':
+        case 'AltRight':
+            altDown = true;
+            break;
+        case 'MetaLeft':
+        case 'MetaRight':
+            metaDown = true;
+            break;
     }
 }
+function handleTabCombinations(e) {}
+function handleAltCombinations(e) {}
+function handleShiftCombinations(e) {
+    switch(e.code) {
+        case 'KeyH':
+            handlePreviousOfObserved();
+            break;
+        case 'KeyJ':
+            handlePreviousMove();
+            break;
+        case 'KeyK':
+            handleNextMove();
+            break;
+        case 'KeyL':
+            handleNextOfObserved();
+            break;
+    }
+}
+function handleControlCombinations(e) {}
+function handleMetaCombinations(e) {}
 
 function handleEnterKeyboardMode(e) {
     if(e.code === "Backquote") {
@@ -288,26 +464,14 @@ function handleEnterKeyboardMode(e) {
         window.addEventListener("keydown", handleKeyboardMode);
     }
 }
-
 function handleExitKeyboardMode() {
-    window.removeEventListener("keydown", handleKeyboardMode);
+    window.removeEventListener("keydown", handleKeyDown);
     keyboardModeOn = false;
     window.addEventListener("keydown", handleEnterKeyboardMode);
 }
 
-function handleShowTableRecord() {
-    let tableRecord = document.getElementById("table-record-container");
-    let areaShow = tableRecord.getAttribute("area-show") === "hide" ? "show" : "hide";
-    tableRecord.setAttribute("area-show", areaShow);
-}
-
-function handleShowComment() {
-    let commentElement = document.getElementById("comment");
-    let areaShow = commentElement.getAttribute("area-show") === "hide" ? "show" : "hide";
-    commentElement.setAttribute("area-show", areaShow);
-}
-
-window.addEventListener("keydown", handleEnterKeyboardMode);
+window.addEventListener("keydown", handleKeyDown);
+window.addEventListener("keyup", handleKeyUp);
 
 
 // file handlers
