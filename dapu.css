@@ -113,6 +113,10 @@ body {
 #table-record tr:nth-child(odd) td.td-lead {
     background-color: #eec;
 }
+#table-record td[highlight='current'] {
+    background-color: #33c !important;
+    color: #eee;
+}
 
 .footer {
     height: 6vh;
