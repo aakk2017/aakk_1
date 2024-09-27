@@ -20,6 +20,7 @@
 /* container: 100vh by 177vh (9 : 16) if aspect ratio < 9/16 */
 body {
     height: 100vh;
+    overflow: hidden;
 }
 .container {
     height: 100vh;

@@ -31,6 +31,7 @@ function prevChar(l) {
 class ShengjiCard extends Card {
   constructor(suit, rank, level, strain) {
     super(suit, rank);
+    this.orderName = this.rankName;
     if(this.isJoker() || this.suit === strain || this.rank === level) {
       this.division = 4;
     } else {
@@ -42,8 +43,13 @@ class ShengjiCard extends Card {
       this.order = theRank;
     } else if(this.rank === level) {
       this.order = 13;
+      this.orderName = "T";
       if(strain !== 4 && this.suit !== strain) {
         this.order = 12;
+        this.orderName = this.suitName.toUpperCase();
+      }
+      if(strain === 4) {
+        this.orderName = this.suitName.toUpperCase();
       }
     } else if(this.rank > level) {
       this.order = this.rank - 1;
@@ -61,6 +67,7 @@ class ShengjiCard extends Card {
       default:
         this.score = 0;
     }
+    this.divisionName = numberToDivisionName[this.division];
   }
 
   fillDivisionAndOrder(l, s) {
@@ -113,13 +120,13 @@ class ShengjiMove extends Move {
       this.isDipai = isDipai;
       this.isLead = isLead;
       this.revokedCards = [];
-      this.moveString = '';
+      this.moveText = '';
     }
 
     setId(newId) {
       this.moveId = newId;
     }
-    setMoveString(isLead, leadType) {
+    setMoveText(isLead, leadType) {
 
     }
 
@@ -482,6 +489,23 @@ function resolveLead(m) {
   let type = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   let pairs = [];
   let elements = [];
+  let division = m.moveCards[0].division;
+  let moveText = m.moveCards[0].divisionName === "t" ? "" : m.moveCards[0].divisionName;
+  let isFromSingleDivision = true;
+  m.moveCards.forEach((c) => {
+    isFromSingleDivision = isFromSingleDivision && c.division === division;
+  });
+  if(!isFromSingleDivision) {
+    type[0] = m.moveCards.length; 
+    elements.push(m);
+    return {
+      error: "wrong lead",
+      type: type,
+      division: -2, // -2 is for illegal move, -1 is for discard
+      elements: elements,
+      moveText: ""
+    };
+  }
   for(let i = 0; i < m.moveCards.length; i++) {
     if(i+1 < m.moveCards.length && m.moveCards[i].isSame(m.moveCards[i+1])) {
       // first, pick out all pairs
@@ -499,8 +523,9 @@ function resolveLead(m) {
     let lianZhi = 1;
     while(j < pairs.length) {
       if(pairs[i][2*lianZhi-1].isConsecutive(pairs[j][0])) {
-        pairs[i].concat(pairs[j]);
+        pairs[i] = pairs[i].concat(pairs[j]);
         pairs.splice(j, 1);
+        lianZhi ++;
       } else {
         j++;
       }
@@ -508,36 +533,103 @@ function resolveLead(m) {
     elements.push(pairs[i]);
     type[lianZhi] += 1;
   }
-  elements.sort((a, b) => {
-    b[0].order - a[0].order;
+  elements.sort((a, b) => b[0].order - a[0].order);
+  elements.forEach((e) => {
+    e.forEach((c, index, arr) => {
+      let appendMoveText = (index > 0 && arr[index-1].isSame(c)) ? "-" : c.orderName;
+      moveText += appendMoveText;
+    });
   });
   return {
     type: type,
+    division: division,
     elements: elements,
-    moveString: ''
+    moveText: moveText
   };
 }
-function resolveFollow(m, leadType) {
+function resolveFollow(m, leadInfo) {
+  let isAllTrump = true;
+  let isAllDivision = true;
+  let isFormalRuff = false;
+  let isMatch = false; // true if the type can match the lead type and is all trump or is all division
+  let pairs = [];
+  let elements = [];
+  let moveText = '';
+  if(leadInfo.division < 0) {
+    return {
+      error: "wrong lead"
+    };
+  }
+  m.moveCards.forEach((card) => {
+    if(card.division !== 4) isAllTrump = false;
+    if(card.division !== leadInfo.division) isAllDivision = false;
+  });
+  if(isAllDivision || isAllTrump) { // if all cards are from the lead division or all from trump division
+    let moveInfo = resolveLead(m);
+    let isSameType = moveInfo.type.every((t, i) => t === leadInfo.type[i]);
+    if(isSameType) {
+      return {
+        isFormalRuff: isAllTrump,
+        isMatch: true,
+        elements: moveInfo.elements,
+        moveText: moveInfo.moveText
+      };
+    }
+    let numberOfPairs = 0, numberOfPairsInLead = 0;
+    for(let i = 1; i < leadInfo.type.length; i++) {
+      numberOfPairs += moveInfo.type[i];
+      numberOfPairsInLead += leadInfo.type[i];
+    }
+    if(numberOfPairs < numberOfPairsInLead) { // if # of pairs followed is less than the lead, then it can't match the type
+      moveText = isAllTrump ? "" : m.moveCards[0].divisionName;
+      moveText += m.moveCards[0].orderName;
+      for(let i = 1; i < m.moveCards.length; i++) {
+        moveText += m.moveCards[i].isSame(m.moveCards[i-1]) ? "-" : m.moveCards[i].orderName;
+      }
+    } else if(numberOfPairs >= numberOfPairsInLead) { // not completed. just placeholder
+      moveText = m.moveCards[0].division === 4 ? "" : m.moveCards[0].divisionName;
+      moveText += m.moveCards[0].orderName;
+      for(let i = 1; i < m.moveCards.length; i++) {
+        if(m.moveCards[i].division !== m.moveCards[i-1].division) {
+          moveText += (" " + m.moveCards[i].divisionName);
+        }
+        moveText += m.moveCards[i].orderName;
+      }
+    }
+  } else { // if at least one from side divisions
+    moveText = m.moveCards[0].division === 4 ? "" : m.moveCards[0].divisionName;
+    moveText += m.moveCards[0].orderName;
+    for(let i = 1; i < m.moveCards.length; i++) {
+      if(m.moveCards[i].division !== m.moveCards[i-1].division) {
+        moveText += (" " + m.moveCards[i].divisionName);
+      }
+      moveText += m.moveCards[i].orderName;
+    }
+  }
   return {
-    isDivisionFollow: true,
-    isRuff: false,
-    elements: '',
-    moveString: ''
+    isFormalRuff: false,
+    isMatch: false,
+    elements: [],
+    moveText: moveText
   }
 }
 function normalizeMoves(m) {
   // m is an array of ShengjiMove object
   let roundId = 'a';
   for(let i = 1; i < m.length; i += 4) {
-    for(let j = 0; j < 4; j++) {
-      m[i+j].setId(roundId + j);
-    }
     m[i].isLead = true;
     let leadInfo = resolveLead(m[i]);
     if(m[i].moveCards.length > m[i+1].moveCards.length) {
       let actualCards = leadInfo.elements.findLast((a) => a.length === m[i+1].moveCards.length);
       m[i].revokedCards = m[i].moveCards.filter((a) => !actualCards.includes(a));
       m[i].moveCards = actualCards;
+    }
+    leadInfo = resolveLead(m[i]);
+    m[i].moveInfo = leadInfo;
+    m[i].setId(roundId + '0');
+    for(let j = 1; j < 4; j++) {
+      m[i+j].setId(roundId + j);
+      m[i+j].moveInfo = resolveFollow(m[i+j], leadInfo);
     }
     roundId = nextChar(roundId);
   }
@@ -572,11 +664,11 @@ function generateTableRecord(m) {
       for(let j = 0; j < 4; j++) {
         if(aMove.nextMove()) {
           aMove = aMove.nextMove();
-          let moveString = '';
+          let moveText = '';
           for(let c of aMove.moveCards) {
-            moveString += (c.suitName + c.rankName);
+            moveText += (c.suitName + c.rankName);
           }
-          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].innerHTML = moveString;
+          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].innerHTML = aMove.moveInfo.moveText;
           roundTds[(aMove.player+4-zhuangPosition) % 4 +1].id = 'td-' + aMove.moveId;
           roundTds[(aMove.player+4-zhuangPosition) % 4 +1].onclick = handleClickOnTd;
           if(j === 0) {
