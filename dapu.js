@@ -461,7 +461,7 @@ function handleEnterKeyboardMode(e) {
     if(e.code === "Backquote") {
         window.removeEventListener("keydown", handleEnterKeyboardMode);
         keyboardModeOn = true;
-        window.addEventListener("keydown", handleKeyboardMode);
+        window.addEventListener("keydown", handleKeyDown);
     }
 }
 function handleExitKeyboardMode() {

@@ -580,7 +580,8 @@ function resolveFollow(m, leadInfo) {
       numberOfPairs += moveInfo.type[i];
       numberOfPairsInLead += leadInfo.type[i];
     }
-    if(numberOfPairs < numberOfPairsInLead) { // if # of pairs followed is less than the lead, then it can't match the type
+    if(numberOfPairs < numberOfPairsInLead 
+        || (numberOfPairs === numberOfPairsInLead && isAllDivision)) { // if # of pairs followed is less than the lead, then it can't match the type
       moveText = isAllTrump ? "" : m.moveCards[0].divisionName;
       moveText += m.moveCards[0].orderName;
       for(let i = 1; i < m.moveCards.length; i++) {

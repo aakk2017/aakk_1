@@ -28,26 +28,26 @@ body {
     margin: 0 auto;
     padding: 1vh;
     box-sizing: border-box;
-    background-color: aquamarine;
+    background-color: antiquewhite;
 }
 
 /* the top row */
 .nscontainer {
     height: var(--card-height);
     width: calc(var(--container-width) - 2vh);
-    background-color: skyblue;
+    /* background-color: skyblue; */
     display: flex;    
     justify-content: space-between;
 }
 .corner {
     height: var(--card-height);
     width: 32.5vh;
-    background-color: orange;
+    /* background-color: orange; */
 }
 .nshand {
     height: var(--card-height);
     width: calc(9 * var(--card-width));
-    background-color: aqua;
+    /* background-color: aqua; */
     display: flex;
     justify-content: center;
 }
@@ -64,7 +64,7 @@ body {
 .ewhand {
     height: calc(3 * var(--card-height));
     width: calc(4 * var(--card-width));
-    background-color: greenyellow;
+    /* background-color: greenyellow; */
 }
 .ewhand .hand {
     height: calc(0.5 * var(--card-height));
@@ -101,12 +101,17 @@ body {
     margin: 0 auto;
     font-size: 2.5vh;
     font-family: 'Roboto Mono', monospace;
+    table-layout: fixed;
 }
 #table-record tbody tr:nth-child(odd) {
     background-color: #eee;
 }
 #table-record tbody td {
     text-align: center;
+}
+#table-record tbody td:first-child, 
+#table-record th:first-child {
+    width: 5vh;
 }
 #table-record td.td-lead {
     background-color: #ffd;
