@@ -35,6 +35,7 @@
     width: calc(var(--card-width) / 3);
     transition: all 0.1s;
     overflow: hidden;
+    user-select: none;
 }
 .card-container[card-show^="show"]:not(:has(~ .card-container[card-show^="show"])) {
     /* last child has the full card width */
