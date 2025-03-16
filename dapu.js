@@ -37,6 +37,7 @@ const errorbar = document.getElementById('errorbar');
 const infoSection = document.getElementById('corner-lt');
 const scoringSection = document.getElementById('corner-rt');
 const dipaiSection = document.getElementById('corner-lb');
+const commentSection = document.getElementById('corner-rb');
 const tableRecord = document.getElementById('table-record');
 const tableRecordBody = tableRecord.getElementsByTagName('tbody')[0];
 
@@ -57,6 +58,7 @@ let markTrumpsOn = false;
 let markHighestOn = false;
 let markCounterCardsOn = false;
 let currentStage = 'play';
+let highlightLeaderOrWinner = true;
 
 // card selection
 let selectedSuit = -1;
@@ -203,6 +205,35 @@ function nextLetter(l) {
 }
 
 // render functions
+function createCardContainer(card) {
+    let cardContainer = document.createElement("div");
+    let thisCard = document.createElement("div");
+    cardContainer.appendChild(thisCard);
+    cardContainer.className = "card-container";
+    cardContainer.setAttribute("suit", card.suitName);
+    cardContainer.setAttribute("rank", card.rankName);
+    cardContainer.setAttribute("card-show", "show-inhand");
+    thisCard.className = "card";
+    let cardRank = document.createElement("div");
+    cardRank.innerHTML = card.rankName === "X" ? "1O" : card.rankName;
+    cardRank.className = "card-rank";
+    let cardSuit = document.createElement("div");
+    cardSuit.innerHTML = card.suitName === "w" ? jokerHtml : suitTexts[card.suit];
+    cardSuit.className = "card-suit";
+    let cardFace = document.createElement("div");
+    cardFace.innerHTML = card.suitName === "w" ? jokerHtml : suitTexts[card.suit];
+    cardFace.className = "card-face";
+    thisCard.appendChild(cardRank);
+    thisCard.appendChild(cardSuit);
+    thisCard.appendChild(cardFace);
+    return cardContainer;
+}
+function createHandElement(sortGroup) {
+    let hand = document.createElement("div");
+    hand.className = "hand";
+    hand.setAttribute("sort-group", sortGroup);
+    return hand;
+}
 function generateEwhandHtml() {
     let eFirstRow = createHandElement("n");
     let wFirstRow = createHandElement("n");
@@ -255,7 +286,7 @@ function renderHands() {
 // game-specified js file must include functions goToNextMove() and goToPreviousMove()
 function updateTableRecordHighlight() {
     const currentMoveTd = document.getElementById('td-' + currentMoveId);
-    const highlightedMoveTd = tableRecordBody.querySelector('[highlight="current"]');
+    const highlightedMoveTd = document.querySelector('[highlight="current"]');
     if(highlightedMoveTd) {
         highlightedMoveTd.removeAttribute('highlight');
         highlightedMoveTd.blur();
@@ -293,16 +324,17 @@ function handlePreviousMove() {
 }
 function handlePreviousOfObserved() {
     // let p = getCurrentMove().player;
+    goToPreviousMove();
     for(let i = 0; i < 8; i++) {
         if(currentMoveId === '^' || currentMoveId === '') {
             updateTableRecordHighlight();
             return;
         }
-        goToPreviousMove();
         if(getCurrentMove().player === observedPlayerPosition) {
             updateTableRecordHighlight();
             return;
         }
+        goToPreviousMove();
     }
     // updateTableRecordHighlight();
 }

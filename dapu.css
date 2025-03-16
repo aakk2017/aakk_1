@@ -45,6 +45,10 @@ body {
     width: 32.5vh;
     /* background-color: orange; */
 }
+.input-container {
+    background-color: #f2e3c9;
+    font-size: 2.5vh;
+}
 .nshand {
     height: var(--card-height);
     width: calc(9 * var(--card-width));
@@ -107,16 +111,17 @@ body {
     font-family: 'Roboto Mono', monospace;
     table-layout: fixed;
 }
-#dipai-div-in-table {
+.dipai-div-in-table {
     width: 71vh;
     border: 1px solid #333;
     border-bottom: 0px;
     box-sizing: border-box;
-    background-color: #fff;
+    background-color: #eee;
     margin: 0 auto;
     padding: 0.2vh;
     font-size: 2.5vh;
     font-family: 'Roboto Mono', monospace;
+    text-align: center;
     table-layout: fixed;
 }
 #table-record tbody tr:nth-child(odd) {
@@ -135,7 +140,8 @@ body {
 #table-record tr:nth-child(odd) td.td-lead {
     background-color: #eec;
 }
-#table-record td[highlight='current'] {
+#table-record td[highlight='current'],
+.dipai-div-in-table[highlight='current'] {
     background-color: #33c !important;
     color: #eee;
 }

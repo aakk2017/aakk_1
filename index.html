@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cards Practice</title>
+    <title>青云谱 - 升级</title>
 
     <!-- Fonts -->
     <!-- Roboto Mono, for 10 -->
@@ -17,7 +17,18 @@
 <body>
     <div class="container">
         <div class="nscontainer">
-            <div class="corner" id="corner-lt"></div>
+            <div class="corner" id="corner-lt">
+                <div class="input-container">
+                    <label for="open-file">选择牌谱</label>
+                    <input 
+                        type="file" 
+                        id="open-file" 
+                        name="open-file" 
+                        accept=".upg, .qyp, .qypc" 
+                        onchange="viewFile()" />
+                </div>
+                <!-- <div id="file-text"></div> -->
+            </div>
             <div class="nshand" id="nhand"></div>
             <div class="corner" id="corner-rt"></div>
         </div>
@@ -25,14 +36,10 @@
             <div class="ewhand" id="whand"></div>
             <div class="desk">
                 <div class="table-record-container" id="table-record-container" area-show="show">
-                    <div class="input-container">
-                        <input type="file" id="open-file" onchange="viewFile()" />
-                        <div id="file-text"></div>
-                    </div>
                     <table id="table-record">
                         <!-- <caption>table record</caption> -->
                         <thead>
-                            <div id="dipai-div-in-table">325454</div>
+                            <div class="dipai-div-in-table"></div>
                             <tr>
                                 <th></th>
                                 <th>庄</th>

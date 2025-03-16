@@ -209,6 +209,91 @@ class ShengjiType {
   }
 }
 
+// preparation
+function createDeck(){
+  let deck = [];
+  for (let i=0; i<=12; ++i){
+    for (let j=0; j<=3; ++j){
+      let suitName, rankName;
+      switch(j){
+        case 3: suitName = "s"; break;
+        case 2: suitName = "h"; break;
+        case 1: suitName = "c"; break;
+        case 0: suitName = "d"; break;
+      }
+      switch (i) {
+        case 8: rankName = "X"; break;
+        case 9: rankName = "J"; break;
+        case 10: rankName = "Q"; break;
+        case 11: rankName = "K"; break;
+        case 12: rankName = "A"; break;
+        default: rankName = (i+2).toString();
+      }
+      deck.push({
+        suit:j, 
+        suitName:suitName, 
+        rank:i,
+        rankName:rankName, 
+        division:j, 
+        order:i, 
+        played:false
+        });
+      deck.push({suit:j, suitName:suitName, rank:i, rankName:rankName, division:j, order:i, played:false});
+    }
+  }
+  deck.push({
+    suit:4, 
+    suitName:"w", 
+    rank: 14,
+    rankName: "V", 
+    division:4, 
+    order:14,
+    played:false
+    });
+  deck.push({suit:4, suitName:"w", rank: 14, rankName: "V", division:4, order:14, played:false});
+  deck.push({suit:4, suitName:"w", rank: 15, rankName: "W", division:4, order:15, played:false});
+  deck.push({suit:4, suitName:"w", rank: 15, rankName: "W", division:4, order:15, played:false});
+  return deck;
+}
+// parameter l: integer from 0 (deal with 2) to 12 (deal with A)
+function setLevel(l) {
+    // level = l;
+    for(let i = 0; i < theDeck.length; i++) {
+        if(theDeck[i].rank === l) {
+            theDeck[i].division = 4;
+            theDeck[i].order = 13;
+        } else if (theDeck[i].rank > l) {
+            theDeck[i].order = theDeck[i].rank - 1;
+        }
+    }
+}
+// parameter d: integer from 0 to 4
+function setStrain(s) {
+    // strain = s;
+    if(s < 4) {
+        for(let i = 0; i < theDeck.length; i++) {
+            if(theDeck[i].suit === s) {
+                theDeck[i].division = 4;
+            }
+        }
+    }
+}
+
+// sort cards
+function compareSuits(s1, s2) {
+    return ((s1 < 4 && s1 > strain) ? s1 - 4 : s1) - ((s2 < 4 && s2 > strain) ? s2 - 4 : s2);
+}
+function sortHand(hand) {
+  hand.sort(function(a, b){
+        return compareSuits(b.division, a.division) * 1000 + (b.order - a.order) * 10 + compareSuits(b.suit, a.suit);
+    });
+}
+function sortMove(move, leadDivision){
+
+}
+
+
+// moves
 function previousMoveId(mid) {
   // temporary
   // input: moveId of a move, string
@@ -353,122 +438,6 @@ function goToRoundShengji(rid) {
   // alert(rid);
 }
 
-function createDeck(){
-  let deck = [];
-  for (let i=0; i<=12; ++i){
-    for (let j=0; j<=3; ++j){
-      let suitName, rankName;
-      switch(j){
-        case 3: suitName = "s"; break;
-        case 2: suitName = "h"; break;
-        case 1: suitName = "c"; break;
-        case 0: suitName = "d"; break;
-      }
-      switch (i) {
-        case 8: rankName = "X"; break;
-        case 9: rankName = "J"; break;
-        case 10: rankName = "Q"; break;
-        case 11: rankName = "K"; break;
-        case 12: rankName = "A"; break;
-        default: rankName = (i+2).toString();
-      }
-      deck.push({
-        suit:j, 
-        suitName:suitName, 
-        rank:i,
-        rankName:rankName, 
-        division:j, 
-        order:i, 
-        played:false
-        });
-      deck.push({suit:j, suitName:suitName, rank:i, rankName:rankName, division:j, order:i, played:false});
-    }
-  }
-  deck.push({
-    suit:4, 
-    suitName:"w", 
-    rank: 14,
-    rankName: "V", 
-    division:4, 
-    order:14,
-    played:false
-    });
-  deck.push({suit:4, suitName:"w", rank: 14, rankName: "V", division:4, order:14, played:false});
-  deck.push({suit:4, suitName:"w", rank: 15, rankName: "W", division:4, order:15, played:false});
-  deck.push({suit:4, suitName:"w", rank: 15, rankName: "W", division:4, order:15, played:false});
-  return deck;
-}
-
-// parameter l: integer from 0 (deal with 2) to 12 (deal with A)
-function setLevel(l) {
-    // level = l;
-    for(let i = 0; i < theDeck.length; i++) {
-        if(theDeck[i].rank === l) {
-            theDeck[i].division = 4;
-            theDeck[i].order = 13;
-        } else if (theDeck[i].rank > l) {
-            theDeck[i].order = theDeck[i].rank - 1;
-        }
-    }
-}
-
-// parameter d: integer from 0 to 4
-function setStrain(s) {
-    // strain = s;
-    if(s < 4) {
-        for(let i = 0; i < theDeck.length; i++) {
-            if(theDeck[i].suit === s) {
-                theDeck[i].division = 4;
-            }
-        }
-    }
-}
-
-
-function compareSuits(s1, s2) {
-    return ((s1 < 4 && s1 > strain) ? s1 - 4 : s1) - ((s2 < 4 && s2 > strain) ? s2 - 4 : s2);
-}
-
-function sortHand(hand) {
-  hand.sort(function(a, b){
-        return compareSuits(b.division, a.division) * 1000 + (b.order - a.order) * 10 + compareSuits(b.suit, a.suit);
-    });
-}
-
-function sortMove(move, leadDivision){
-
-}
-
-function createCardContainer(card) {
-    let cardContainer = document.createElement("div");
-    let thisCard = document.createElement("div");
-    cardContainer.appendChild(thisCard);
-    cardContainer.className = "card-container";
-    cardContainer.setAttribute("suit", card.suitName);
-    cardContainer.setAttribute("rank", card.rankName);
-    cardContainer.setAttribute("card-show", "show-inhand");
-    thisCard.className = "card";
-    let cardRank = document.createElement("div");
-    cardRank.innerHTML = card.rankName === "X" ? "1O" : card.rankName;
-    cardRank.className = "card-rank";
-    let cardSuit = document.createElement("div");
-    cardSuit.innerHTML = card.suitName === "w" ? jokerHtml : suitTexts[card.suit];
-    cardSuit.className = "card-suit";
-    let cardFace = document.createElement("div");
-    cardFace.innerHTML = card.suitName === "w" ? jokerHtml : suitTexts[card.suit];
-    cardFace.className = "card-face";
-    thisCard.appendChild(cardRank);
-    thisCard.appendChild(cardSuit);
-    thisCard.appendChild(cardFace);
-    return cardContainer;
-}
-
-function createHandElement(sortGroup) {
-    let hand = document.createElement("div");
-    hand.className = "hand";
-    hand.setAttribute("sort-group", sortGroup);
-    return hand;
-}
 
 // function selectCard(hand, i){
 //   hand[i].played = -hand[i].played;
@@ -480,7 +449,6 @@ function createHandElement(sortGroup) {
 // }
 
 // file reading functions
-//
 function cardsToString(c) {
   // c is an Array of ShengjiCards
 }
@@ -691,11 +659,15 @@ function generateTableRecord(m) {
     }
     let dipaiTr = document.createElement('tr');
     let dipaiTd = document.createElement('td');
+    let dipaiDivInTable = document.getElementsByClassName('dipai-div-in-table')[0];
     dipaiTd.className = 'td-dipai';
     dipaiTd.setAttribute('colspan', '5');
     dipaiTd.innerHTML = dipaiString;
     dipaiTr.appendChild(dipaiTd);
     tableRecordBody.appendChild(dipaiTr);
+    dipaiDivInTable.innerHTML = dipaiString;
+    dipaiDivInTable.id = 'td-_';
+    dipaiDivInTable.onclick = handleClickOnTd;
   }
 }
 function bufferToString(b) {
@@ -784,8 +756,8 @@ function parseUpgBodyBuffer(b) {
 }
 // read and parse .upg file
 function readUpg(file) {
-  const fileText = document.getElementById("file-text");
-  fileText.innerHTML = '';
+  // const fileText = document.getElementById("file-text");
+  // fileText.innerHTML = '';
   const reader = new FileReader();
   reader.addEventListener("load", () => {
     const length = reader.result.byteLength;
@@ -839,6 +811,16 @@ function viewFile() {
   readUpg(file);
 
   theDeck = createDeck();
+}
+
+
+// rules
+function isLegalFollow(leadInfo, followCards, handCards) {
+
+}
+function legalFollowShapes(leadType, divisionShape, isExternal) {
+  // leadType: Array[13]; divisionShape: Array[13] of lead division; isExternal: if true, continue and notify error, if false, return error
+
 }
 
 
