@@ -1,0 +1,149 @@
+/* reset styles */
+* {
+    margin: 0;
+    user-select: none;
+}
+
+/* clear float */
+.clearfix::after {
+    content: '';
+    display: block;
+    clear: both;
+}
+
+/* define key heights and widths */
+:root {
+    --container-width: 177vh;
+    --card-height: 18vh;
+    --card-width: 12vh;
+}
+
+/* styles of #corner-lt, denomination area */
+#corner-lt {
+    display: flex;
+    /* background-color: #666; */
+}
+#div-seats {
+    width: 15vh;
+    height: 15vh;
+    box-sizing: border-box;
+    border: 3vh solid azure;
+    border-radius: 1.5vh;
+    outline: 1px solid black;
+    /* box-shadow: inset 1px solid black; */
+    margin: auto 1vh;
+}
+#div-seats[zhuang="undetermined"] {
+    border-color: azure;
+}
+#div-seats[zhuang="observed"] {
+    border-top-color: var(--v-color);
+    border-bottom-color: var(--w-color);
+    border-left-color: azure;
+    border-right-color: azure;
+}
+#div-seats[zhuang="next"] {
+    border-left-color: var(--v-color);
+    border-right-color: var(--w-color);
+    border-top-color: azure;
+    border-bottom-color: azure;
+}
+#div-seats[zhuang="previous"] {
+    border-right-color: var(--v-color);
+    border-left-color: var(--w-color);
+    border-top-color: azure;
+    border-bottom-color: azure;
+}
+#div-seats[zhuang="opposite"] {
+    border-bottom-color: var(--v-color);
+    border-top-color: var(--w-color);
+    border-left-color: azure;
+    border-right-color: azure;
+}
+#div-table-number {
+    width: 9vh;
+    height: 9vh;
+    box-sizing: border-box;
+    border: 1px solid black;
+    margin: auto;
+    background-color: antiquewhite;
+    font-size: 6vh;
+    text-align: center;
+}
+#div-denomination-area {
+    border: 1px solid black;
+    background-color: #f8f8f8;
+    width: 14.5vh;
+    height: 15vh;
+    box-sizing: border-box;
+    border-radius: 1.5vh;
+    margin: auto 1vh;
+    margin-left: 0;
+}
+#div-denomination-area[strain="w"] {
+    color: var(--w-color);
+}
+#div-denomination-area[strain="v"] {
+    color: var(--v-color);
+}
+#div-denomination-area[strain="s"] {
+    color: var(--s-color);
+}
+#div-denomination-area[strain="h"] {
+    color: var(--h-color);
+}
+#div-denomination-area[strain="d"] {
+    color: var(--d-color);
+}
+#div-denomination-area[strain="c"] {
+    color: var(--c-color);
+}
+#div-denomination {
+    height: 10vh;
+    font-size: 6vh;
+    font-family: 'Roboto Mono', monospace;
+    text-align: center;
+    display: flex;
+}
+#div-denomination-level {
+    height: 10vh;
+    width: 6vh;
+}
+#div-denomination-strain {
+    height: 10vh;
+    width: 8.5vh;
+    text-align: left;
+}
+#div-denomination-nts-text {
+    width: 17vh;
+    font-size: 5vh;
+    letter-spacing: 0;
+    transform: scaleX(0.7) translateX(-4vh) translateY(0.5vh);
+}
+#div-declaration {
+    height: 5vh;
+    font-size: 2.5vh;
+    text-align: center;
+}
+
+/* styles of #corner-rt, score area */
+#corner-rt {
+    background-color: #666;
+}
+.blocks-rt {
+    height: var(--card-height);
+    box-sizing: border-box;
+    font-family: 'Roboto Mono', monospace;
+}
+#div-score-area {
+    display: flex;
+    overflow: visible;
+    font-size: 3vh;
+    background-color: #33c;
+}
+#div-score div {
+    text-align: right;
+}
+#div-score-in-hand {
+    color: red;
+}

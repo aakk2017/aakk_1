@@ -114,7 +114,7 @@
     border: 1px solid black;
     border-radius: calc(var(--card-width) / 20);
     box-sizing: border-box;
-    background-color: #eee;
+    background-color: #f8f8f8;
     position: relative;
     box-shadow: 0 0 0.3vh #eee;
     transition: all 0.2s;

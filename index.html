@@ -13,24 +13,31 @@
     
     <link rel="stylesheet" href="dapu.css">
     <link rel="stylesheet" href="card.css">
+    <link rel="stylesheet" href="shengji.css">
 </head>
 <body>
     <div class="container">
         <div class="nscontainer">
             <div class="corner" id="corner-lt">
-                <div class="input-container">
-                    <label for="open-file">选择牌谱</label>
-                    <input 
-                        type="file" 
-                        id="open-file" 
-                        name="open-file" 
-                        accept=".upg, .qyp, .qypc" 
-                        onchange="viewFile()" />
+                <div id="div-seats" class="blocks-lt" zhuang="undetermined">
+                    <div id="div-table-number">1</div>
                 </div>
-                <!-- <div id="file-text"></div> -->
+                <div id="div-denomination-area" class="blocks-lt">
+                    <div id="div-denomination">
+                        <div id="div-denomination-level"></div>
+                        <div id="div-denomination-strain"></div>
+                    </div>
+                    <div id="div-declaration">亮主：<span id="span-declarer"></span></div>
+                </div>
             </div>
             <div class="nshand" id="nhand"></div>
-            <div class="corner" id="corner-rt"></div>
+            <div class="corner" id="corner-rt">
+                <div id="div-score-area" class="blocks-rt">
+                    <div id="div-score">得分：80</div>
+                    <div id="div-score-in-hand">剩余：80</div>
+                </div>
+                <div id="div-captured-counters" class="blocks-rt"></div>
+            </div>
         </div>
         <div class="middle-container">
             <div class="ewhand" id="whand"></div>
@@ -55,7 +62,17 @@
             <div class="ewhand" id="ehand"></div>
         </div>
         <div class="nscontainer">
-            <div class="corner" id="corner-lb"></div>
+            <div class="corner" id="corner-lb">
+                <div class="input-container">
+                    <label for="open-file">选择牌谱</label>
+                    <input 
+                        type="file" 
+                        id="open-file" 
+                        name="open-file" 
+                        accept=".upg, .qyp, .qypc" 
+                        onchange="viewFile()" />
+                </div>
+            </div>
             <div class="nshand" id="shand"></div>
             <div class="corner" id="corner-rb"></div>
         </div>

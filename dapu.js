@@ -76,7 +76,8 @@ const numberToSuitName = ['d', 'c', 'h', 's', 'w'];
 const numberToRankName = ['2', '3', '4', '5', '6', '7', '8', '9', 'X', 'J', 'Q', 'K', 'A', '', 'V', 'W'];
 const suitTexts = ["&#9830;", "&#9827;", "&#9829;", "&#9824;", ""];
 const jokerHtml = '<span class="joker"></span>';
-
+const numberToPositionString = ['observed', 'next', 'opposite', 'previous'];
+const numberToPositionObserved = ['本家', '下家', '对家', '上家'];
 
 class Card {
     constructor(s, r) {

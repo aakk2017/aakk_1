@@ -15,10 +15,20 @@ let theDeck = createDeck();
 // var zHand = [], zInitialHand = [];
 // var tSuit = -1;
 const numberToDivisionName = ["d", "c", "h", "s", "t"];
-const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4}
+const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
+const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
+const ntsHtml = '<div id="div-denomination-nts-text">无主</div>';
+const numberToPositionInGame = ['庄家', '右家', '前家', '左家'];
+
 
 // view
-// var dipaiTd = document.getElementById('td-dipai');
+const seatsDiv = document.getElementById("div-seats");
+const tableNumberDiv = document.getElementById("div-table-number");
+const denominationAreaDiv = document.getElementById("div-denomination-area");
+const levelDiv = document.getElementById("div-denomination-level");
+const strainDiv = document.getElementById("div-denomination-strain");
+const declarationDiv = document.getElementById("div-declaration");
+const declarerSpan = document.getElementById("span-declarer");
 
 // sematic functions
 function nextChar(l) {
@@ -257,7 +267,8 @@ function createDeck(){
 }
 // parameter l: integer from 0 (deal with 2) to 12 (deal with A)
 function setLevel(l) {
-    // level = l;
+    level = l;
+    levelDiv.innerHTML = numberToLevel[l];
     for(let i = 0; i < theDeck.length; i++) {
         if(theDeck[i].rank === l) {
             theDeck[i].division = 4;
@@ -269,14 +280,35 @@ function setLevel(l) {
 }
 // parameter d: integer from 0 to 4
 function setStrain(s) {
-    // strain = s;
     if(s < 4) {
+        strain = s;
         for(let i = 0; i < theDeck.length; i++) {
             if(theDeck[i].suit === s) {
                 theDeck[i].division = 4;
             }
         }
+        strainDiv.innerHTML = suitTexts[s];
+        if(declarations.length > 1) {
+          strainDiv.innerHTML += suitTexts[s];
+        }
+        denominationAreaDiv.setAttribute("strain", numberToSuitName[s]);
+    } else if(s === 52) {
+        strain = 4;
+        strainDiv.innerHTML = ntsHtml;
+        denominationAreaDiv.setAttribute("strain", "v");
+    } else if(s === 53) {
+        strain = 4;
+        strainDiv.innerHTML = ntsHtml;
+        denominationAreaDiv.setAttribute("strain", "w");
     }
+}
+function setZhuang(z) {
+  zhuangPosition = z;
+}
+function setObservedPlayer(o) {
+  observedPlayerPosition = o;
+  let relativeZhuangPosition = (zhuangPosition + 4 - o) % 4;
+  seatsDiv.setAttribute("zhuang", numberToPositionString[relativeZhuangPosition]);
 }
 
 // sort cards
@@ -685,8 +717,9 @@ function readDeclaration(b) {
     player: player,
     shown: shown
   });
-  const s = shown >= 4 ? 4 : shown;
-  strain = s;
+  const declarerPosition = (player + 4 - zhuangPosition) % 4;
+  declarerSpan.innerHTML = numberToPositionInGame[declarerPosition];
+  setStrain(shown);
 }
 function readZhuangAndLevel(b) {
   zhuangPosition = b[2];
@@ -775,14 +808,15 @@ function readUpg(file) {
       playerNames[i] = bufferToString(nameBuffer.slice(i * 20, (i+1)*20));
     }
     mainPlayerPosition = intInfo[0];
-    observedPlayerPosition = intInfo[0];
+    // observedPlayerPosition = intInfo[0];
+    level = intInfo[5];
+    zhuangPosition = intInfo[11];
+    setObservedPlayer(intInfo[0]);
     handElements = new Array(4);
     handElements[mainPlayerPosition] = shandElement;
     handElements[(mainPlayerPosition + 1) %4] = ehandElement;
     handElements[(mainPlayerPosition + 2) %4] = nhandElement;
     handElements[(mainPlayerPosition + 3) %4] = whandElement;
-    level = intInfo[5];
-    zhuangPosition = intInfo[11];
     if(intInfo[11] > 0) {
       isQiangzhuang = false;
     }
