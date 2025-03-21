@@ -1,3 +1,12 @@
+/* import fonts */
+
+@font-face {
+    /* for score */
+    font-family: 'Chivo Mono';
+    src: url('./Chivo_Mono/ChivoMono-VariableFont_wght.ttf') format('truetype');
+}
+
+
 /* reset styles */
 * {
     margin: 0;

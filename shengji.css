@@ -30,7 +30,6 @@
     border: 3vh solid azure;
     border-radius: 1.5vh;
     outline: 1px solid black;
-    /* box-shadow: inset 1px solid black; */
     margin: auto 1vh;
 }
 #div-seats[zhuang="undetermined"] {
@@ -64,14 +63,14 @@
     width: 9vh;
     height: 9vh;
     box-sizing: border-box;
-    border: 1px solid black;
+    outline: 1px solid black;
     margin: auto;
     background-color: antiquewhite;
     font-size: 6vh;
     text-align: center;
 }
 #div-denomination-area {
-    border: 1px solid black;
+    outline: 1px solid black;
     background-color: #f8f8f8;
     width: 14.5vh;
     height: 15vh;
@@ -108,6 +107,7 @@
 #div-denomination-level {
     height: 10vh;
     width: 6vh;
+    text-align: right;
 }
 #div-denomination-strain {
     height: 10vh;
@@ -127,9 +127,7 @@
 }
 
 /* styles of #corner-rt, score area */
-#corner-rt {
-    background-color: #666;
-}
+
 .blocks-rt {
     height: var(--card-height);
     box-sizing: border-box;
@@ -138,12 +136,34 @@
 #div-score-area {
     display: flex;
     overflow: visible;
+    font-family: 'Chivo Mono', monospace;
     font-size: 3vh;
-    background-color: #33c;
+    /* background-color: darkkhaki; */
 }
-#div-score div {
-    text-align: right;
+#div-score-container {
+    width: 20vh;
+    height: 15vh;
+    box-sizing: border-box;
+    border: 3vh solid azure;
+    border-radius: 1.5vh;
+    font-size: 6vh;
+    outline: 1px solid black;
+    margin: auto 1vh;
+    text-align: center;
+    transition: all 0.3s;
 }
-#div-score-in-hand {
-    color: red;
+#div-score {
+    width: 14vh;
+    height: 9vh;
+    line-height: 9vh;
+    outline: 1px solid black;
+}
+#div-penalty[sign="-"] {
+    color: #ce0000;
+}
+#div-penalty[sign="+"] {
+    color: #00a000;
+}
+#div-dipai-score {
+    color: #0000ce;
 }

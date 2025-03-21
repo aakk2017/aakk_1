@@ -29,6 +29,9 @@ const levelDiv = document.getElementById("div-denomination-level");
 const strainDiv = document.getElementById("div-denomination-strain");
 const declarationDiv = document.getElementById("div-declaration");
 const declarerSpan = document.getElementById("span-declarer");
+const scoreDiv = document.getElementById("div-score");
+const scoreContainerDiv = document.getElementById("div-score-container");
+const penaltyDiv = document.getElementById("div-penalty");
 
 // sematic functions
 function nextChar(l) {
@@ -217,6 +220,10 @@ class ShengjiType {
   setTypeFromCards(cards) {
     // input: an Array of ShengjiCard
   }
+
+  fitCards(cards) {
+
+  }
 }
 
 // preparation
@@ -309,6 +316,40 @@ function setObservedPlayer(o) {
   observedPlayerPosition = o;
   let relativeZhuangPosition = (zhuangPosition + 4 - o) % 4;
   seatsDiv.setAttribute("zhuang", numberToPositionString[relativeZhuangPosition]);
+}
+function setScoreValue(s) {
+  if(s === -404) {
+    scoreContainerDiv.style = "border-color: azure";
+    scoreDiv.innerHTML = ""
+  } else {
+    const h = s * 1.5;
+    scoreContainerDiv.style = "border-color: hsl(" + h + ", 100%, 50%, 100%)";
+    scoreDiv.innerHTML = s.toString();
+    // if(s > 99) {
+    //   scoreDiv.setAttribute("range", "high");
+    // } else {
+    //   scoreDiv.removeAttribute("range");
+    // }
+  }
+}
+function setPenaltyValue(p) {
+  if(p > 0) {
+    penaltyDiv.setAttribute("sign", "+");
+    penaltyDiv.innerHTML = "+" + p.toString();
+  } else {
+    penaltyDiv.setAttribute("sign", "-");
+    penaltyDiv.innerHTML = p.toString();
+  }
+}
+function setScore(move) {
+  if(move.deskScore || move.deskScore === 0) {
+    setScoreValue(move.deskScore);
+  } else {
+    setScoreValue(-404);
+  }
+  if(move.penalty) {
+    setPenaltyValue(move.penalty);
+  }
 }
 
 // sort cards
@@ -425,6 +466,7 @@ function goToPreviousMove() {
     }
     if(previousMove) {
       currentMoveId = previousMove.moveId;
+      setScore(previousMove);
     } else {
       currentMoveId = '^';
     }
@@ -461,6 +503,7 @@ function goToNextMove() {
         handElements[nextMove.player].querySelector(qs).setAttribute('card-show', 'show-revoked');
     });
     currentMoveId = nextMove.moveId;
+    setScore(nextMove);
   } else {
     // handle error
   }
@@ -842,6 +885,9 @@ function viewFile() {
   currentMoveId = "^";
   currentRound = "";
   currentBranch = "";
+  scoreDiv.innerHTML = "";
+  scoreContainerDiv.removeAttribute("style");
+  penaltyDiv.innerHTML = "";
   readUpg(file);
 
   theDeck = createDeck();
