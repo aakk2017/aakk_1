@@ -124,6 +124,7 @@
     height: 5vh;
     font-size: 2.5vh;
     text-align: center;
+    line-height: 4vh;
 }
 
 /* styles of #corner-rt, score area */
@@ -158,6 +159,19 @@
     line-height: 9vh;
     outline: 1px solid black;
 }
+#div-penalty-and-dipai {
+    width: 10vh;
+    height: 15vh;
+    margin: auto;
+    text-align: left;
+    font-size: 3vh;
+}
+#div-penalty,
+#div-dipai-score {
+    height: 6vh;
+    margin: 1vh;
+    line-height: 6vh;
+}
 #div-penalty[sign="-"] {
     color: #ce0000;
 }
@@ -165,5 +179,6 @@
     color: #00a000;
 }
 #div-dipai-score {
+    margin-top: 0;
     color: #0000ce;
 }

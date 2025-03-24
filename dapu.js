@@ -18,6 +18,7 @@ let initHands = [];
 let moves = [];
 let dipai = [];
 let score = 0;
+let penalty = 0;
 
 // true when writing comments or typing hands. controlling shortcuts will not trigger if true.
 let isTyping = false;
@@ -302,7 +303,6 @@ function getCurrentMove() {
 }
 function goToMove(mid) {
     // input: the moveId of a move
-    let currentMoveTd = document.getElementById('td-' + currentMoveId);
     let targetMove = moves.find((m) => m.moveId === mid);
     if(targetMove.isAfter(currentMoveId)) {
         for(let i = 0; i < 104; i++) {

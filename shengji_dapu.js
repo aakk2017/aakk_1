@@ -5,6 +5,9 @@
 let zhuangPosition = 0;
 let level = 5;
 let strain = 2;
+let dipaiScore = 0;
+let dipaiRawScore = 0;
+let dipaiMultiplier = 0;
 
 let isQiangzhuang = true;
 let declarations = [];
@@ -12,14 +15,13 @@ let declarations = [];
 let typeOfCurrentRound = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 let theDeck = createDeck();
-// var zHand = [], zInitialHand = [];
-// var tSuit = -1;
 const numberToDivisionName = ["d", "c", "h", "s", "t"];
 const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
 const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
 const ntsHtml = '<div id="div-denomination-nts-text">无主</div>';
 const numberToPositionInGame = ['庄家', '右家', '前家', '左家'];
-
+const numberToNaturalPositionText = ['东', '北', '西', '南'];
+const numberToRelativePositionText = ['本家', '下家', '对家', '上家'];
 
 // view
 const seatsDiv = document.getElementById("div-seats");
@@ -29,9 +31,11 @@ const levelDiv = document.getElementById("div-denomination-level");
 const strainDiv = document.getElementById("div-denomination-strain");
 const declarationDiv = document.getElementById("div-declaration");
 const declarerSpan = document.getElementById("span-declarer");
+const declareMethodSpan = document.getElementById("span-declare-method");
 const scoreDiv = document.getElementById("div-score");
 const scoreContainerDiv = document.getElementById("div-score-container");
 const penaltyDiv = document.getElementById("div-penalty");
+const dipaiScoreDiv = document.getElementById("div-dipai-score");
 
 // sematic functions
 function nextChar(l) {
@@ -272,6 +276,27 @@ function createDeck(){
   deck.push({suit:4, suitName:"w", rank: 15, rankName: "W", division:4, order:15, played:false});
   return deck;
 }
+function initializePage(){
+  zhuangPosition = -1;
+  mainPlayerPosition = 0;
+  observedPlayerPosition = 0;
+  declarations = [];
+  initHands = [];
+  moves = [];
+  // moves.push(Move.startMove());
+  dipai = [];
+  score = 0;
+  penalty = 0;
+  currentMoveId = "^";
+  currentRound = "";
+  currentBranch = "";
+  declarerSpan.innerHTML = "";
+  declareMethodSpan.innerHTML = "";
+  scoreDiv.innerHTML = "";
+  scoreContainerDiv.removeAttribute("style");
+  seatsDiv.setAttribute("zhuang", "undetermined");
+  penaltyDiv.innerHTML = "";
+}
 // parameter l: integer from 0 (deal with 2) to 12 (deal with A)
 function setLevel(l) {
     level = l;
@@ -325,6 +350,7 @@ function setScoreValue(s) {
     const h = s * 1.5;
     scoreContainerDiv.style = "border-color: hsl(" + h + ", 100%, 50%, 100%)";
     scoreDiv.innerHTML = s.toString();
+    score = s;
     // if(s > 99) {
     //   scoreDiv.setAttribute("range", "high");
     // } else {
@@ -336,9 +362,11 @@ function setPenaltyValue(p) {
   if(p > 0) {
     penaltyDiv.setAttribute("sign", "+");
     penaltyDiv.innerHTML = "+" + p.toString();
-  } else {
+  } else if(p < 0) {
     penaltyDiv.setAttribute("sign", "-");
     penaltyDiv.innerHTML = p.toString();
+  } else {
+    penaltyDiv.innerHTML = "";
   }
 }
 function setScore(move) {
@@ -348,8 +376,20 @@ function setScore(move) {
     setScoreValue(-404);
   }
   if(move.penalty) {
-    setPenaltyValue(move.penalty);
+    penalty = move.penalty;
+    setPenaltyValue(penalty);
+  } else {
+    penalty = 0;
+    setPenaltyValue(0);
   }
+}
+function setDipaiScore() {
+  if(dipaiScore) {
+    dipaiScoreDiv.innerHTML = dipaiScore.toString();
+  }
+}
+function clearDipaiScore() {
+  dipaiScoreDiv.innerHTML = "";
 }
 
 // sort cards
@@ -435,12 +475,14 @@ function goToPreviousMove() {
   let currentMove = getCurrentMove();
   // let previousMove = currentMove ? currentMove.previousMove() : moves[0];
   if(currentMove) {
-    handElements[currentMove.player].querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
-      c.setAttribute('card-show', 'show-inhand');
-    });
-    handElements[currentMove.player].querySelectorAll('[card-show="show-revoked"]').forEach((c) => {
-      c.setAttribute('card-show', 'show-inhand');
-    });
+    if(!currentMove.isEnd) {
+      handElements[currentMove.player].querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
+        c.setAttribute('card-show', 'show-inhand');
+      });
+      handElements[currentMove.player].querySelectorAll('[card-show="show-revoked"]').forEach((c) => {
+        c.setAttribute('card-show', 'show-inhand');
+      });
+    }
     let previousMove = currentMove.previousMove();
     if(currentMove.isLead) {
       if(currentMove.moveId.endsWith('a0')) {
@@ -467,6 +509,9 @@ function goToPreviousMove() {
     if(previousMove) {
       currentMoveId = previousMove.moveId;
       setScore(previousMove);
+      if(currentMove.isEnd) {
+        clearDipaiScore();
+      }
     } else {
       currentMoveId = '^';
     }
@@ -503,7 +548,12 @@ function goToNextMove() {
         handElements[nextMove.player].querySelector(qs).setAttribute('card-show', 'show-revoked');
     });
     currentMoveId = nextMove.moveId;
-    setScore(nextMove);
+    if(nextMove.isEnd) {
+      setDipaiScore();
+      setScoreValue(score + dipaiScore + penalty);
+    } else {
+      setScore(nextMove);
+    }
   } else {
     // handle error
   }
@@ -677,12 +727,16 @@ function normalizeMoves(m) {
     }
     roundId = nextChar(roundId);
   }
+  let endMoveId = roundId + '0';
+  let endMove = new ShengjiMove(-1, endMoveId, [], false, false);
+  endMove.isEnd = true;
+  m.push(endMove);
 }
 function generateInitialHands(m) {
   // m is an Array of ShengjiMove
   initHands = [[], [], [], []]; // index is the absolute position in upg file
   for(let move of m) {
-    if(!move.isStart){
+    if(!move.isStart && !move.isEnd){
       initHands[move.player] = initHands[move.player].concat(move.moveCards);
     }
   }
@@ -696,7 +750,7 @@ function generateTableRecord(m) {
     tableRecordBody.innerHTML = '';
     let aMove = firstMove;
     for(let i = 0; i < 25; i++) {
-      let newRound = document.createElement('tr');
+      if(aMove.nextMove() && aMove.nextMove().isEnd) break;
       let roundTds = [];
       for(let j = 0; j < 5; j++) {
         roundTds.push(document.createElement('td'));
@@ -708,6 +762,7 @@ function generateTableRecord(m) {
       for(let j = 0; j < 4; j++) {
         if(aMove.nextMove()) {
           aMove = aMove.nextMove();
+          if(aMove.isEnd) break;
           let moveText = '';
           for(let c of aMove.moveCards) {
             moveText += (c.suitName + c.rankName);
@@ -722,12 +777,14 @@ function generateTableRecord(m) {
           break;
         }
       }
+      let newRound = document.createElement('tr');
       for(let td of roundTds) {
         newRound.appendChild(td);
       }
       tableRecordBody.appendChild(newRound);
       if(!aMove.nextMove()) break;
     }
+    aMove = aMove.nextMove();
     let dipaiString = '';
     for(let c of firstMove.moveCards) {
       dipaiString += (c.suitName + c.rankName + " ");
@@ -735,9 +792,10 @@ function generateTableRecord(m) {
     let dipaiTr = document.createElement('tr');
     let dipaiTd = document.createElement('td');
     let dipaiDivInTable = document.getElementsByClassName('dipai-div-in-table')[0];
-    dipaiTd.className = 'td-dipai';
+    dipaiTd.id = 'td-' + aMove.moveId;
     dipaiTd.setAttribute('colspan', '5');
     dipaiTd.innerHTML = dipaiString;
+    dipaiTd.onclick = handleClickOnTd;
     dipaiTr.appendChild(dipaiTd);
     tableRecordBody.appendChild(dipaiTr);
     dipaiDivInTable.innerHTML = dipaiString;
@@ -761,7 +819,9 @@ function readDeclaration(b) {
     shown: shown
   });
   const declarerPosition = (player + 4 - zhuangPosition) % 4;
-  declarerSpan.innerHTML = numberToPositionInGame[declarerPosition];
+  if(!isQiangzhuang) {
+    declarerSpan.innerHTML = numberToPositionInGame[declarerPosition];
+  }
   setStrain(shown);
 }
 function readZhuangAndLevel(b) {
@@ -792,7 +852,8 @@ function readDipai(b) {
   let dipaiMove = new ShengjiMove(zhuangPosition, '_', dipai, true, false);
   dipaiMove.deskScore = 0;
   moves.splice(0, 0, dipaiMove);
-  moves[moves.length - 1].deskScore = b[5];
+  dipaiScore = b[5] - moves[moves.length - 1].deskScore;
+  // moves[moves.length - 1].deskScore = b[5];
 }
 function read8218(b) {
   // const fileText = document.getElementById("file-text");
@@ -851,19 +912,23 @@ function readUpg(file) {
       playerNames[i] = bufferToString(nameBuffer.slice(i * 20, (i+1)*20));
     }
     mainPlayerPosition = intInfo[0];
-    // observedPlayerPosition = intInfo[0];
+    observedPlayerPosition = intInfo[0];
     level = intInfo[5];
     zhuangPosition = intInfo[11];
-    setObservedPlayer(intInfo[0]);
     handElements = new Array(4);
     handElements[mainPlayerPosition] = shandElement;
     handElements[(mainPlayerPosition + 1) %4] = ehandElement;
     handElements[(mainPlayerPosition + 2) %4] = nhandElement;
     handElements[(mainPlayerPosition + 3) %4] = whandElement;
-    if(intInfo[11] > 0) {
+    if(intInfo[11] >= 0) {
       isQiangzhuang = false;
+      declareMethodSpan.innerHTML = "亮主：";
+    } else {
+      isQiangzhuang = true;
+      declareMethodSpan.innerHTML = "抢庄";
     }
     parseUpgBodyBuffer(intBody);
+    setObservedPlayer(intInfo[0]);
     normalizeMoves(moves);
     generateInitialHands(moves);
     generateTableRecord(moves);
@@ -875,19 +940,7 @@ function readUpg(file) {
 }
 function viewFile() {
   const file = document.getElementById("open-file").files[0];
-  zhuangPosition = -1;
-  declarations = [];
-  initHands = [];
-  moves = [];
-  // moves.push(Move.startMove());
-  dipai = [];
-  score = 0;
-  currentMoveId = "^";
-  currentRound = "";
-  currentBranch = "";
-  scoreDiv.innerHTML = "";
-  scoreContainerDiv.removeAttribute("style");
-  penaltyDiv.innerHTML = "";
+  initializePage();
   readUpg(file);
 
   theDeck = createDeck();
