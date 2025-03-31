@@ -3,7 +3,19 @@
 @font-face {
     /* for score */
     font-family: 'Chivo Mono';
-    src: url('./Chivo_Mono/ChivoMono-VariableFont_wght.ttf') format('truetype');
+    src: url('./fonts/Chivo_Mono/ChivoMono-VariableFont_wght.ttf') format('truetype');
+}
+
+@font-face {
+    /* for score */
+    font-family: 'JetBrains Mono';
+    src: url('./fonts/JetBrains_Mono/JetBrainsMono-VariableFont_wght.ttf') format('truetype');
+}
+
+@font-face {
+    /* for score */
+    font-family: 'Roboto';
+    src: url('./fonts/Roboto/Roboto-VariableFont_wdth\,wght.ttf') format('truetype');
 }
 
 

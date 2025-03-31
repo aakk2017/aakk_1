@@ -66,8 +66,10 @@
     outline: 1px solid black;
     margin: auto;
     background-color: antiquewhite;
+    font-family: "Roboto";
     font-size: 6vh;
     text-align: center;
+    line-height: 9vh;
 }
 #div-denomination-area {
     outline: 1px solid black;
@@ -132,17 +134,17 @@
 .blocks-rt {
     height: var(--card-height);
     box-sizing: border-box;
-    font-family: 'Roboto Mono', monospace;
+    font-family: 'Roboto';
 }
 #div-score-area {
     display: flex;
     overflow: visible;
-    font-family: 'Chivo Mono', monospace;
+    /* font-family: 'JetBrains Mono', monospace; */
     font-size: 3vh;
     /* background-color: darkkhaki; */
 }
 #div-score-container {
-    width: 20vh;
+    width: 18vh;
     height: 15vh;
     box-sizing: border-box;
     border: 3vh solid #f8f8f8;
@@ -154,10 +156,11 @@
     transition: all 0.3s;
 }
 #div-score {
-    width: 14vh;
+    width: 12vh;
     height: 9vh;
     line-height: 9vh;
     outline: 1px solid black;
+    /* letter-spacing: -0.3vh; */
 }
 #div-penalty-and-dipai {
     width: 10vh;

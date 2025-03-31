@@ -296,6 +296,7 @@ function initializePage(){
   scoreContainerDiv.removeAttribute("style");
   seatsDiv.setAttribute("zhuang", "undetermined");
   penaltyDiv.innerHTML = "";
+  dipaiScoreDiv.innerHTML = "";
 }
 // parameter l: integer from 0 (deal with 2) to 12 (deal with A)
 function setLevel(l) {
