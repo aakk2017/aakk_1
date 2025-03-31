@@ -27,37 +27,37 @@
     width: 15vh;
     height: 15vh;
     box-sizing: border-box;
-    border: 3vh solid azure;
+    border: 3vh solid #f8f8f8;
     border-radius: 1.5vh;
     outline: 1px solid black;
     margin: auto 1vh;
 }
 #div-seats[zhuang="undetermined"] {
-    border-color: azure;
+    border-color: #f8f8f8;
 }
 #div-seats[zhuang="observed"] {
     border-top-color: var(--v-color);
     border-bottom-color: var(--w-color);
-    border-left-color: azure;
-    border-right-color: azure;
+    border-left-color: #f8f8f8;
+    border-right-color: #f8f8f8;
 }
 #div-seats[zhuang="next"] {
     border-left-color: var(--v-color);
     border-right-color: var(--w-color);
-    border-top-color: azure;
-    border-bottom-color: azure;
+    border-top-color: #f8f8f8;
+    border-bottom-color: #f8f8f8;
 }
 #div-seats[zhuang="previous"] {
     border-right-color: var(--v-color);
     border-left-color: var(--w-color);
-    border-top-color: azure;
-    border-bottom-color: azure;
+    border-top-color: #f8f8f8;
+    border-bottom-color: #f8f8f8;
 }
 #div-seats[zhuang="opposite"] {
     border-bottom-color: var(--v-color);
     border-top-color: var(--w-color);
-    border-left-color: azure;
-    border-right-color: azure;
+    border-left-color: #f8f8f8;
+    border-right-color: #f8f8f8;
 }
 #div-table-number {
     width: 9vh;
@@ -145,7 +145,7 @@
     width: 20vh;
     height: 15vh;
     box-sizing: border-box;
-    border: 3vh solid azure;
+    border: 3vh solid #f8f8f8;
     border-radius: 1.5vh;
     font-size: 6vh;
     outline: 1px solid black;

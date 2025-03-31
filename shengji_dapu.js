@@ -913,6 +913,8 @@ function readUpg(file) {
     }
     mainPlayerPosition = intInfo[0];
     observedPlayerPosition = intInfo[0];
+    tableNumber = intInfo[1] % 100;
+    tableNumberDiv.innerHTML = tableNumber.toString();
     level = intInfo[5];
     zhuangPosition = intInfo[11];
     handElements = new Array(4);

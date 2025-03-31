@@ -7,6 +7,7 @@ ehandElement = document.getElementById("ehand");
 handElements = []
 
 // game info
+let tableNumber = "";
 let dateTime;
 let playerNames = []; 
 let mainPlayerPosition = 0; 
