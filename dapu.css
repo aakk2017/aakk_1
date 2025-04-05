@@ -32,7 +32,7 @@
     clear: both;
 }
 
-/* define key heights and widths */
+/* define key heights, widths and colors */
 :root {
     --container-width: 177vh;
     --card-height: 18vh;
@@ -100,6 +100,42 @@ body {
 }
 #whand .hand {
     justify-content: end;
+}
+
+.namebar {
+    height: calc(var(--card-height) / 5);
+    background-color: #ccf;
+    border-bottom: 1px solid black;
+    border-left: 1px solid black;
+    border-right: 1px solid black;
+    border-radius: 0 0 calc(var(--card-height) / 20) calc(var(--card-height) / 20);
+    box-sizing: border-box;
+    display: flex;
+    font-size: calc(var(--card-height) / 6);
+    transform: translateY(calc(var(--card-height) / (-5)));
+    opacity: 1;
+    transition: all 0.3s;
+}
+.namebar[show="hide"] {
+    transform: translateY(0);
+    opacity: 0;
+}
+.namebar[show="breath"] {
+    transition: all 1s;
+}
+.namebar .game-position-area {
+    height: calc(var(--card-height) / 5);
+    width: calc(var(--card-height) / 4);
+    line-height: calc(var(--card-height) / 5);
+    text-align: center;
+    background-color: #366;
+    color: white;
+}
+.namebar .name-area {
+    height: calc(var(--card-height) / 5);
+    line-height: calc(var(--card-height) / 5);
+    font-family: "Roboto Mono", monospace;
+    text-align: left;
 }
 
 .desk {

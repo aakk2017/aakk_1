@@ -185,3 +185,10 @@
     margin-top: 0;
     color: #0000ce;
 }
+
+/* styles for the lb block */
+
+#corner-lb {
+    /* background-color: aquamarine; */
+    font-size: 2vh;
+}
