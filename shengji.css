@@ -115,12 +115,14 @@
     height: 10vh;
     width: 8.5vh;
     text-align: left;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 #div-denomination-nts-text {
+    font-family: "Noto Sans SC";
     width: 17vh;
     font-size: 5vh;
     letter-spacing: 0;
-    transform: scaleX(0.7) translateX(-4vh) translateY(0.5vh);
+    transform: scaleX(0.7) translateX(-3vh);
 }
 #div-declaration {
     height: 5vh;

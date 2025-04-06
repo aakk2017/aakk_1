@@ -18,6 +18,11 @@
     src: url('./fonts/Roboto/Roboto-VariableFont_wdth\,wght.ttf') format('truetype');
 }
 
+@font-face {
+    font-family: 'Noto Sans SC';
+    src: url('./fonts/Noto_Sans_SC/NotoSansSC-VariableFont_wght.ttf') format('truetype');
+}
+
 
 /* reset styles */
 * {
@@ -167,6 +172,9 @@ body {
     font-size: 2.5vh;
     font-family: 'Roboto Mono', monospace;
     table-layout: fixed;
+}
+#table-record th {
+    font-family: "Noto Sans SC";
 }
 .dipai-div-in-table {
     width: 71vh;
