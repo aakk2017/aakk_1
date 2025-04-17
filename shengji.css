@@ -36,6 +36,7 @@
 #div-seats .div-zhuang-mark {
     width: 9vh;
     height: 3vh;
+    font-size: 2vh;
     font-family: "Noto Sans SC";
     font-weight: bold;
     color: #f8f8f8;

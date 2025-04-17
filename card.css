@@ -149,10 +149,10 @@
 .card-suit {
     /* font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; */
     font-family: 'suit';
-    transform: translateY(-1vh) translateX(0vh);
+    transform: translateY(-1.2vh) translateX(0vh);
 }
 .card-container[suit="w"] .card-suit {
-    transform: translateY(-0.2vh);
+    transform: translateY(-0.4vh);
 }
 .card-face {
     font-size: var(--card-width);

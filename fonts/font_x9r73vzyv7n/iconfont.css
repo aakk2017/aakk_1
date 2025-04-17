@@ -1,0 +1,177 @@
+@font-face {
+  font-family: "iconfont"; /* Project id  */
+  src: url('iconfont.ttf?t=1744908692050') format('truetype');
+}
+
+.iconfont {
+  font-family: "iconfont" !important;
+  font-size: 16px;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.icon-angledoubledown:before {
+  content: "\e605";
+}
+
+.icon-angledoubleleft:before {
+  content: "\e606";
+}
+
+.icon-angledoubleright:before {
+  content: "\e607";
+}
+
+.icon-angledoubleup:before {
+  content: "\e608";
+}
+
+.icon-home:before {
+  content: "\e609";
+}
+
+.icon-medianext:before {
+  content: "\e60b";
+}
+
+.icon-mediapause:before {
+  content: "\e60c";
+}
+
+.icon-mediaprevious:before {
+  content: "\e60d";
+}
+
+.icon-meidaplay:before {
+  content: "\e60e";
+}
+
+.icon-off1:before {
+  content: "\e610";
+}
+
+.icon-plug:before {
+  content: "\e612";
+}
+
+.icon-reduce:before {
+  content: "\e614";
+}
+
+.icon-star:before {
+  content: "\e615";
+}
+
+.icon-shoucang:before {
+  content: "\e616";
+}
+
+.icon-chazhao:before {
+  content: "\e617";
+}
+
+.icon-dizhi:before {
+  content: "\e618";
+}
+
+.icon-fenxiang:before {
+  content: "\e619";
+}
+
+.icon-gerenzhongxin:before {
+  content: "\e61a";
+}
+
+.icon-guanbi:before {
+  content: "\e61b";
+}
+
+.icon-huidaodingbu:before {
+  content: "\e61c";
+}
+
+.icon-jiantoushang:before {
+  content: "\e61d";
+}
+
+.icon-jiantouxia:before {
+  content: "\e61e";
+}
+
+.icon-jiantouyou:before {
+  content: "\e61f";
+}
+
+.icon-jiantouzuo:before {
+  content: "\e620";
+}
+
+.icon-shanchu3:before {
+  content: "\e621";
+}
+
+.icon-shanchu4:before {
+  content: "\e622";
+}
+
+.icon-shanchu:before {
+  content: "\e623";
+}
+
+.icon-yishoucang:before {
+  content: "\e624";
+}
+
+.icon-shuzi0:before {
+  content: "\e625";
+}
+
+.icon-shuzi1:before {
+  content: "\e626";
+}
+
+.icon-shuzi2:before {
+  content: "\e627";
+}
+
+.icon-shuzi3:before {
+  content: "\e628";
+}
+
+.icon-shuzi4:before {
+  content: "\e629";
+}
+
+.icon-shuzi5:before {
+  content: "\e62a";
+}
+
+.icon-shuzi6:before {
+  content: "\e62b";
+}
+
+.icon-shuzi7:before {
+  content: "\e62c";
+}
+
+.icon-shuzi8:before {
+  content: "\e62d";
+}
+
+.icon-shuzi9:before {
+  content: "\e62e";
+}
+
+.icon-shuaxin:before {
+  content: "\e62f";
+}
+
+.icon-wodexiaoxiicon:before {
+  content: "\e633";
+}
+
+.icon-shezhi:before {
+  content: "\e634";
+}
+
