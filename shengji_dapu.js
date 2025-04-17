@@ -18,7 +18,7 @@ let theDeck = createDeck();
 const numberToDivisionName = ["d", "c", "h", "s", "t"];
 const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
 const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
-const ntsHtml = '<div id="div-denomination-nts-text">无主</div>';
+const ntsHtml = '<div class="div-denomination-nts-text">无主</div>';
 const numberToPositionInGame = ['庄家', '右家', '前家', '左家'];
 const numberToNaturalPositionText = ['东', '北', '西', '南'];
 const numberToRelativePositionText = ['本家', '下家', '对家', '上家'];
@@ -320,9 +320,9 @@ function setStrain(s) {
                 theDeck[i].division = 4;
             }
         }
-        strainDiv.innerHTML = suitTexts[s];
+        strainDiv.innerHTML = "<span class='suit-strain'>" + suitTexts[s] + "</span>";
         if(declarations.length > 1) {
-          strainDiv.innerHTML += suitTexts[s];
+          strainDiv.getElementsByClassName("suit-strain")[0].innerHTML += suitTexts[s];
         }
         denominationAreaDiv.setAttribute("strain", numberToSuitName[s]);
     } else if(s === 52) {

@@ -294,6 +294,9 @@ menu {
     transform: translateY(-100vh);
 }
 
+span[class|="suit"] {
+    font-family: 'suit';
+}
 
 
 #file-text {

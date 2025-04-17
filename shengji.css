@@ -31,9 +31,23 @@
     border-radius: 1.5vh;
     outline: 1px solid black;
     margin: auto 1vh;
+    overflow: visible;
+}
+#div-seats .div-zhuang-mark {
+    width: 9vh;
+    height: 3vh;
+    font-family: "Noto Sans SC";
+    font-weight: bold;
+    color: #f8f8f8;
+    position: relative;
+    text-align: center;
+    line-height: 3vh;
 }
 #div-seats[zhuang="undetermined"] {
     border-color: #f8f8f8;
+}
+#div-seats[zhuang="undetermined"] .div-zhuang-mark {
+    opacity: 0;
 }
 #div-seats[zhuang="observed"] {
     border-top-color: var(--v-color);
@@ -47,17 +61,35 @@
     border-top-color: #f8f8f8;
     border-bottom-color: #f8f8f8;
 }
+#div-seats[zhuang="next"] .div-zhuang-mark {
+    width: 3vh;
+    height: 9vh;
+    line-height: 9vh;
+    top: -9vh;
+    left: 9vh;
+}
 #div-seats[zhuang="previous"] {
     border-right-color: var(--v-color);
     border-left-color: var(--w-color);
     border-top-color: #f8f8f8;
     border-bottom-color: #f8f8f8;
 }
+#div-seats[zhuang="previous"] .div-zhuang-mark {
+    width: 3vh;
+    height: 9vh;
+    line-height: 9vh;
+    top: -9vh;
+    left: -3vh;
+}
 #div-seats[zhuang="opposite"] {
     border-bottom-color: var(--v-color);
     border-top-color: var(--w-color);
     border-left-color: #f8f8f8;
     border-right-color: #f8f8f8;
+}
+#div-seats[zhuang="opposite"] .div-zhuang-mark {
+    top: -12vh;
+    left: 0vh;
 }
 #div-table-number {
     width: 9vh;
@@ -115,9 +147,9 @@
     height: 10vh;
     width: 8.5vh;
     text-align: left;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Noto Sans SC';
 }
-#div-denomination-nts-text {
+.div-denomination-nts-text {
     font-family: "Noto Sans SC";
     width: 17vh;
     font-size: 5vh;
