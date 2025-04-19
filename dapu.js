@@ -237,7 +237,7 @@ function createHandElement(sortGroup) {
     hand.setAttribute("sort-group", sortGroup);
     return hand;
 }
-function generateEwhandHtml() {
+function generateEwhandHtmlInClasses() {
     let eFirstRow = createHandElement("n");
     let wFirstRow = createHandElement("n");
     ehand.appendChild(eFirstRow);
@@ -262,17 +262,21 @@ function generateEwhandHtml() {
         }
     }
 }
-function renderHands() {
+function renderHands4() {
     for(let hand of handElements) {
       hand.innerHTML = '';
     }
-    generateEwhandHtml();
+    generateEwhandHtmlInClasses();
+    let nRow = createHandElement("n");
+    let sRow = createHandElement("n");
     for(const card of initHands[(mainPlayerPosition + 2) %4]) {
-      nhandElement.appendChild(createCardContainer(card));
+      nRow.appendChild(createCardContainer(card));
     }
     for(const card of initHands[mainPlayerPosition]) {
-      shandElement.appendChild(createCardContainer(card));
+      sRow.appendChild(createCardContainer(card));
     }
+    nhandElement.appendChild(nRow);
+    shandElement.appendChild(sRow);
     for(const card of initHands[(mainPlayerPosition + 3) %4]) {
       let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
       let row = whandElement.querySelector("[sort-group='" + sortGroup + "']");

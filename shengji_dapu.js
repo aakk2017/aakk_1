@@ -915,7 +915,7 @@ function readUpg(file) {
     mainPlayerPosition = intInfo[0];
     observedPlayerPosition = intInfo[0];
     tableNumber = intInfo[1] % 100;
-    tableNumberDiv.innerHTML = tableNumber.toString();
+    // tableNumberDiv.innerHTML = tableNumber.toString();
     level = intInfo[5];
     zhuangPosition = intInfo[11];
     handElements = new Array(4);
@@ -935,7 +935,7 @@ function readUpg(file) {
     normalizeMoves(moves);
     generateInitialHands(moves);
     generateTableRecord(moves);
-    renderHands();
+    renderHands4();
   });
   if(file) {
     reader.readAsArrayBuffer(file);

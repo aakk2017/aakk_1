@@ -100,7 +100,7 @@ body {
 .ewhand .hand {
     height: calc(0.5 * var(--card-height));
 }
-.ewhand .hand:not(:has(~ .hand)) {
+.hand:not(:has(~ .hand)) {
     height: var(--card-height);
 }
 #whand .hand {
