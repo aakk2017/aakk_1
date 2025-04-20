@@ -73,20 +73,19 @@ body {
 }
 .input-container {
     background-color: #f2e3c9;
+    font-family: "Roboto Mono", "Noto Sans SC";
     font-size: 2.5vh;
 }
 .nshand {
     height: var(--card-height);
     width: calc(9 * var(--card-width));
-    /* background-color: aqua; */
-    display: flex;
     justify-content: center;
+    overflow: hidden;
 }
 
 .middle-container {
     height: calc(3 * var(--card-height));
     width: 175vh;
-    /* background-color: skyblue; */
     margin: 1vh 0;
     display: flex;
     justify-content: space-between;
@@ -95,7 +94,7 @@ body {
 .ewhand {
     height: calc(3 * var(--card-height));
     width: calc(4 * var(--card-width));
-    /* background-color: greenyellow; */
+    overflow: hidden;
 }
 .ewhand .hand {
     height: calc(0.5 * var(--card-height));
@@ -106,18 +105,22 @@ body {
 #whand .hand {
     justify-content: end;
 }
+#ehand .hand {
+    justify-content: start;
+}
 
 .namebar {
-    height: calc(var(--card-height) / 5);
-    background-color: #ccf;
+    height: 3.5vh;
+    background-color: #d3d3d3;
     border-bottom: 1px solid black;
     border-left: 1px solid black;
     border-right: 1px solid black;
     border-radius: 0 0 calc(var(--card-height) / 20) calc(var(--card-height) / 20);
     box-sizing: border-box;
     display: flex;
-    font-size: calc(var(--card-height) / 6);
-    transform: translateY(calc(var(--card-height) / (-5)));
+    overflow-y: hidden;
+    font-size: 2.5vh;
+    transform: translateY(-3.5vh);
     opacity: 1;
     transition: all 0.3s;
 }
@@ -125,21 +128,27 @@ body {
     transform: translateY(0);
     opacity: 0;
 }
-.namebar[show="breath"] {
+.namebar[status="on-play"] {
+    background-color: #ffce00;
     transition: all 1s;
 }
+.namebar[status="played"] {
+    background-color: #ffce00;
+}
 .namebar .game-position-area {
-    height: calc(var(--card-height) / 5);
+    height: inherit;
     width: calc(var(--card-height) / 4);
+    margin-right: 1vh;
     line-height: calc(var(--card-height) / 5);
     text-align: center;
-    background-color: #366;
+    background-color: #004c4c;
+    font-family: "Noto Sans SC";
     color: white;
 }
 .namebar .name-area {
     height: calc(var(--card-height) / 5);
     line-height: calc(var(--card-height) / 5);
-    font-family: "Roboto Mono", monospace;
+    font-family: "Roboto Mono", "Noto Sans SC";
     text-align: left;
 }
 
@@ -294,7 +303,7 @@ menu {
     transform: translateY(-100vh);
 }
 
-span[class|="suit"] {
+[class|="suit"] {
     font-family: 'suit';
 }
 

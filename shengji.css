@@ -141,21 +141,33 @@
 }
 #div-denomination-level {
     height: 10vh;
-    width: 6vh;
+    width: 5vh;
+    /* margin: auto 0.3vh; */
     text-align: right;
 }
 #div-denomination-strain {
     height: 10vh;
     width: 8.5vh;
-    text-align: left;
-    font-family: 'Noto Sans SC';
+    margin-right: 0.3vh;
+    display: flex;
+    justify-content: start;
+    /* text-align: left; */
+    /* font-family: 'Noto Sans SC'; */
+}
+.suit-denomination {
+    width: 6vh;
+    height: 10vh;
+    line-height: 8vh;
+    font-family: 'suit';
+    text-shadow: -0.03em 0 #f8f8f8;
 }
 .div-denomination-nts-text {
     font-family: "Noto Sans SC";
     width: 17vh;
     font-size: 5vh;
     letter-spacing: 0;
-    transform: scaleX(0.7) translateX(-3vh);
+    text-wrap: nowrap;
+    transform: scaleX(0.8);
 }
 #div-declaration {
     height: 5vh;

@@ -37,6 +37,7 @@
     height: var(--card-height);
     overflow-y: visible;
     display: flex;
+    justify-content: center;
 }
 
 .card-container {

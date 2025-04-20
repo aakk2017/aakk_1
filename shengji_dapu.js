@@ -320,19 +320,40 @@ function setStrain(s) {
                 theDeck[i].division = 4;
             }
         }
-        strainDiv.innerHTML = "<span class='suit-strain'>" + suitTexts[s] + "</span>";
-        if(declarations.length > 1) {
-          strainDiv.getElementsByClassName("suit-strain")[0].innerHTML += suitTexts[s];
-        }
+        // strainDiv.innerHTML = "<span class='suit-strain'>" + suitTexts[s] + "</span>";
+        // if(declarations.length > 1) {
+        //   strainDiv.getElementsByClassName("suit-strain")[0].innerHTML += suitTexts[s];
+        // }
         denominationAreaDiv.setAttribute("strain", numberToSuitName[s]);
     } else if(s === 52) {
         strain = 4;
-        strainDiv.innerHTML = ntsHtml;
+        // strainDiv.innerHTML = ntsHtml;
         denominationAreaDiv.setAttribute("strain", "v");
     } else if(s === 53) {
         strain = 4;
-        strainDiv.innerHTML = ntsHtml;
+        // strainDiv.innerHTML = ntsHtml;
         denominationAreaDiv.setAttribute("strain", "w");
+    }
+}
+function renderDeclarations() {
+    if(declarations.length) {
+      let d = declarations[declarations.length - 1];
+      strainDiv.innerHTML = "";
+      if(d.shown < 4) {
+        for(let i = 0; i < d.diezhi; i++) {
+          let suitDenominationDiv = document.createElement("div");
+          suitDenominationDiv.innerHTML = suitTexts[d.shown];
+          suitDenominationDiv.setAttribute("class", "suit-denomination");
+          strainDiv.appendChild(suitDenominationDiv);
+        }
+      } else if(d.shown === 52) {
+        strainDiv.innerHTML = ntsHtml;
+        // denominationAreaDiv.setAttribute("strain", "v");
+      } else if(d.shown === 53) {
+        strainDiv.innerHTML = ntsHtml;
+        // denominationAreaDiv.setAttribute("strain", "w");
+      }
+      setStrain(d.shown);
     }
 }
 function setZhuang(z) {
@@ -815,15 +836,17 @@ function bufferToString(b) {
 function readDeclaration(b) {
   const player = b[1] % 256;
   const shown = b[2];
+  const diezhi = b[3];
   declarations.push({
     player: player,
-    shown: shown
+    shown: shown,
+    diezhi: diezhi
   });
   const declarerPosition = (player + 4 - zhuangPosition) % 4;
   if(!isQiangzhuang) {
     declarerSpan.innerHTML = numberToPositionInGame[declarerPosition];
   }
-  setStrain(shown);
+  renderDeclarations();
 }
 function readZhuangAndLevel(b) {
   zhuangPosition = b[2];
@@ -908,16 +931,17 @@ function readUpg(file) {
     const bodyBuffer = reader.result.slice(265, length);
     const intInfo = new Int32Array(infoBuffer);
     const intBody = new Int32Array(bodyBuffer);
+    const decoder = new TextDecoder("gbk");
     dateTime = new Date(bufferToString(dateTimeBuffer) + 'GMT+0800');
-    for(let i = 0; i < 4; i++) {
-      playerNames[i] = bufferToString(nameBuffer.slice(i * 20, (i+1)*20));
-    }
     mainPlayerPosition = intInfo[0];
     observedPlayerPosition = intInfo[0];
     tableNumber = intInfo[1] % 100;
     // tableNumberDiv.innerHTML = tableNumber.toString();
     level = intInfo[5];
     zhuangPosition = intInfo[11];
+    for(let i = 0; i < 4; i++) {
+      playerNames[(i+1+mainPlayerPosition)%4] = decoder.decode(nameBuffer.slice(i * 20, (i+1)*20));
+    }
     handElements = new Array(4);
     handElements[mainPlayerPosition] = shandElement;
     handElements[(mainPlayerPosition + 1) %4] = ehandElement;

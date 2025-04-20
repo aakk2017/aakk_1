@@ -1,10 +1,10 @@
 // controlling values
 // html elements
-nhandElement = document.getElementById("nhand");
-shandElement = document.getElementById("shand");
-whandElement = document.getElementById("whand");
-ehandElement = document.getElementById("ehand");
-handElements = []
+const nhandElement = document.getElementById("nhand");
+const shandElement = document.getElementById("shand");
+const whandElement = document.getElementById("whand");
+const ehandElement = document.getElementById("ehand");
+let handElements = [];
 
 // game info
 let tableNumber = "";
@@ -286,6 +286,20 @@ function renderHands4() {
       let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
       let row = ehandElement.querySelector("[sort-group='" + sortGroup + "']");
       row.appendChild(createCardContainer(card));
+    }
+    for(let i = 0; i < 4; i++) {
+        let namebarDiv = document.createElement("div");
+        namebarDiv.setAttribute("class", "namebar");
+        namebarDiv.setAttribute("show", "show");
+        namebarDiv.setAttribute("status", "idle");
+        let gamePositionArea = document.createElement("div");
+        gamePositionArea.setAttribute("class", "game-position-area");
+        namebarDiv.appendChild(gamePositionArea);
+        let nameArea = document.createElement("div");
+        nameArea.setAttribute("class", "name-area");
+        nameArea.innerHTML = playerNames[i];
+        namebarDiv.appendChild(nameArea);
+        handElements[i].appendChild(namebarDiv);
     }
 }
 
