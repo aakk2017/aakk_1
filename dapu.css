@@ -42,6 +42,7 @@
     --container-width: 177vh;
     --card-height: 18vh;
     --card-width: 12vh;
+    --radius: 0.6vh;
 }
 
 /* container: 100vh by 177vh (9 : 16) if aspect ratio < 9/16 */
@@ -115,7 +116,7 @@ body {
     border-bottom: 1px solid black;
     border-left: 1px solid black;
     border-right: 1px solid black;
-    border-radius: 0 0 calc(var(--card-height) / 20) calc(var(--card-height) / 20);
+    border-radius: 0 0 var(--radius) var(--radius);
     box-sizing: border-box;
     display: flex;
     overflow-y: hidden;
@@ -284,6 +285,7 @@ menu {
     width: 40vh;
     padding: 0.2vh 0.5vh;
     border-left: 1pt solid #eee;
+    font-family: "Roboto Mono", "suit", "Noto Sans SC";
     font-size: 2vh;
     color: #eee;
     line-height: 3vh;

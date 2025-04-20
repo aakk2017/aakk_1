@@ -28,7 +28,7 @@
     height: 15vh;
     box-sizing: border-box;
     border: 3vh solid #f8f8f8;
-    border-radius: 1.5vh;
+    border-radius: var(--radius);
     outline: 1px solid black;
     margin: auto 1vh;
     overflow: visible;
@@ -110,7 +110,7 @@
     width: 14.5vh;
     height: 15vh;
     box-sizing: border-box;
-    border-radius: 1.5vh;
+    border-radius: var(--radius);
     margin: auto 1vh;
     margin-left: 0;
 }

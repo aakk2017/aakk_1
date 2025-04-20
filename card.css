@@ -124,7 +124,7 @@
     width: var(--card-width);
     height: var(--card-height);
     border: 1px solid black;
-    border-radius: calc(var(--card-width) / 20);
+    border-radius: var(--radius);
     box-sizing: border-box;
     background-color: #f8f8f8;
     position: relative;
