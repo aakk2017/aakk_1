@@ -292,9 +292,12 @@ function renderHands4() {
         namebarDiv.setAttribute("class", "namebar");
         namebarDiv.setAttribute("show", "show");
         namebarDiv.setAttribute("status", "idle");
-        let gamePositionArea = document.createElement("div");
-        gamePositionArea.setAttribute("class", "game-position-area");
-        namebarDiv.appendChild(gamePositionArea);
+        let positionArea = document.createElement("div");
+        positionArea.setAttribute("class", "game-position-area");
+        if(gameName === 'shengji') {
+            positionArea.innerHTML = numberToPositionInGameShengji[(i + 4 - zhuangPosition) % 4][0];
+        }
+        namebarDiv.appendChild(positionArea);
         let nameArea = document.createElement("div");
         nameArea.setAttribute("class", "name-area");
         nameArea.innerHTML = playerNames[i];

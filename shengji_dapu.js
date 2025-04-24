@@ -19,9 +19,9 @@ const numberToDivisionName = ["d", "c", "h", "s", "t"];
 const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
 const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
 const ntsHtml = '<div class="div-denomination-nts-text">无主</div>';
-const numberToPositionInGame = ['庄家', '右家', '前家', '左家'];
-const numberToNaturalPositionText = ['东', '北', '西', '南'];
-const numberToRelativePositionText = ['本家', '下家', '对家', '上家'];
+const numberToPositionInGameShengji = ['庄家', '右家', '前家', '左家'];
+const numberToNaturalPositionText4 = ['东', '北', '西', '南'];
+const numberToRelativePositionText4 = ['本家', '下家', '对家', '上家'];
 
 // view
 const seatsDiv = document.getElementById("div-seats");
@@ -844,7 +844,7 @@ function readDeclaration(b) {
   });
   const declarerPosition = (player + 4 - zhuangPosition) % 4;
   if(!isQiangzhuang) {
-    declarerSpan.innerHTML = numberToPositionInGame[declarerPosition];
+    declarerSpan.innerHTML = numberToPositionInGameShengji[declarerPosition];
   }
   renderDeclarations();
 }
