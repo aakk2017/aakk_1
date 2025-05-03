@@ -67,7 +67,7 @@
         <div class="nscontainer">
             <div class="corner" id="corner-lb">
                 <div class="input-container">
-                    <label for="open-file">选择牌谱(.upg)</label>
+                    <label for="open-file" class="button">选择牌谱(.upg)</label>
                     <input 
                         type="file" 
                         id="open-file" 
@@ -75,6 +75,7 @@
                         accept=".upg, .qyp, .qypc" 
                         onchange="viewFile()" />
                 </div>
+                <div class="text ellipsis" id="file-name-container"></div>
             </div>
             <div class="nshand" id="shand"></div>
             <div class="corner" id="corner-rb"></div>

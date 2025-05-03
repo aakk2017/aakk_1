@@ -73,10 +73,20 @@ body {
     /* background-color: orange; */
 }
 .input-container {
-    background-color: #f2e3c9;
+    height: 3vh;
     font-family: "Roboto Mono", "Noto Sans SC";
     font-size: 2.5vh;
 }
+input {
+    width: 0;
+    height: 0;
+    opacity: 0;
+}
+#file-name-container {
+    /* background-color: skyblue; */
+    margin: auto 1vh;
+}
+
 .nshand {
     height: var(--card-height);
     width: calc(9 * var(--card-width));
@@ -157,9 +167,6 @@ body {
     height: calc(3 * var(--card-height));
     width: 77vh;
     overflow: hidden;
-}
-.input-container {
-    margin-bottom: 1vh;
 }
 .table-record-container {
     height: 0;
@@ -309,6 +316,29 @@ menu {
     font-family: 'suit';
 }
 
+.button {
+    display: block;
+    height: 3vh;
+    margin: auto 1vh;
+    border: 1px solid #47a;
+    border-radius: var(--radius);
+    box-sizing: border-box;
+    background: #69c;
+    color: #eee;
+    padding: 0 1vh;
+    line-height: 3vh;
+    font-size: 2vh;
+}
+.button:hover {
+    cursor: pointer;
+    background-color: #47a;
+}
+.text {
+    font-family: "Roboto", "suit", "Noto Sans SC";
+}
+.ellipsis {
+    text-overflow: ellipsis;
+}
 
 #file-text {
     /* height: 50vh; */

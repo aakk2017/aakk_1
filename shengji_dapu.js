@@ -36,6 +36,7 @@ const scoreDiv = document.getElementById("div-score");
 const scoreContainerDiv = document.getElementById("div-score-container");
 const penaltyDiv = document.getElementById("div-penalty");
 const dipaiScoreDiv = document.getElementById("div-dipai-score");
+const fileNameDiv = document.getElementById("file-name-container");
 
 // sematic functions
 function nextChar(l) {
@@ -297,6 +298,7 @@ function initializePage(){
   seatsDiv.setAttribute("zhuang", "undetermined");
   penaltyDiv.innerHTML = "";
   dipaiScoreDiv.innerHTML = "";
+  fileNameDiv.innerHTML = "";
 }
 // parameter l: integer from 0 (deal with 2) to 12 (deal with A)
 function setLevel(l) {
@@ -969,7 +971,7 @@ function viewFile() {
   const file = document.getElementById("open-file").files[0];
   initializePage();
   readUpg(file);
-
+  fileNameDiv.innerHTML = file.name;
   theDeck = createDeck();
 }
 

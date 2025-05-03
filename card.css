@@ -148,7 +148,6 @@
     font-style: normal;
 }
 .card-suit {
-    /* font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; */
     font-family: 'suit';
     transform: translateY(-1.2vh) translateX(0vh);
 }
@@ -157,7 +156,6 @@
 }
 .card-face {
     font-size: var(--card-width);
-    /* font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; */
     font-family: 'suit';
     font-weight: 400;
     font-style: normal;
