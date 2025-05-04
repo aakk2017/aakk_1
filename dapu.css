@@ -49,6 +49,7 @@
 body {
     height: 100vh;
     overflow: hidden;
+    background-image: radial-gradient(ellipse farthest-corner, bisque 20%, antiquewhite 80%);
 }
 .container {
     height: 100vh;
@@ -56,7 +57,7 @@ body {
     margin: 0 auto;
     padding: 1vh;
     box-sizing: border-box;
-    background-color: antiquewhite;
+    /* background-image: radial-gradient(ellipse farthest-corner, bisque 20%, antiquewhite 80%); */
 }
 
 /* the top row */
@@ -135,6 +136,9 @@ input {
     opacity: 1;
     transition: all 0.3s;
 }
+.namebar:hover {
+    background-color: #e3e3e3;
+}
 .namebar[show="hide"] {
     transform: translateY(0);
     opacity: 0;
@@ -170,7 +174,7 @@ input {
 }
 .table-record-container {
     height: 0;
-    background-color: #eee;
+    /* background-color: #eee; */
     transition: all 0.2s;
     overflow: scroll;
 }
@@ -226,6 +230,15 @@ input {
 .dipai-div-in-table[highlight='current'] {
     background-color: #33c !important;
     color: #eee;
+}
+.dipai-div-in-table:hover[highlight="current"],
+#table-record tbody td:not([class="round-number"]):hover,
+#table-record tbody tr:nth-child(odd) td:not([class="round-number"]):hover[highlight="current"] {
+    box-shadow: inset 0 0 0.2vh 0.2vh #eef;
+}
+.dipai-div-in-table:hover,
+#table-record tbody tr:nth-child(odd) td:not([class="round-number"]):hover {
+    box-shadow: inset 0 0 0.2vh 0.2vh #fff;
 }
 
 .footer {
@@ -324,7 +337,7 @@ menu {
     border-radius: var(--radius);
     box-sizing: border-box;
     background: #69c;
-    color: #eee;
+    color: #fff;
     padding: 0 1vh;
     line-height: 3vh;
     font-size: 2vh;
