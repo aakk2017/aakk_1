@@ -15,6 +15,7 @@ let observedPlayerPosition = 0;
 
 // game parameters
 let gameName = "shengji";
+let gameVariation = 2;
 let initHands = [];
 let moves = [];
 let dipai = [];

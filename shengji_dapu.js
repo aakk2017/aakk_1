@@ -371,15 +371,10 @@ function setScoreValue(s) {
     scoreContainerDiv.style = "border-color: azure";
     scoreDiv.innerHTML = ""
   } else {
-    const h = s * 1.5;
+    const h = s * 3 / gameVariation;
     scoreContainerDiv.style = "border-color: hsl(" + h + ", 100%, 50%, 100%)";
     scoreDiv.innerHTML = s.toString();
     score = s;
-    // if(s > 99) {
-    //   scoreDiv.setAttribute("range", "high");
-    // } else {
-    //   scoreDiv.removeAttribute("range");
-    // }
   }
 }
 function setPenaltyValue(p) {
@@ -587,15 +582,6 @@ function goToRoundShengji(rid) {
   // alert(rid);
 }
 
-
-// function selectCard(hand, i){
-//   hand[i].played = -hand[i].played;
-//   if(hand[i].played != 0){
-//     document.getElementById("card"+i.toString()).style.bottom =
-//       document.getElementById("card"+i.toString()).style.bottom == "100px" ? "60px" : "100px";
-//     //this.style.bottom = (this.style.bottom == "100px" ? "60px" : "100px");
-//   }
-// }
 
 // file reading functions
 function cardsToString(c) {
@@ -835,7 +821,15 @@ function bufferToString(b) {
   }
   return s;
 }
-function readDeclaration(b) {
+function bufferToInt32(b) {
+  if(b.byteLength < 4) {
+    return 0;
+  }
+  const i = new Int32Array(b.slice(0, 4));
+  return i[0];
+}
+function readDeclaration(buffer) {
+  const b = new Int32Array(buffer);
   const player = b[1] % 256;
   const shown = b[2];
   const diezhi = b[3];
@@ -850,12 +844,14 @@ function readDeclaration(b) {
   }
   renderDeclarations();
 }
-function readZhuangAndLevel(b) {
+function readZhuangAndLevel(buffer) {
+  const b = new Int32Array(buffer.slice(0, 20));
   zhuangPosition = b[2];
   level = b[3];
   setLevel(b[3]);
 }
-function readMove(b) {
+function readMove(buffer) {
+  const b = new Int32Array(buffer);
   let player = b[1];
   let numberOfCards = b[2];
   let cards = [];
@@ -869,7 +865,8 @@ function readMove(b) {
   m.deskScore = b[7];
   moves.push(m);
 }
-function readDipai(b) {
+function readDipai(buffer) {
+  const b = new Int32Array(buffer);
   for(let i = 11; i < b.length; i += 7) {
     let card = new ShengjiCard(b[i+1], b[i+2], level, strain);
     // let card = new Card(b[i+1], b[i+2]);
@@ -879,48 +876,64 @@ function readDipai(b) {
   dipaiMove.deskScore = 0;
   moves.splice(0, 0, dipaiMove);
   dipaiScore = b[5] - moves[moves.length - 1].deskScore;
-  // moves[moves.length - 1].deskScore = b[5];
+}
+function read8214(buffer) {
+  const b = new Int32Array(buffer.slice(0, 20));
+  zhuangPosition = b[2];
+  if(b[2] >= 0) {
+    isQiangzhuang = false;
+    declareMethodSpan.innerHTML = "亮主：";
+  } else {
+    isQiangzhuang = true;
+    declareMethodSpan.innerHTML = "抢庄";
+  }
 }
 function read8218(b) {
   // const fileText = document.getElementById("file-text");
   // fileText.innerHTML += (b[1]%256 + ', ' + parseInt(b[1]/256)%256 + ', ' + parseInt(b[1]/65536) + '<br>');
 }
 function parseUpgBodyBuffer(b) {
-  const bodyLength = b.length;
+  const bodyLength = b.byteLength;
   let i = 0;
-  while(i < bodyLength) {
-    switch(b[i]) {
+  let itemByteLength, itemKey;
+  while(i+8 < bodyLength) {
+    itemByteLength = bufferToInt32(b.slice(i, i+4));
+    itemKey = bufferToInt32(b.slice(i+4, i+8));
+    switch(itemKey) {
       // case 8195:
       case 8204:
-        readZhuangAndLevel(b.slice(i+1, i+2+b[i+1]/4));
-        i += (1 + b[i+1] / 4);
+        readZhuangAndLevel(b.slice(i+8, i+4+itemByteLength));
+        i += (4 + itemByteLength);
         break;
       case 8205:
-        readMove(b.slice(i+1, i+2+b[i+1]/4));
-        i += (1 + b[i+1] / 4);
+        readMove(b.slice(i+8, i+4+itemByteLength));
+        i += (4 + itemByteLength);
         break;
       case 8209:
-        readDeclaration(b.slice(i+1, i+2+b[i+1]/4));
-        i += (1 + b[i+1] / 4);
+        readDeclaration(b.slice(i+8, i+4+itemByteLength));
+        i += (4 + itemByteLength);
         break;
       case 8213:
-        readDipai(b.slice(i+1, i+2+b[i+1]/4));
-        i += (1 + b[i+1] / 4);
+        readDipai(b.slice(i+8, i+4+itemByteLength));
+        i += (4 + itemByteLength);
         break;
-      // case 8214:
+      case 8214:
+        read8214(b.slice(i+8, i+4+itemByteLength));
       // case 8216:
       case 8218:
-        read8218(b.slice(i+1, i+2+b[i+1]/4));
-        i += (1 + b[i+1] / 4);
+        read8218(b.slice(i+8, i+4+itemByteLength));
+        i += (4 + itemByteLength);
         break;
-      default: i++;
+      case 8195:
+      case 8216:
+        i += (4 + itemByteLength);
+        break;
+      default: i += 4;
     }
   }
 }
 // read and parse .upg file
 function readUpg(file) {
-  // const fileText = document.getElementById("file-text");
-  // fileText.innerHTML = '';
   const reader = new FileReader();
   reader.addEventListener("load", () => {
     const length = reader.result.byteLength;
@@ -928,19 +941,16 @@ function readUpg(file) {
     const dateTimeBuffer = reader.result.slice(8, 32);
     const metaBuffer = reader.result.slice(32, 104);
     const nameBuffer = reader.result.slice(104, 184);
-    const infoBuffer = reader.result.slice(184, 240);
-    const unknownBuffer = reader.result.slice(240, 265);
-    const bodyBuffer = reader.result.slice(265, length);
+    const infoBuffer = reader.result.slice(184, 212);
+    const bodyBuffer = reader.result.slice(212, length);
     const intInfo = new Int32Array(infoBuffer);
-    const intBody = new Int32Array(bodyBuffer);
     const decoder = new TextDecoder("gbk");
     dateTime = new Date(bufferToString(dateTimeBuffer) + 'GMT+0800');
     mainPlayerPosition = intInfo[0];
     observedPlayerPosition = intInfo[0];
     tableNumber = intInfo[1] % 100;
-    // tableNumberDiv.innerHTML = tableNumber.toString();
+    gameVariation = intInfo[3];
     level = intInfo[5];
-    zhuangPosition = intInfo[11];
     for(let i = 0; i < 4; i++) {
       playerNames[(i+1+mainPlayerPosition)%4] = decoder.decode(nameBuffer.slice(i * 20, (i+1)*20));
     }
@@ -949,14 +959,7 @@ function readUpg(file) {
     handElements[(mainPlayerPosition + 1) %4] = ehandElement;
     handElements[(mainPlayerPosition + 2) %4] = nhandElement;
     handElements[(mainPlayerPosition + 3) %4] = whandElement;
-    if(intInfo[11] >= 0) {
-      isQiangzhuang = false;
-      declareMethodSpan.innerHTML = "亮主：";
-    } else {
-      isQiangzhuang = true;
-      declareMethodSpan.innerHTML = "抢庄";
-    }
-    parseUpgBodyBuffer(intBody);
+    parseUpgBodyBuffer(bodyBuffer);
     setObservedPlayer(intInfo[0]);
     normalizeMoves(moves);
     generateInitialHands(moves);
