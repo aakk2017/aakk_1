@@ -37,6 +37,7 @@ const scoreContainerDiv = document.getElementById("div-score-container");
 const penaltyDiv = document.getElementById("div-penalty");
 const dipaiScoreDiv = document.getElementById("div-dipai-score");
 const fileNameDiv = document.getElementById("file-name-container");
+const saveUpgBtn = document.getElementById("save-upg-btn");
 
 // sematic functions
 function nextChar(l) {
@@ -936,6 +937,9 @@ function parseUpgBodyBuffer(b) {
 function readUpg(file) {
   const reader = new FileReader();
   reader.addEventListener("load", () => {
+    recordBuffer = reader.result;
+    saveUpgBtn.setAttribute('href', URL.createObjectURL(new Blob([recordBuffer], {type: 'text/plain'})));
+    saveUpgBtn.setAttribute('download', recordName);
     const length = reader.result.byteLength;
     const headBuffer = reader.result.slice(0, 8);
     const dateTimeBuffer = reader.result.slice(8, 32);
@@ -967,14 +971,15 @@ function readUpg(file) {
     renderHands4();
   });
   if(file) {
-    reader.readAsArrayBuffer(file);
+  initializePage();
+  recordName = file.name;
+  fileNameDiv.innerHTML = file.name;
+  reader.readAsArrayBuffer(file);
   }
 }
 function viewFile() {
   const file = document.getElementById("open-file").files[0];
-  initializePage();
   readUpg(file);
-  fileNameDiv.innerHTML = file.name;
   theDeck = createDeck();
 }
 

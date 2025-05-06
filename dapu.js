@@ -12,6 +12,8 @@ let dateTime;
 let playerNames = []; 
 let mainPlayerPosition = 0; 
 let observedPlayerPosition = 0;
+let recordName = "";
+let recordBuffer = new ArrayBuffer();
 
 // game parameters
 let gameName = "shengji";
@@ -43,6 +45,10 @@ const dipaiSection = document.getElementById('corner-lb');
 const commentSection = document.getElementById('corner-rb');
 const tableRecord = document.getElementById('table-record');
 const tableRecordBody = tableRecord.getElementsByTagName('tbody')[0];
+
+// menubar items
+const saveMenu = document.getElementById('menu-save');
+saveMenu.onclick = saveAsUpg;
 
 // toolbar items
 const toStartButton = document.getElementById('button-to-start');
@@ -531,4 +537,6 @@ window.addEventListener("keyup", handleKeyUp);
 
 
 // file handlers
-
+function saveAsUpg(){
+    return saveUpgBtn.click();
+};
