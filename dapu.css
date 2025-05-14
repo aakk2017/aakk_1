@@ -178,7 +178,7 @@ input {
     height: 0;
     /* background-color: #eee; */
     transition: all 0.2s;
-    overflow: scroll;
+    overflow-y: auto;
 }
 .table-record-container[area-show="show"] {
     height: calc(3 * var(--card-height)); 
