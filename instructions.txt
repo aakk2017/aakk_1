@@ -7,13 +7,14 @@ chapter 1 Overview
     1b. The four suits of a regular deck are equal by default (different from bridge, where they are ranked). However, there is a variation, where suits are ranked s-h-c-d from high to low in the dealing phase (defined below). <user should be able to choose between these variations before creating a game>  When referring to the suits (and the rest of this article), single lower-case characters is used. <when sorting cards in UI, always do circulating sequence s-h-c-d-s-h, will be discussed below>
     1c. The ranks of number cards, from high to low, are A, K, Q, J, then 10 through 2. When referring to the rank 10, a single capital letter "X" is used instead of the 2-character string "10". <the rank 10 needs additional style in UI>
     1d. The 2 differentiable jokers are named "big joker" and "small joker" respectively, and referred by "W" and "V" in plain text <and UI for now>. As named, W is higher than V. Their suits are "w", and ranks are just defined as "W" and "V". V is higher than A.
-    1e. A card carrying points is called counter. In Shengji, all cards of ranks 5, X, and K are couunters. Each 5 is 5 points. Each X or K is 10 points.
-    1f. A pair of cards refers to two identical cards, with same suit and same rank.
+    1e. A card carrying points is called counter. In Shengji, all cards of ranks 5, X, and K are counters. Each 5 is 5 points. Each X or K is 10 points.
+    1f. A pair of cards refers to two cards with same suit and same rank.
+    1g. Note that duplicates of cards (same suit and rank) are not identical, although they have the same value in the game. Think about mixed two decks in real life, you have one duplicate of each cards, if you hold both duplicates, you are holding two cards instead of one. Therefore, in a set, same-valued cards are allowed. In the default 2-deck variation, there can be at most 2 same-valued cards for each kind in any sets.
 2. The 4 players play in 2 teams. Each 2 players across the table is one team. 
 3. The game is usually played in a counter-clockwise (CCW) sequence, namely South-East-North-West. CCW is set as the default game advancing sequence. <there should be a checkbox in settings to switch the direction real-time, even in an ongoing game>
 4. Different position systems
-    4a. Natural positions (aboslute positions): South, East, North, West.
-    4b. Relative positions: Observed player, Subsequent player (SP), Partner, Precedent player (PP).
+    4a. Natural positions (aboslute positions): South, East, North, West. <assigned when the game is created and will not change until the end of the game>
+    4b. Relative positions (relative to self or the observed player): Reference, Afterhand, Opposite, Forehand
     4c. Frame position (see below)
     4d. Round position (see below)
 5. A game consists one or multiple frames. A frame is a period, in which players are dealt cards once and play up the cards dealt (like one table in bridge).
@@ -24,11 +25,11 @@ chapter 1 Overview
 chapter 2 Game properties
 1. In each frame, there is one specific player to be zhuang. Zhuang is usually determined by the result of the last frame. 
     1a. In the first frame, or some rare exceptions, zhuang is not defined at the beginning of a frame. This kind of frame is a qiangzhuang frame.
-    1b. Frame position: Zhuang, You (or lower zhuang, LZ; zhuang's SP), Qian (zhuang's partner), Zuo (or higher zhuang, HZ; zhuang's PP)
+    1b. Frame position (relative to zhuang): Zhuang (or pivot), You (or successor, zhuang's afterhand), Qian (or ally, zhuang's partner), Zuo (or predecessor, zhuang's forehand) <in old codes, I used zhuang/you/qian/zuo as names, but you may switch to pivot/successor/ally/predecessor if they are more accessible to readers>
 2. The level of the frame is the level of zhuang's team.
     2a. Cards of the same rank as the level of the frame are called level cards or levelers.
     2b. In the first frame of each game, both teams have the level of 2 by default. While there are variations using different schemes. <make it possible to set starting levels when creating a game>
-3. There may or may not be a trump suit in each frame. The frame is called suited frame if trump suit exist, or no-trump-suit (NTS) if not. The information telling the trump suit condition is called strain or denomination, which takes value from the set {"s", "h", "c", "d", "nts"}. <"NTS" can be "n" in short, if more convenient>
+3. There may or may not be a trump suit in each frame. The frame is called suited frame if trump suit exist, or no-trump-suit (NTS) if not. The information telling the trump suit condition is called strain or denomination, which takes value from the set {"s", "h", "c", "d", "nts"}. <"nts" can be "n" in short, if more convenient>
 4. The zhuang's team is considered the defending side, and the opponents the attacking side. The scoring of a frame shows points won by the attacking side.
 5. Each frame consists of dealing phase, basing phase, playing phase, and counting phase, in sequence.
 
@@ -39,7 +40,7 @@ chapter 3 Dealing Phase
     1c. Stay in the dealing phase for 5 more seconds upon finishing dealing. This is the last call for declaration. <show countdown in the UI> After this, the frame moves to the next phase.
 2. In the dealing phase, players can make declarations. Players can declare a trump suit by exposing a leveler or a pair of levelers of the declared suit, or declare NTS by exposing a pair of jokers. Declaration sets the strain of this frame.
     2a. Declaring with a single leveler is called single declaration, and with a pair, double declaration.
-    2b. After a declaration, players other than the declarer of the last declaration can make double declarations to overcall. Double declarations can override any single declaration. NTS declarations are always non-single and can override any suited declaration, and declaration with WW can override VV. However, suited double declaration cannot override another suited declaration in normal variation. In other variations, suited double declarations are ranked as s-h-c-d and higher ones can override lower ones. <users should be able to choose when creating a game>
+    2b. After a declaration, players other than the declarer of the last declaration can make double declarations to overcall. Double declarations can override any single declaration. NTS declarations are always non-single and can override any suited declaration, and declaration with WW can override VV. However, suited double declaration cannot override another suited double declaration in normal variation. In other variations, suited double declarations are ranked as s-h-c-d and higher ones can override lower ones. <users should be able to choose when creating a game>
     2c. To handle multiple-deck variations, we set that triple declaration, of any kind, can override any double declaration, and quadriple ones can override triple and doubles, etc. <no need to do it now>
     2d. In qiangzhuang frames, the zhuang is also determined in the dealing phase. The last declarer in the dealing phase is zhuang of this frame.
     2e. Overcalls in the dealing phase don't follow the advancing sequence. Players can overcall anytime, as long as they have the levelers or jokers.
@@ -55,7 +56,7 @@ chapter 4 Basing Phase
     3a. In some variations, overcall can be made after setting the primary base by players who is neither zhuang nor the last declarer. The overcaller, also can be called overbaser, grabs the primary base and make a new 8-card base. Upon that, the overbasing sequence can go on, player other than the last declarer can make overcall and make base, until everyone agrees with the strain.
         3a-1. There's one sub-variation, in which the partner of the last one who made the base can only overcall but can't make base.
         3a-2. In these overbase variations, the suits are always ranked.
-        3a-3. The post-dealing overcalls should follow the advancing sequence. A player can't make post-dealing overcall before PP saying pass.
+        3a-3. The post-dealing overcalls should follow the advancing sequence. A player can't make post-dealing overcall before his forehand saying pass.
 4. When the base is set, the frame moves on to the next phase. In the playing phase, only the one who made the final base can check it. <there should be a button on the final baser's interface. cliking on it shows the base.>
 
 chapter 5 Playing Phase
@@ -72,8 +73,8 @@ chapter 5 Playing Phase
     4c. Two cards are consecutive only if they are in the same division and have neighboring orders (difference is 1). Note that two different plain levelers are not consecutive.
 5. A laed may be a single card, a multiple-card element, or multiple elements. A lead must come in one single division. Followers must follow division if possible, and when following division, one must follow type if possible. This is called basic rule of follow. (see chapter 6 for details)
     5a. Leading a single element has no restrictions. The leader can lead any single element.
-    5b. The basic rule of follow has the highest priority.
-    5c. As a follower, to play cards that are higher than all previous moves in the same round is to cover; to not cover is to duck; to duck and not following division is to discard.
+    5b. The basic rule of follow has the highest priority for followers.
+    5c. As a follower, to play cards that are higher than all previous moves in the same round is to cover; to not cover and not following division is to discard.
 6. A multiple-element lead is called a multiplay. A multiplay is valid only if for each element e_x and for each of the other players p_y, e_x is no lower than any possible elements in the same division and type in p_y's hand. Players other than p_y can't see p_y's hand, so this judgement is done by the referee <in online games, the server or the host's browser>. 
     6a. If a multiplay is not valid as defined above, it fails. The element(s) that's lower than some potential element(s) in someone's hand is blocked. The leader must lead the blocked element and revoke the rest. 
         6a-1. If multiple elements of the same type are blocked, lead one of the lowest one among them.
@@ -82,17 +83,37 @@ chapter 5 Playing Phase
         <always show the actual blocker to the table. this information should be public.>
         <show the full multiplay, highlight the actual blocked element to the table at the lead, stay for 1 sec, then move the revoked cards to the leader's area so other players can see, leaving only the led cards on the table. in the leader's UI, the revoked cards should be highlighted, but still sorted normally in hand with all other cards.>
     6b. After the failed multiplay
-        6b-1. (3rd-seat-duck rule) In the same round, the 3rd-seat must not cover by default.
-        6b-2. (PP-control rule) The leader's revoked cards will be exposed to the table until they are played up. When the leader must follow exposed division, the leader's PP decides which cards that must be played or which cards that must not be played.
-        6b-3. The above rules can't override the basic rule of follow. For example, if the failed leader has only one card, which is exposed, in the division of the current round, he has to play it even though his PP wants him to hold it.
-        6b-4. Variations: multiplay compensation. If a multiplay fails, instead of 3rd-seat-duck and PP-control, multiplay compensation will be deduced from the leader's score. Here "deduce" means to change the frame score in the way that is adverse to the leader, namely, reduce frame score if the leader is attacker, and increase if he is defender. The value of the multiplay compensation is 5 or 10 points times the number of cards or elements revoked. <user choose>
+        6b-1. (3rd-seat-low rule) In the same round, the 3rd-seat must not cover by default.
+        6b-2. (forehand-control rule) The leader's revoked cards will be exposed to the table until they are played up. When the leader must follow the exposed division, the leader's forehand decides which cards that must be played or which cards that must not be played.
+        6b-3. The above rules can't override the basic rule of follow. For example, if the failed leader has only one card, which is exposed, in the division of the current round, he has to play it even though his forehand wants him to hold it.
+        6b-4. Variations: multiplay compensation. If a multiplay fails, instead of 3rd-seat-low and forehand-control, multiplay compensation will be deduced from the leader's score. Here "deduce" means to change the frame score in the way that is adverse to the leader, namely, reduce frame score if the leader is attacker, and increase if he is defender. The value of the multiplay compensation is 5 or 10 points times the number of cards or elements revoked. <user choose> <multiplay compensation is stored as a signed number that adds to the frame score in the counting phase>
 7. There's one variation in which at the beginning of the playing phase, players can claim crossing before the first lead in suited frames. <user to choose>
-    7a. If one player has no more than 5 trumps, he can claim a crossing. The crossing player pick up 5 cards from his hand, containing all his trumps, and give them to his partner; then the partner cross back 5 cards. All the involved cards are not exposed to the opponents.
+    7a. If one player has no more than 5 trumps, he can claim a crossing. The crossing player pick up 5 cards from his hand, containing all his trumps, and cross them to his partner; then the partner cross back 5 cards. All the involved cards are not exposed to the opponents.
     7b. One cannot claim crossing if the partner had already claimed.
     7c. Each team can only claim crossing once in a frame.
 
 
-chapter 6 Types and Rules of Follow
+chapter 6 Types and Evaluation
+1. An element is a set of cards. An element can only contain either a single card, or duplicates of a consecutive-card straight. Element is the individable object in hand evaluation.
+    1a. The volume of an element is the number of cards in it. The span (or lian zhi) of an element is the number of consecutive orders, and the copy (or die zhi) of an element is the number of duplicates. <lianZhi and dieZhi are used in the old code. you may switch to span and copy.>
+        1a-1. The span takes positive integers. When span = 1, the copy can only be 1. When span > 1, copy can take positive integers. In the default 2-deck variation, copy = 1 or 2. Volume = span * copy.
+    1b. An element is always a combination of cards in one single division. The element's division inherets from cards in it. The element's order is the highest order in its consecutive straight.
+    1c. The type of an element is a 2-number pair, (copy, span). Types can be ranked: copy is compared first, and with the same copy, the type with greater span is higher. 
+    1d. Only elements with the same type are comparable. The deciding property is the elements' order. Note the ranking of types is not directly related to hand evaluation.
+    1e. Naming convention: type (1, 1) is a single, (2, 1) is a pair, (2, n) n > 1 is consecutive pairs (or a tractor).
+    1f. Type A = (m, n) is a subtype of type B = (p, q) if m <= p and n <= q. Element A is a subelement of element B if A is contained in B. 
+    1g. (Maximal interpretation rule) A non-single element, once lead, can't be interpreted as a combination of subelements.
+2. Multiplay
+    2a. The volume of a multiplay is the number of cards in it, equaling the total volume of all the elements in it.
+    2b. The type of a multiplay is a multiset, including types of each of its elements.
+    2c. If sort the elements in the multiplay by type from high to low, with the same type sort the order (if the orders are still the same, sort by suit then rank), the top element is the core element of the multiplay. The type of the core element is the core type.
+    2d. (Maximal interpretation rule for multiplay) 
+    2e. Interpretation of a multiplay may be ambiguous. For example, {A, A, A, K, K} can be either a multiplay of {(2, 2), (1, 1)} or {(3, 1), (2, 1)}. By default, it's automatically interpreted such that the core type is the highest (if same compare the second highest, etc.), in this example, {(3, 1), (2, 1)}. In other variations, let the leader to decide the multiplay type. <that's before judging whether the multiplay fails>
+3. The basic rule of follow revisited in details. 
+    3a. The amount of cards followed must match the volume of the lead. If the amount of cards in the follower's division is no more than the lead, all of this division should be played, then fill up the gap with cards in other divisions until the amount matches the lead. Below we assume the follower has enough cards in the led division.
+    3b. When following a (m, 1) element, starting from k = m, find potential (k, 1) elements in the led division in hand. If any exists, choose one of them to play, break iteration; if not, k step down by 1, until k = 1. This is the procedure to follow type (m, 1) (or (m, 1) procedure in short). At the end, fill the volume gap with any cards in the led division. <note that for m no more than 2, iteration is not really necessary, but it's a should-do for now to reserve compatibility for multiple-deck variations>
+    3c. When following a (m, n) element, do the (m, n) procedure first, as below:
+
 
 chapter 7 Counting Phase
 
