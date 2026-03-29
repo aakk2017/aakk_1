@@ -56,8 +56,8 @@ chapter 3 Dealing Phase
     4a. That the automatic strain can never be overwritten in any variations is non-negotiable.
 
 chapter 4 Basing Phase
-1. In each frame, there is a base area (or dipai) containing 8 cards. They are initially the 8 cards not dealt in the dealing phase, called initial base. Base cards are not visible to players until counting phase, except specific player who is allowed to touch them.
-2. At the beginning of the basing phase, the zhuang pick up the 8 undealt cards <at this time these initial base cards simply merge into zhuang's hand cads, as there's no need to distinguish them from dealt cards>. Then zhuang choose 8 cards from hand to make the new base (called the primary base). 
+1. In each frame, there is a base area (or dipai) containing 8 cards. They are initially the 8 cards not dealt in the dealing phase, called initial base. Base cards are face down until counting phase, except specific player who is allowed to touch them.
+2. At the beginning of the basing phase, the zhuang pick up the 8 undealt cards <at this time these initial base cards simply merge into zhuang's hand cads, as there's no need to distinguish them from dealt cards>. Then zhuang choose 8 cards from hand, put them face down on the table to make the new base (called the primary base). 
 3. Upon making the primary base, in default game, the frame moves forward to the next phase. <user can choose the variations below>
     3a. In some variations, overcall can be made after setting the primary base by players who is neither zhuang nor the last declarer. The overcaller, also can be called overbaser, grabs the primary base and make a new 8-card base. Upon that, the overbasing sequence can go on, player other than the last declarer can make overcall and make base, until everyone agrees with the strain.
         3a-1. There's one sub-variation, in which the partner of the last one who made the base can only overcall but can't make base.
@@ -74,8 +74,8 @@ chapter 5 Playing Phase
 3. The lead transfers between the two sides. Ending refers to the period from the last round in which the attackers turn on-lead to the last round if the playing phase ends with a round won by the attackers. If the last round is not won by the attackers, then the ending is null. For example, if the attackers win only the last round and lose others, the ending refers to the last round; if the attackers win the last 4 rounds and lose the rest, the ending is then the last 4 rounds.
 4. In the playing phase, the cards are divided into divisions according to the level and strain. The cardplay goes by divisions and orders (see below) instead of suits and ranks.
     4a. Divisions revisited. The trump division consists of all jokers, levelers, and cards of the trump suit in a suited frame. In NTS frame, it only consists of jokers and levelers. All cards in the trump division are trumps. Other cards are divided by suits into plain divisions. Divisions are labeled either in lower-case single characters (trump is "t") or numbers. <sort hand cards by divisions, trump first, then plain divisions in cycling suit sequence>
-        4a-1. In a suited frame, the leveler in the trump suit is called the major leveler (labeled "T"), and others the minor leveler or plain leveler (labeled by upper-case single letters of their suit label). When NTS, all levelers are plain levelers.
-    4b. The order of a card describes how high the card is. In plain divisions, the order starts from 0 for the lowest ranked card (2 if not in level 2), to 11 for the highest ranked card (A if not in level A). Note that cards with neighboring order can have a gap of 2 in ranks due to the missing of leveler in plain divisions. In a suited frame, the orders of W, V, T, and plain levelers are 15, 14, 13, 12, respectively. The rest of the trump division follows the same ordering as plain suits. In a NTS frame, W and V are 15 and 14, and all plain levelers are simply 13. 
+        4a-1. In a suited frame, the leveler in the trump suit is called the major leveler, and others the minor leveler or plain leveler. When NTS, all levelers are plain levelers.
+    4b. The order of a card describes how high the card is. The order takes integer values. In plain divisions, the order starts from 0 for the lowest ranked card (2 if not in level 2), to 11 for the highest ranked card (A if not in level A). Note that cards with neighboring order can have a gap of 2 in ranks due to the absence of leveler in plain divisions, or the below-leveler part of the trump division. In a suited frame, the orders of W, V, T, and plain levelers are 15, 14, 13, 12, respectively. The rest of the trump division follows the same ordering as plain suits. In a NTS frame, W and V are 15 and 14, and all plain levelers are simply 13. 
     4c. Two cards are consecutive only if they are in the same division and have neighboring orders (difference is 1). Note that two different plain levelers are not consecutive.
 5. A lead must be a set of single-divisioned card(s). It may contain a single card, or multiple cards that form a multiple-card element or multiple elements. Followers must follow division if possible, and when following division, one must follow type if possible. This is called basic rule of follow. (see chapter 6 for details)
     5a. Leading a single element has no restrictions. The leader can lead any single element.
@@ -90,7 +90,7 @@ chapter 5 Playing Phase
         <show the full multiplay, highlight the actual blocked element to the table at the lead, stay for 1 sec, then move the revoked cards to the leader's area so other players can see, leaving only the led cards on the table. in the leader's UI, the revoked cards should be highlighted, but still sorted normally in hand with all other cards.>
     6b. After the failed multiplay
         6b-1. (3rd-seat-low rule) In the same round, the 3rd-seat must not cover by default.
-        6b-2. (forehand-control rule) The leader's revoked cards will be exposed to the table until they are played up. When the leader must follow the exposed division, the leader's forehand decides which cards that must be played or which cards that must not be played.
+        6b-2. (forehand-control rule) The leader's revoked cards will be exposed to the table until they are played up. When the next time that the leader must follow one of the exposed division in the same frame, the leader's forehand decides which cards that must be played or which cards that must not be played. Each failure in multiplay grants the opponents one time of forehand-control rule in this frame. In practice, the forehand chooses one in {must-play, must-hold}, and select cards in the exposed part. Also see the next chapter for details.
         6b-3. The above rules can't override the basic rule of follow. For example, if the failed leader has only one card, which is exposed, in the division of the current round, he has to play it even though his forehand wants him to hold it.
         6b-4. Variations: multiplay compensation. If a multiplay fails, instead of 3rd-seat-low and forehand-control, multiplay compensation will be deduced from the leader's score. Here "deduce" means to change the frame score in the way that is adverse to the leader, namely, reduce frame score if the leader is attacker, and increase if he is defender. The value of the multiplay compensation is 5 or 10 points times the number of cards or elements revoked. <user choose> <multiplay compensation is stored as a signed number that adds to the frame score in the counting phase>
 7. There's one variation in which at the beginning of the playing phase, players can claim crossing before the first lead in suited frames. <user to choose>
@@ -123,9 +123,30 @@ chapter 6 Types and Evaluation in the Playing Phase
         the structured part is exactly one of the possible structured outcomes of 3c-3d, and
         the filler part consists of the remaining played cards and satisfies the volume and division requirements of 3a-3d. 
     For legality checking, the intended follow is not greedily decomposed as a lead under rule 2a. The legality of follow is existential, not canonical. <should be able to judge whether a set of selected cards is a legal follow> <way to judge a follow: find all legal structural follows, and check if the structural part of the intended follow matches any one of them. >
+    3f. Forehand-control revisited. The forehand-control gives priority to the (k, j) elements that does/doesn't contain selected cards in each recursion of SFP. More specifically, if the forehand chooses "must-play"/"must-hold", the follower must choose the (k, j) element that contains the most/least selected cards (when tied, he may choose any one of the equals) in each recursion of SFP.
+4. An all-trump follow in a plain-division-lead round, which is counted as higher than all hands played before in the round (see evaluation rules below), is a ruff. 
+    4a. A set of cards in the trump division is a potential ruff of this round, if:
+        its amount of cards matches the volume of the lead, and
+        it admits a decomposition into a set of elements R, such that a bijection, R to the resolved lead L, exists, preserving types.
+    Such sets of elements are called resolved potential ruffs, and the topmost element in the resolved potential ruff (sorted descendingly by type, then order; ties may appear) is its core element.
+    4b. Once a potential ruff is played by a follower, it's automatically decomposed as the possible resolved potential ruff with the highest-ordered core element. <tie may appear, but doesn't matter in games, just choose anyone among them.>
+    4c. A potential ruff played by a follower is a ruff, if either it's the first potential ruff in this round, or it's core element is higher than that of any of the potential ruffs played before in this round. (see evaluation rules below)
+5. Evaluation in a round.
+    5a. Discards (including partial discards) are always the lowest in a round. Note that includes an all-trump hand that's not a potential ruff. In practice, when division is not fully followed, first check whether division is partially followed (if yes, it's a discard), then check whether the follow contains any plain side-division cards (if yes, discard), then check whether the follow is a potential ruff (if no, discard; if yes, go to 5b).
+    5b. In each round, potential ruffs, if any, are higher than any of the division-followers.
+        5b-1. For a round of an one-element lead, in each groups (potential ruffs or division-followers), hands are ranked by orders. 
+        5b-2. For a round of multiplay, potential ruffs are ranked by orders of their core elements, and division-followers are always lower than the lead.
+    If tied, the hand played the earliest in this round is higher. Note that a not-covering potential ruff is also considered as a discard by definition.
+    5c. The highest hand in a round wins the round.
 
 
 chapter 7 Counting Phase
+1. The winner of the last round in the playing phase wins the base. If the attackers win the base, the total points in the base are multiplied by the endgame factor then added to the frame score.
+    1a. The endgame factor depends on the core type of the last round: for single card, i.e. (1, 1), endgame factor is 2; for a pair, it's 4; for higher types, 8.
+    1b. Variation 1 (unlimited endgame factor): for type (2, s), the endgame factor is 2^(s + 1).
+    1c. Variation 2: if the attackers made the final base, the endgame factor halves. This is not exclusive with variation 1.
+2. (not in the default variation) If the attackers win the base, there is an ending compensation to be added to the frame score. The ending compensation equals (the number of rounds in the ending) * (endgame factor) / 2.
+3. 
 
 chapter 8 Timings
 
