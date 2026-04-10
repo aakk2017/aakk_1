@@ -10,30 +10,44 @@
     src: url('./fonts/font_zanf5jk7tv/iconfont.ttf?t=1717531063653') format('truetype');
 }
 @font-face {
-    /* for ranks and card texts */
+    /* for ranks on cards */
     font-family: 'Roboto Mono';
     src: url('./fonts/Roboto_Mono/RobotoMono-VariableFont_wght.ttf') format('truetype');
 }
 @font-face {
+    /* for Chinese */
     font-family: 'Noto Sans SC';
     src: url('./fonts/Noto_Sans_SC/NotoSansSC-VariableFont_wght.ttf') format('truetype');
 }
 @font-face{
+    /* for suit marks */
     font-family: 'suit';
     src: url('./fonts/bidding.d7bbc18fb3a50f3f.ttf') format('truetype');
 }
 
 /* colors */
 :root {
-    --s-color: #006;
+    /* spade */
+    --s-color: #006; 
+
+    /* heart */
     --h-color: #a00;
+
+    /* diamond */
     --d-color: #c30;
+
+    /* club */
     --c-color: #222;
+
+    /* big joker */
     --w-color: #c03;
+
+    /* small joker */
     --v-color: #525;
 }
 
 .hand {
+    /* hand cards */
     height: var(--card-height);
     overflow-y: visible;
     display: flex;
@@ -41,7 +55,9 @@
 }
 
 .card-container {
-    /* card-container determines the position of cards */
+    /* card-container is a group of cards, arranged horizontally */
+    /* used in showing hand cards and move cards */
+    /* when showing cards in a place that can't fit the height or width, rescale it to fit */
     height: var(--card-height);
     width: calc(var(--card-width) / 3);
     transition: all 0.1s;
@@ -49,13 +65,14 @@
     user-select: none;
 }
 .card-container[card-show^="show"]:not(:has(~ .card-container[card-show^="show"])) {
-    /* last child has the full card width */
+    /* right-most card in the card-container has the full card width */
     width: var(--card-width);
     flex-shrink: 0;
 }
 .card-container:hover {
     flex-shrink: 0;
 }
+
 /* set colors for different suits */
 .card-container[suit="s"] {
     color: var(--s-color);
@@ -75,7 +92,8 @@
 .card-container[rank="V"] {
     color: var(--v-color);
 }
-/* special font for jokers */
+
+/* special font for joker's suit */
 .card-container[suit="w"] .card-suit {
     font-family: "joker";
     font-size: calc(var(--card-width) / 4);
@@ -89,30 +107,39 @@
 .card-container[suit="w"] span.joker::after {
     content: '\e612';
 }
+
 /* special styles for tens */
 .card-container[rank="X"] .card-rank {
     /* font-family: "Roboto"; */
+    /* in order to shrink two characters "1O" to match other one-character indices */
     letter-spacing: -0.1em;
     transform: scaleX(0.7) translateX(-0.1em);
 }
+
 /* styles for different show modes */
 .card-container[card-show='show-selected'] .card {
+    /* for selected cards */
     background-color: green;
 }
 .card-container[card-show='show-played'] .card {
+    /* for cards in the initial hand, but had been played in the frame */
+    /* only in use if in the "show played cards" mode */
     background-color: #aaa;
 }
 .card-container[card-show='show-played'] .card div {
     opacity: 0.5;
 }
 .card-container[card-show='show-ondesk'] .card {
+    /* for cards had been played in the current round */
     background-color: aqua;
 }
 .card-container[card-show='show-revoked'] .card {
+    /* for revoked cards */
     background-color: #525;
     color: #d66;
 }
 .card-container[card-show='folded'] {
+    /* for played cards */
     width: 0;
     opacity: 0;
 }
@@ -121,6 +148,8 @@
 }
 
 .card {
+    /* style of a single card */
+    /* when rendering a card in a small space, rescale or only show the top-left corner (left 1/3 and top 1/2) */
     width: var(--card-width);
     height: var(--card-height);
     border: 1px solid black;
@@ -139,6 +168,7 @@
 
 .card-rank,
 .card-suit {
+    /* for card index area */
     width: calc(var(--card-width) / 3);
     /* padding-left: 0; */
     text-align: center;
@@ -154,7 +184,9 @@
 .card-container[suit="w"] .card-suit {
     transform: translateY(-0.4vh);
 }
+
 .card-face {
+    /* for card face area */
     font-size: var(--card-width);
     font-family: 'suit';
     font-weight: 400;

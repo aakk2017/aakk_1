@@ -18,7 +18,8 @@
     --card-width: 12vh;
 }
 
-/* styles of #corner-lt, denomination area */
+/* styles of #corner-lt, the area showing strain and level */
+/* this area remains the same in games */
 #corner-lt {
     display: flex;
     /* background-color: #666; */
@@ -114,6 +115,7 @@
     margin-left: 0;
 }
 #div-denomination-area[strain="w"] {
+    /* note the strain="w" means the declaration cards are big jokers, and "v" means small jokers. They both indicate a NTS strain in the actual game. */
     color: var(--w-color);
 }
 #div-denomination-area[strain="v"] {
@@ -176,7 +178,7 @@
 }
 
 /* styles of #corner-rt, score area */
-
+/* this area remains the same in games */
 .blocks-rt {
     height: var(--card-height);
     box-sizing: border-box;
@@ -233,7 +235,7 @@
 }
 
 /* styles for the lb block */
-
+/* this is the area to show the base, if the reference is the final baser */
 #corner-lb {
     /* background-color: aquamarine; */
     font-size: 2vh;
