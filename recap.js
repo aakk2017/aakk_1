@@ -11,7 +11,7 @@ let tableNumber = "";
 let dateTime;
 let playerNames = []; 
 let mainPlayerPosition = 0; 
-let observedPlayerPosition = 0;
+let referencePlayerPosition = 0;
 let recordName = "";
 let recordBuffer = new ArrayBuffer();
 
@@ -20,7 +20,7 @@ let gameName = "shengji";
 let gameVariation = 2;
 let initHands = [];
 let moves = [];
-let dipai = [];
+let base = [];
 let score = 0;
 let penalty = 0;
 
@@ -41,7 +41,7 @@ const statusbar = document.getElementById('statusbar');
 const errorbar = document.getElementById('errorbar');
 const infoSection = document.getElementById('corner-lt');
 const scoringSection = document.getElementById('corner-rt');
-const dipaiSection = document.getElementById('corner-lb');
+const baseSection = document.getElementById('corner-lb');
 const commentSection = document.getElementById('corner-rb');
 const tableRecord = document.getElementById('table-record');
 const tableRecordBody = tableRecord.getElementsByTagName('tbody')[0];
@@ -52,12 +52,12 @@ saveMenu.onclick = saveAsUpg;
 
 // toolbar items
 const toStartButton = document.getElementById('button-to-start');
-const previousOfObservedButton = document.getElementById('button-previous-of-observed');
+const previousOfReferenceButton = document.getElementById('button-previous-of-reference');
 const previousMoveButton = document.getElementById('button-previous-move');
 previousMoveButton.onclick = handlePreviousMove;
 const nextMoveButton = document.getElementById('button-next-move');
 nextMoveButton.onclick = handleNextMove;
-const nextOfObservedButton = document.getElementById('button-next-of-observed');
+const nextOfReferenceButton = document.getElementById('button-next-of-reference');
 
 // view options
 let showTableRecordOn = false;
@@ -85,8 +85,8 @@ const numberToSuitName = ['d', 'c', 'h', 's', 'w'];
 const numberToRankName = ['2', '3', '4', '5', '6', '7', '8', '9', 'X', 'J', 'Q', 'K', 'A', '', 'V', 'W'];
 const suitTexts = ["&#9830;", "&#9827;", "&#9829;", "&#9824;", ""];
 const jokerHtml = '<span class="joker"></span>';
-const numberToPositionString = ['observed', 'next', 'opposite', 'previous'];
-const numberToPositionObserved = ['本家', '下家', '对家', '上家'];
+const numberToPositionString = ['reference', 'afterhand', 'opposite', 'forehand'];
+const numberToPositionReference = ['本家', '下家', '对家', '上家'];
 
 class Card {
     constructor(s, r) {
@@ -302,7 +302,7 @@ function renderHands4() {
         let positionArea = document.createElement("div");
         positionArea.setAttribute("class", "game-position-area");
         if(gameName === 'shengji') {
-            positionArea.innerHTML = numberToPositionInGameShengji[(i + 4 - zhuangPosition) % 4][0];
+            positionArea.innerHTML = numberToPositionInGameShengji[(i + 4 - pivotPosition) % 4][0];
         }
         namebarDiv.appendChild(positionArea);
         let nameArea = document.createElement("div");
@@ -352,7 +352,7 @@ function handlePreviousMove() {
     goToPreviousMove();
     updateTableRecordHighlight();
 }
-function handlePreviousOfObserved() {
+function handlePreviousOfReference() {
     // let p = getCurrentMove().player;
     goToPreviousMove();
     for(let i = 0; i < 8; i++) {
@@ -360,7 +360,7 @@ function handlePreviousOfObserved() {
             updateTableRecordHighlight();
             return;
         }
-        if(getCurrentMove().player === observedPlayerPosition) {
+        if(getCurrentMove().player === referencePlayerPosition) {
             updateTableRecordHighlight();
             return;
         }
@@ -372,12 +372,12 @@ function handleNextMove() {
     goToNextMove();
     updateTableRecordHighlight();
 }
-function handleNextOfObserved() {
+function handleNextOfReference() {
     // let p = getCurrentMove().player;
     for(let i = 0; i < 8; i++) {
         // if(getCurrentMove().isEnd) return;
         goToNextMove();
-        if(getCurrentMove().player === observedPlayerPosition) break;
+        if(getCurrentMove().player === referencePlayerPosition) break;
     }
     updateTableRecordHighlight();
 }
@@ -469,10 +469,10 @@ function handleSingleKeyDown(e) {
             handleNextMove();
             break;
         case 'ArrowUp':
-            handlePreviousOfObserved();
+            handlePreviousOfReference();
             break;
         case 'ArrowDown':
-            handleNextOfObserved();
+            handleNextOfReference();
             break;
         case 'Backquote':
             handleExitKeyboardMode();
@@ -503,7 +503,7 @@ function handleAltCombinations(e) {}
 function handleShiftCombinations(e) {
     switch(e.code) {
         case 'KeyH':
-            handlePreviousOfObserved();
+            handlePreviousOfReference();
             break;
         case 'KeyJ':
             handlePreviousMove();
@@ -512,7 +512,7 @@ function handleShiftCombinations(e) {
             handleNextMove();
             break;
         case 'KeyL':
-            handleNextOfObserved();
+            handleNextOfReference();
             break;
     }
 }

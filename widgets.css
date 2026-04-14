@@ -1,0 +1,409 @@
+/* =========================================================
+   widgets.css
+   ---------------------------------------------------------
+   Purpose:
+   Reusable interface widgets shared across pages.
+
+   This file should contain only:
+   - corner panels
+   - score / denomination / declaration widgets
+   - name bars
+   - shared buttons
+   - shared footer / status / toolbar widgets
+   - reusable small utility UI blocks
+
+   This file should NOT contain:
+   - card face rendering
+   - recap-only table layout
+   - game-table-only layout
+   - page container geometry
+
+   Notes:
+   - This file is shared by recap and game pages.
+   - If a widget is reused in more than one page, it belongs here.
+   - If a rule is only meaningful inside one page layout, move it
+     to that page’s CSS file instead.
+
+   Dependency:
+   - Requires tokens.css to be loaded first.
+   - May rely on card.css only indirectly through shared markup.
+   ========================================================= */
+
+/* container: 100vh by 177vh (9 : 16) if aspect ratio < 9/16 */
+body {
+    height: 100vh;
+    overflow: hidden;
+    background-image: radial-gradient(ellipse farthest-corner, bisque 20%, antiquewhite 80%);
+}
+.container {
+    height: 100vh;
+    width: var(--container-width);
+    margin: 0 auto;
+    padding: 1vh;
+    box-sizing: border-box;
+    /* background-image: radial-gradient(ellipse farthest-corner, bisque 20%, antiquewhite 80%); */
+}
+
+/* styles of #corner-lt, the area showing strain and level */
+/* this area remains the same in games */
+#corner-lt {
+    display: flex;
+    /* background-color: #666; */
+}
+#div-seats {
+    width: 15vh;
+    height: 15vh;
+    box-sizing: border-box;
+    border: 3vh solid #f8f8f8;
+    border-radius: var(--radius);
+    outline: 1px solid black;
+    margin: auto 1vh;
+    overflow: visible;
+}
+#div-seats .div-pivot-mark {
+    width: 9vh;
+    height: 3vh;
+    font-size: 2vh;
+    font-family: "Noto Sans SC";
+    font-weight: bold;
+    color: #f8f8f8;
+    position: relative;
+    text-align: center;
+    line-height: 3vh;
+}
+#div-seats[pivot="undetermined"] {
+    border-color: #f8f8f8;
+}
+#div-seats[pivot="undetermined"] .div-pivot-mark {
+    opacity: 0;
+}
+#div-seats[pivot="reference"] {
+    border-top-color: var(--v-color);
+    border-bottom-color: var(--w-color);
+    border-left-color: #f8f8f8;
+    border-right-color: #f8f8f8;
+}
+#div-seats[pivot="afterhand"] {
+    border-left-color: var(--v-color);
+    border-right-color: var(--w-color);
+    border-top-color: #f8f8f8;
+    border-bottom-color: #f8f8f8;
+}
+#div-seats[pivot="afterhand"] .div-pivot-mark {
+    width: 3vh;
+    height: 9vh;
+    line-height: 9vh;
+    top: -9vh;
+    left: 9vh;
+}
+#div-seats[pivot="forehand"] {
+    border-right-color: var(--v-color);
+    border-left-color: var(--w-color);
+    border-top-color: #f8f8f8;
+    border-bottom-color: #f8f8f8;
+}
+#div-seats[pivot="forehand"] .div-pivot-mark {
+    width: 3vh;
+    height: 9vh;
+    line-height: 9vh;
+    top: -9vh;
+    left: -3vh;
+}
+#div-seats[pivot="opposite"] {
+    border-bottom-color: var(--v-color);
+    border-top-color: var(--w-color);
+    border-left-color: #f8f8f8;
+    border-right-color: #f8f8f8;
+}
+#div-seats[pivot="opposite"] .div-pivot-mark {
+    top: -12vh;
+    left: 0vh;
+}
+#div-table-number {
+    width: 9vh;
+    height: 9vh;
+    box-sizing: border-box;
+    outline: 1px solid black;
+    margin: auto;
+    font-family: "Roboto";
+    font-size: 6vh;
+    text-align: center;
+    line-height: 9vh;
+}
+#div-denomination-area {
+    outline: 1px solid black;
+    background-color: #f8f8f8;
+    width: 14.5vh;
+    height: 15vh;
+    box-sizing: border-box;
+    border-radius: var(--radius);
+    margin: auto 1vh;
+    margin-left: 0;
+}
+#div-denomination-area[strain="w"] {
+    /* note the strain="w" means the declaration cards are big jokers, and "v" means small jokers. They both indicate a NTS strain in the actual game. */
+    color: var(--w-color);
+}
+#div-denomination-area[strain="v"] {
+    color: var(--v-color);
+}
+#div-denomination-area[strain="s"] {
+    color: var(--s-color);
+}
+#div-denomination-area[strain="h"] {
+    color: var(--h-color);
+}
+#div-denomination-area[strain="d"] {
+    color: var(--d-color);
+}
+#div-denomination-area[strain="c"] {
+    color: var(--c-color);
+}
+#div-denomination {
+    height: 10vh;
+    font-size: 6vh;
+    font-family: 'Roboto Mono', monospace;
+    text-align: center;
+    display: flex;
+}
+#div-denomination-level {
+    height: 10vh;
+    width: 5vh;
+    /* margin: auto 0.3vh; */
+    text-align: right;
+}
+#div-denomination-strain {
+    height: 10vh;
+    width: 8.5vh;
+    margin-right: 0.3vh;
+    display: flex;
+    justify-content: start;
+    /* text-align: left; */
+    /* font-family: 'Noto Sans SC'; */
+}
+.suit-denomination {
+    width: 6vh;
+    height: 10vh;
+    line-height: 8vh;
+    font-family: 'suit';
+    text-shadow: -0.03em 0 #f8f8f8;
+}
+.div-denomination-nts-text {
+    font-family: "Noto Sans SC";
+    width: 17vh;
+    font-size: 5vh;
+    letter-spacing: 0;
+    text-wrap: nowrap;
+    transform: scaleX(0.8);
+}
+#div-declaration {
+    height: 5vh;
+    font-size: 2.5vh;
+    text-align: center;
+    line-height: 4vh;
+}
+
+/* styles of #corner-rt, score area */
+/* this area remains the same in games */
+.blocks-rt {
+    height: var(--card-height);
+    box-sizing: border-box;
+    font-family: 'Roboto';
+}
+#div-score-area {
+    display: flex;
+    overflow: visible;
+    /* font-family: 'JetBrains Mono', monospace; */
+    font-size: 3vh;
+    /* background-color: darkkhaki; */
+}
+#div-score-container {
+    width: 18vh;
+    height: 15vh;
+    box-sizing: border-box;
+    border: 3vh solid #f8f8f8;
+    border-radius: 1.5vh;
+    font-size: 6vh;
+    outline: 1px solid black;
+    margin: auto 1vh;
+    text-align: center;
+    transition: all 0.3s;
+}
+#div-score {
+    width: 12vh;
+    height: 9vh;
+    line-height: 9vh;
+    outline: 1px solid black;
+    /* letter-spacing: -0.3vh; */
+}
+#div-penalty-and-base {
+    width: 10vh;
+    height: 15vh;
+    margin: auto;
+    text-align: left;
+    font-size: 3vh;
+}
+#div-penalty,
+#div-base-score {
+    height: 6vh;
+    margin: 1vh;
+    line-height: 6vh;
+}
+#div-penalty[sign="-"] {
+    color: #ce0000;
+}
+#div-penalty[sign="+"] {
+    color: #00a000;
+}
+#div-base-score {
+    margin-top: 0;
+    color: #0000ce;
+}
+
+/* styles for the lb block */
+/* this is the area to show the base, if the reference is the final baser */
+#corner-lb {
+    /* background-color: aquamarine; */
+    font-size: 2vh;
+}
+
+/* styles for the name bar of each player */
+.namebar {
+    height: 3.5vh;
+    background-color: #d3d3d3;
+    border-bottom: 1px solid black;
+    border-left: 1px solid black;
+    border-right: 1px solid black;
+    border-radius: 0 0 var(--radius) var(--radius);
+    box-sizing: border-box;
+    display: flex;
+    overflow-y: hidden;
+    font-size: 2.5vh;
+    transform: translateY(-3.5vh);
+    opacity: 1;
+    transition: all 0.3s;
+}
+.namebar:hover {
+    background-color: #e3e3e3;
+}
+.namebar[show="hide"] {
+    transform: translateY(0);
+    opacity: 0;
+}
+.namebar[status="on-play"] {
+    background-color: #ffce00;
+    transition: all 1s;
+}
+.namebar[status="played"] {
+    background-color: #ffce00;
+}
+.namebar .game-position-area {
+    height: inherit;
+    width: calc(var(--card-height) / 4);
+    margin-right: 1vh;
+    line-height: calc(var(--card-height) / 5);
+    text-align: center;
+    background-color: #004c4c;
+    font-family: "Noto Sans SC";
+    color: white;
+}
+.namebar .name-area {
+    height: calc(var(--card-height) / 5);
+    line-height: calc(var(--card-height) / 5);
+    font-family: "Roboto Mono", "Noto Sans SC";
+    text-align: left;
+}
+
+/* styles for the footer, including menu bar, control buttons, and status bar */
+.footer {
+    height: 6vh;
+    margin-top: 1vh;
+    background-color: gray;
+    display: flex;
+    justify-content: space-between;
+}
+menu {
+    list-style: none;
+    display: flex;
+    cursor: default;
+}
+.menubar {
+    height: 6vh;
+    padding-left: 0;
+}
+.menubar li {
+    height: 6vh;
+    padding-left: 2vh;
+    padding-right: 2vh;
+    margin: auto 0;
+    font-size: 2vh;
+    color: #eee;
+    border-right: solid 1px #ccc;
+    line-height: 6vh;
+    display: flex;
+}
+/* .menubar li:first-child {
+    margin-left: 0;
+} */
+.menubar li .key {
+    height: 1.5vh;
+    width: 1.5vh;
+    font-size: 1.5vh;
+    font-family: 'Courier New', Courier, monospace;
+    color: #eee;
+    border: solid 1px #eee;
+    border-radius: 0.3vh;
+    margin: auto 0.5vh;
+    margin-left: 0;
+    text-align: center;
+    line-height: 1.5vh;
+}
+.menubar li[show='unfolded'] {
+    background-color: #eee;
+    color: #666;
+}
+.menubar li[show='unfolded'] .key {
+    color: #666;
+    border-color: #666;
+}
+.toolbar {
+    margin: auto;
+}
+.toolbar li {
+    font-size: 3vh;
+    color: #eee;
+    margin: auto 2vh;
+}
+#statusbar {
+    height: 6vh;
+    width: 40vh;
+    padding: 0.2vh 0.5vh;
+    border-left: 1pt solid #eee;
+    font-family: "Roboto Mono", "suit", "Noto Sans SC";
+    font-size: 2vh;
+    color: #eee;
+    line-height: 3vh;
+}
+
+/* styles for the button widget */
+.button {
+    display: block;
+    height: 3vh;
+    margin: auto 1vh;
+    border: 1px solid #47a;
+    border-radius: var(--radius);
+    box-sizing: border-box;
+    background: #69c;
+    color: #fff;
+    padding: 0 1vh;
+    line-height: 3vh;
+    font-size: 2vh;
+    text-decoration: none;
+    font-family: "Roboto Mono", "suit", "Noto Sans SC";
+}
+.button:hover {
+    cursor: pointer;
+    background-color: #47a;
+}
+
+

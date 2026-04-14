@@ -2,12 +2,12 @@
 // code for game must include goToPreviousMove(), goToNextMove()
 
 // game info
-let zhuangPosition = 0;
+let pivotPosition = 0;
 let level = 5;
 let strain = 2;
-let dipaiScore = 0;
-let dipaiRawScore = 0;
-let dipaiMultiplier = 0;
+let baseScore = 0;
+let baseRawScore = 0;
+let baseMultiplier = 0;
 
 let isQiangzhuang = true;
 let declarations = [];
@@ -35,7 +35,7 @@ const declareMethodSpan = document.getElementById("span-declare-method");
 const scoreDiv = document.getElementById("div-score");
 const scoreContainerDiv = document.getElementById("div-score-container");
 const penaltyDiv = document.getElementById("div-penalty");
-const dipaiScoreDiv = document.getElementById("div-dipai-score");
+const baseScoreDiv = document.getElementById("div-base-score");
 const fileNameDiv = document.getElementById("file-name-container");
 const saveUpgBtn = document.getElementById("save-upg-btn");
 
@@ -134,9 +134,9 @@ class ShengjiCard extends Card {
 }
 
 class ShengjiMove extends Move {
-    constructor(player, id, cards, isDipai, isLead){
+    constructor(player, id, cards, isBase, isLead){
       super(player, id, cards);
-      this.isDipai = isDipai;
+      this.isBase = isBase;
       this.isLead = isLead;
       this.revokedCards = [];
       this.moveText = '';
@@ -279,14 +279,14 @@ function createDeck(){
   return deck;
 }
 function initializePage(){
-  zhuangPosition = -1;
+  pivotPosition = -1;
   mainPlayerPosition = 0;
-  observedPlayerPosition = 0;
+  referencePlayerPosition = 0;
   declarations = [];
   initHands = [];
   moves = [];
   // moves.push(Move.startMove());
-  dipai = [];
+  base = [];
   score = 0;
   penalty = 0;
   currentMoveId = "^";
@@ -296,9 +296,9 @@ function initializePage(){
   declareMethodSpan.innerHTML = "";
   scoreDiv.innerHTML = "";
   scoreContainerDiv.removeAttribute("style");
-  seatsDiv.setAttribute("zhuang", "undetermined");
+  seatsDiv.setAttribute("pivot", "undetermined");
   penaltyDiv.innerHTML = "";
-  dipaiScoreDiv.innerHTML = "";
+  baseScoreDiv.innerHTML = "";
   fileNameDiv.innerHTML = "";
 }
 // parameter l: integer from 0 (deal with 2) to 12 (deal with A)
@@ -359,13 +359,13 @@ function renderDeclarations() {
       setStrain(d.shown);
     }
 }
-function setZhuang(z) {
-  zhuangPosition = z;
+function setPivot(z) {
+  pivotPosition = z;
 }
-function setObservedPlayer(o) {
-  observedPlayerPosition = o;
-  let relativeZhuangPosition = (zhuangPosition + 4 - o) % 4;
-  seatsDiv.setAttribute("zhuang", numberToPositionString[relativeZhuangPosition]);
+function setReferencePlayer(o) {
+  referencePlayerPosition = o;
+  let relativePivotPosition = (pivotPosition + 4 - o) % 4;
+  seatsDiv.setAttribute("pivot", numberToPositionString[relativePivotPosition]);
 }
 function setScoreValue(s) {
   if(s === -404) {
@@ -403,13 +403,13 @@ function setScore(move) {
     setPenaltyValue(0);
   }
 }
-function setDipaiScore() {
-  if(dipaiScore) {
-    dipaiScoreDiv.innerHTML = dipaiScore.toString();
+function setBaseScore() {
+  if(baseScore) {
+    baseScoreDiv.innerHTML = baseScore.toString();
   }
 }
-function clearDipaiScore() {
-  dipaiScoreDiv.innerHTML = "";
+function clearBaseScore() {
+  baseScoreDiv.innerHTML = "";
 }
 
 // sort cards
@@ -506,7 +506,7 @@ function goToPreviousMove() {
     let previousMove = currentMove.previousMove();
     if(currentMove.isLead) {
       if(currentMove.moveId.endsWith('a0')) {
-        handElements[previousMove.player].querySelectorAll('[card-show="folded-dipai"]').forEach((c) => {
+        handElements[previousMove.player].querySelectorAll('[card-show="folded-base"]').forEach((c) => {
           c.setAttribute('card-show', 'show-ondesk');
         });
       } else {
@@ -530,7 +530,7 @@ function goToPreviousMove() {
       currentMoveId = previousMove.moveId;
       setScore(previousMove);
       if(currentMove.isEnd) {
-        clearDipaiScore();
+        clearBaseScore();
       }
     } else {
       currentMoveId = '^';
@@ -549,7 +549,7 @@ function goToNextMove() {
   }
   if(nextMove) {
     if(nextMove.isLead) {
-      let cardShow = nextMove.moveId.endsWith("a0") ? "folded-dipai" : "folded";
+      let cardShow = nextMove.moveId.endsWith("a0") ? "folded-base" : "folded";
       handElements.forEach((e) => {
           e.querySelectorAll('[card-show="show-ondesk"]').forEach((c) => {
               c.setAttribute('card-show', cardShow);
@@ -569,8 +569,8 @@ function goToNextMove() {
     });
     currentMoveId = nextMove.moveId;
     if(nextMove.isEnd) {
-      setDipaiScore();
-      setScoreValue(score + dipaiScore + penalty);
+      setBaseScore();
+      setScoreValue(score + baseScore + penalty);
     } else {
       setScore(nextMove);
     }
@@ -778,11 +778,11 @@ function generateTableRecord(m) {
           for(let c of aMove.moveCards) {
             moveText += (c.suitName + c.rankName);
           }
-          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].innerHTML = aMove.moveInfo.moveText;
-          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].id = 'td-' + aMove.moveId;
-          roundTds[(aMove.player+4-zhuangPosition) % 4 +1].onclick = handleClickOnTd;
+          roundTds[(aMove.player+4-pivotPosition) % 4 +1].innerHTML = aMove.moveInfo.moveText;
+          roundTds[(aMove.player+4-pivotPosition) % 4 +1].id = 'td-' + aMove.moveId;
+          roundTds[(aMove.player+4-pivotPosition) % 4 +1].onclick = handleClickOnTd;
           if(j === 0) {
-            roundTds[(aMove.player+4-zhuangPosition) % 4 +1].className = 'td-lead';
+            roundTds[(aMove.player+4-pivotPosition) % 4 +1].className = 'td-lead';
           }
         } else {
           break;
@@ -796,22 +796,22 @@ function generateTableRecord(m) {
       if(!aMove.nextMove()) break;
     }
     aMove = aMove.nextMove();
-    let dipaiString = '';
+    let baseString = '';
     for(let c of firstMove.moveCards) {
-      dipaiString += (c.suitName + c.rankName + " ");
+      baseString += (c.suitName + c.rankName + " ");
     }
-    let dipaiTr = document.createElement('tr');
-    let dipaiTd = document.createElement('td');
-    let dipaiDivInTable = document.getElementsByClassName('dipai-div-in-table')[0];
-    dipaiTd.id = 'td-' + aMove.moveId;
-    dipaiTd.setAttribute('colspan', '5');
-    dipaiTd.innerHTML = dipaiString;
-    dipaiTd.onclick = handleClickOnTd;
-    dipaiTr.appendChild(dipaiTd);
-    tableRecordBody.appendChild(dipaiTr);
-    dipaiDivInTable.innerHTML = dipaiString;
-    dipaiDivInTable.id = 'td-_';
-    dipaiDivInTable.onclick = handleClickOnTd;
+    let baseTr = document.createElement('tr');
+    let baseTd = document.createElement('td');
+    let baseDivInTable = document.getElementsByClassName('base-div-in-table')[0];
+    baseTd.id = 'td-' + aMove.moveId;
+    baseTd.setAttribute('colspan', '5');
+    baseTd.innerHTML = baseString;
+    baseTd.onclick = handleClickOnTd;
+    baseTr.appendChild(baseTd);
+    tableRecordBody.appendChild(baseTr);
+    baseDivInTable.innerHTML = baseString;
+    baseDivInTable.id = 'td-_';
+    baseDivInTable.onclick = handleClickOnTd;
   }
 }
 function bufferToString(b) {
@@ -839,15 +839,15 @@ function readDeclaration(buffer) {
     shown: shown,
     diezhi: diezhi
   });
-  const declarerPosition = (player + 4 - zhuangPosition) % 4;
+  const declarerPosition = (player + 4 - pivotPosition) % 4;
   if(!isQiangzhuang) {
     declarerSpan.innerHTML = numberToPositionInGameShengji[declarerPosition];
   }
   renderDeclarations();
 }
-function readZhuangAndLevel(buffer) {
+function readPivotAndLevel(buffer) {
   const b = new Int32Array(buffer.slice(0, 20));
-  zhuangPosition = b[2];
+  pivotPosition = b[2];
   level = b[3];
   setLevel(b[3]);
 }
@@ -866,21 +866,21 @@ function readMove(buffer) {
   m.deskScore = b[7];
   moves.push(m);
 }
-function readDipai(buffer) {
+function readBase(buffer) {
   const b = new Int32Array(buffer);
   for(let i = 11; i < b.length; i += 7) {
     let card = new ShengjiCard(b[i+1], b[i+2], level, strain);
     // let card = new Card(b[i+1], b[i+2]);
-    dipai.push(card);
+    base.push(card);
   }
-  let dipaiMove = new ShengjiMove(zhuangPosition, '_', dipai, true, false);
-  dipaiMove.deskScore = 0;
-  moves.splice(0, 0, dipaiMove);
-  dipaiScore = b[5] - moves[moves.length - 1].deskScore;
+  let baseMove = new ShengjiMove(pivotPosition, '_', base, true, false);
+  baseMove.deskScore = 0;
+  moves.splice(0, 0, baseMove);
+  baseScore = b[5] - moves[moves.length - 1].deskScore;
 }
 function read8214(buffer) {
   const b = new Int32Array(buffer.slice(0, 20));
-  zhuangPosition = b[2];
+  pivotPosition = b[2];
   if(b[2] >= 0) {
     isQiangzhuang = false;
     declareMethodSpan.innerHTML = "亮主：";
@@ -903,7 +903,7 @@ function parseUpgBodyBuffer(b) {
     switch(itemKey) {
       // case 8195:
       case 8204:
-        readZhuangAndLevel(b.slice(i+8, i+4+itemByteLength));
+        readPivotAndLevel(b.slice(i+8, i+4+itemByteLength));
         i += (4 + itemByteLength);
         break;
       case 8205:
@@ -915,7 +915,7 @@ function parseUpgBodyBuffer(b) {
         i += (4 + itemByteLength);
         break;
       case 8213:
-        readDipai(b.slice(i+8, i+4+itemByteLength));
+        readBase(b.slice(i+8, i+4+itemByteLength));
         i += (4 + itemByteLength);
         break;
       case 8214:
@@ -951,7 +951,7 @@ function readUpg(file) {
     const decoder = new TextDecoder("gbk");
     dateTime = new Date(bufferToString(dateTimeBuffer) + 'GMT+0800');
     mainPlayerPosition = intInfo[0];
-    observedPlayerPosition = intInfo[0];
+    referencePlayerPosition = intInfo[0];
     tableNumber = intInfo[1] % 100;
     gameVariation = intInfo[3];
     level = intInfo[5];
@@ -964,7 +964,7 @@ function readUpg(file) {
     handElements[(mainPlayerPosition + 2) %4] = nhandElement;
     handElements[(mainPlayerPosition + 3) %4] = whandElement;
     parseUpgBodyBuffer(bodyBuffer);
-    setObservedPlayer(intInfo[0]);
+    setReferencePlayer(intInfo[0]);
     normalizeMoves(moves);
     generateInitialHands(moves);
     generateTableRecord(moves);

@@ -11,17 +11,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,100..900;1,100..900&family=Roboto+Mono:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet"> -->
     <link rel="icon" href="favicon.ico">
-    <link rel="stylesheet" href="dapu.css">
+    <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="card.css">
-    <link rel="stylesheet" href="shengji.css">
+    <link rel="stylesheet" href="widgets.css">
+    <link rel="stylesheet" href="recap.css">
 </head>
 <body>
     <div class="container">
         <div class="nscontainer">
             <div class="corner" id="corner-lt">
-                <div id="div-seats" class="blocks-lt" zhuang="undetermined">
+                <div id="div-seats" class="blocks-lt" pivot="undetermined">
                     <div id="div-table-number"></div>
-                    <div class="div-zhuang-mark">庄</div>
+                    <div class="div-pivot-mark">庄</div>
                 </div>
                 <div id="div-denomination-area" class="blocks-lt">
                     <div id="div-denomination">
@@ -35,9 +36,9 @@
             <div class="corner" id="corner-rt">
                 <div id="div-score-area" class="blocks-rt">
                     <div id="div-score-container"><div id="div-score"></div></div>
-                    <div id="div-penalty-and-dipai">
+                    <div id="div-penalty-and-base">
                         <div id="div-penalty"></div>
-                        <div id="div-dipai-score"></div>
+                        <div id="div-base-score"></div>
                     </div>
                 </div>
                 <div id="div-captured-counters" class="blocks-rt"></div>
@@ -49,7 +50,7 @@
                 <div class="table-record-container" id="table-record-container" area-show="show">
                     <table id="table-record">
                         <thead>
-                            <div class="dipai-div-in-table"></div>
+                            <div class="base-div-in-table"></div>
                             <tr>
                                 <th></th>
                                 <th>庄</th>
@@ -93,10 +94,10 @@
             </menu>
             <menu class="toolbar">
                 <li id="button-to-start" title="回到开始">&#8617;</li>
-                <li id="button-previous-of-observed" title="本家上一手">&#8810;</li>
+                <li id="button-previous-of-reference" title="本家上一手">&#8810;</li>
                 <li id="button-previous-move" title="上一步">&lt;</li>
                 <li id="button-next-move" title="下一步">&gt;</li>
-                <li id="button-next-of-observed" title="本家下一手">&#8811;</li>
+                <li id="button-next-of-reference" title="本家下一手">&#8811;</li>
             </menu>
             <div id="statusbar">
                 <div id="errorbar"></div>
@@ -107,7 +108,7 @@
         <div class="tree-record" id="tree-record" area-show="hide"></div>
     </div>
     
-    <script src="dapu.js"></script>
-    <script src="shengji_dapu.js"></script>
+    <script src="recap.js"></script>
+    <script src="shengji_recap.js"></script>
 </body>
 </html>

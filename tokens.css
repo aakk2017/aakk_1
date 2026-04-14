@@ -1,0 +1,109 @@
+/* =========================================================
+   tokens.css
+   ---------------------------------------------------------
+   Purpose:
+   Shared design tokens and global CSS foundations.
+
+   This file should contain only:
+   - shared custom font imports
+   - root-level CSS variables
+   - global reset / normalize rules
+   - project-wide color, size, spacing, and radius tokens
+
+   This file should NOT contain:
+   - card component layout
+   - page-specific layout
+   - recap-only rules
+   - game-only rules
+   - widget-specific structure
+
+   Notes:
+   - Load this file before all other CSS files.
+   - Other CSS files may depend on variables defined here.
+   - If a style may be reused by multiple pages, prefer putting
+     its token or base variable here instead of hard-coding it
+     elsewhere.
+
+   Suggested load order:
+   1. tokens.css
+   2. card.css
+   3. widgets.css
+   4. recap.css
+   5. game.css (future)
+   ========================================================= */
+
+/* reset styles */
+* {
+    margin: 0;
+    user-select: none;
+}
+
+/* clear float */
+.clearfix::after {
+    content: '';
+    display: block;
+    clear: both;
+}
+
+/* import fonts */
+@font-face {
+    /* for joker */
+    font-family: 'joker';
+    src: url('./fonts/font_zanf5jk7tv/iconfont.ttf?t=1717531063653') format('truetype');
+}
+@font-face {
+    /* for ranks on cards */
+    font-family: 'Roboto Mono';
+    src: url('./fonts/Roboto_Mono/RobotoMono-VariableFont_wght.ttf') format('truetype');
+}
+@font-face {
+    /* for Chinese */
+    font-family: 'Noto Sans SC';
+    src: url('./fonts/Noto_Sans_SC/NotoSansSC-VariableFont_wght.ttf') format('truetype');
+}
+@font-face{
+    /* for suit marks */
+    font-family: 'suit';
+    src: url('./fonts/bidding.d7bbc18fb3a50f3f.ttf') format('truetype');
+}
+@font-face {
+    /* for general text of alphabetic and numeric characters */
+    font-family: 'Roboto';
+    src: url('./fonts/Roboto/Roboto-VariableFont_wdth\,wght.ttf') format('truetype');
+}
+
+:root {
+    /* heights and widths */
+    --container-width: 177vh;
+    /* usual card aspect ratio is 3/2 */
+    --card-height: 18vh;
+    --card-width: 12vh;
+    --radius: 0.6vh;
+
+    /* colors */
+    /* spade */
+    --s-color: #006; 
+    /* heart */
+    --h-color: #a00;
+    /* diamond */
+    --d-color: #c30;
+    /* club */
+    --c-color: #222;
+    /* big joker */
+    --w-color: #c03;
+    /* small joker */
+    --v-color: #525;
+}
+
+/* set the font of suit marks */
+[class|="suit"] {
+    font-family: 'suit';
+}
+
+/* set the font of text elements */
+.text {
+    font-family: "Roboto", "suit", "Noto Sans SC";
+}
+.ellipsis {
+    text-overflow: ellipsis;
+}

@@ -1,0 +1,189 @@
+/* =========================================================
+   recap.css
+   ---------------------------------------------------------
+   Purpose:
+   Recap / handwritten-recap page layout.
+
+   This file should contain only:
+   - recap page container layout
+   - seat-region positioning for recap view
+   - central history / record table layout
+   - recap-specific scrolling regions
+   - recap-page-only structural rules
+
+   This file should NOT contain:
+   - shared design tokens
+   - reusable card rendering
+   - reusable widgets shared with game page
+   - future real-game table layout
+
+   Notes:
+   - Scope this file to the recap page as much as possible.
+   - Prefer moving reusable rules to tokens.css, card.css,
+     or widgets.css.
+   - Future live-play layout should go to game.css, not here.
+
+   Dependency:
+   - Requires tokens.css first.
+   - Usually loaded after card.css and widgets.css.
+   ========================================================= */
+
+/* the top row */
+.nscontainer {
+    height: var(--card-height);
+    width: calc(var(--container-width) - 2vh);
+    /* background-color: skyblue; */
+    display: flex;    
+    justify-content: space-between;
+}
+.corner {
+    height: var(--card-height);
+    width: 32.5vh;
+    /* background-color: orange; */
+}
+.input-container {
+    height: 3vh;
+    margin: 0.4vh auto;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: 2.5vh;
+}
+input {
+    width: 0;
+    height: 0;
+    opacity: 0;
+}
+#file-name-container {
+    /* background-color: skyblue; */
+    margin: auto 1vh;
+    height: 3vh;
+}
+
+.nshand {
+    height: var(--card-height);
+    width: calc(9 * var(--card-width));
+    justify-content: center;
+    overflow: hidden;
+}
+
+.middle-container {
+    height: calc(3 * var(--card-height));
+    width: 175vh;
+    margin: 1vh 0;
+    display: flex;
+    justify-content: space-between;
+}
+
+.ewhand {
+    height: calc(3 * var(--card-height));
+    width: calc(4 * var(--card-width));
+    overflow: hidden;
+}
+.ewhand .hand {
+    height: calc(0.5 * var(--card-height));
+}
+.hand:not(:has(~ .hand)) {
+    height: var(--card-height);
+}
+#whand .hand {
+    justify-content: end;
+}
+#ehand .hand {
+    justify-content: start;
+}
+
+
+
+.desk {
+    height: calc(3 * var(--card-height));
+    width: 77vh;
+    overflow: hidden;
+}
+.table-record-container {
+    height: 0;
+    /* background-color: #eee; */
+    transition: all 0.2s;
+    overflow-y: auto;
+}
+.table-record-container[area-show="show"] {
+    height: calc(3 * var(--card-height)); 
+    /* height: calc(3 * var(--card-height));  real one*/
+    padding-top: 2vh;
+    padding-bottom: 2vh;
+    box-sizing: border-box;
+}
+#table-record {
+    width: 71vh;
+    border: 1px solid #333;
+    background-color: #fff;
+    margin: 0 auto;
+    font-size: 2.5vh;
+    font-family: 'Roboto Mono', monospace;
+    table-layout: fixed;
+}
+#table-record th {
+    font-family: "Noto Sans SC";
+}
+.base-div-in-table {
+    width: 71vh;
+    border: 1px solid #333;
+    border-bottom: 0px;
+    box-sizing: border-box;
+    background-color: #eee;
+    margin: 0 auto;
+    padding: 0.2vh;
+    font-size: 2.5vh;
+    font-family: 'Roboto Mono', monospace;
+    text-align: center;
+    table-layout: fixed;
+}
+#table-record tbody tr:nth-child(odd) {
+    background-color: #eee;
+}
+#table-record tbody td {
+    text-align: center;
+}
+#table-record tbody td:first-child, 
+#table-record th:first-child {
+    width: 5vh;
+}
+#table-record td.td-lead {
+    background-color: #ffd;
+}
+#table-record tr:nth-child(odd) td.td-lead {
+    background-color: #eec;
+}
+#table-record td[highlight='current'],
+.base-div-in-table[highlight='current'] {
+    background-color: #33c !important;
+    color: #eee;
+}
+.base-div-in-table:hover[highlight="current"],
+#table-record tbody td:not([class="round-number"]):hover,
+#table-record tbody tr:nth-child(odd) td:not([class="round-number"]):hover[highlight="current"] {
+    box-shadow: inset 0 0 0.2vh 0.2vh #eef;
+}
+.base-div-in-table:hover,
+#table-record tbody tr:nth-child(odd) td:not([class="round-number"]):hover {
+    box-shadow: inset 0 0 0.2vh 0.2vh #fff;
+}
+
+
+.comment {
+    width: 177vh;
+    height: 100vh;
+    background-color: aqua;
+    opacity: 0.5;
+    position: fixed;
+    right: calc(50vw - 88.5vh);
+    bottom: -100vh;
+    transition: all 0.2s;
+}
+.comment[area-show="show"] {
+    transform: translateY(-100vh);
+}
+
+
+#file-text {
+    /* height: 50vh; */
+    overflow: scroll;
+}
