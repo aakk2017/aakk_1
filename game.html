@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>青云谱 - 升级 - 对局</title>
+    <link rel="icon" href="favicon.ico">
+    <link rel="stylesheet" href="static/css/tokens.css">
+    <link rel="stylesheet" href="static/css/card.css">
+    <link rel="stylesheet" href="static/css/widgets.css">
+    <link rel="stylesheet" href="static/css/recap.css">
+    <link rel="stylesheet" href="static/css/game.css">
+</head>
+<body>
+    <div class="container">
+        <div class="nscontainer" id="game-top-row">
+            <div class="corner" id="corner-lt">
+                <div id="div-seats" class="blocks-lt" pivot="undetermined">
+                    <div id="div-table-number"></div>
+                    <div class="div-pivot-mark">庄</div>
+                </div>
+                <div id="div-denomination-area" class="blocks-lt">
+                    <div id="div-denomination">
+                        <div id="div-denomination-level"></div>
+                        <div id="div-denomination-strain"></div>
+                    </div>
+                    <div id="div-declaration">
+                        <span id="span-declare-method"></span>
+                        <span id="span-declarer"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="nshand" id="game-top-info">
+                <div id="declare-matrix" style="display:none">
+                    <span id="declare-label">亮牌</span>
+                    <button class="declare-btn" id="declare-btn-0" data-suit="0"></button>
+                    <button class="declare-btn" id="declare-btn-1" data-suit="1"></button>
+                    <button class="declare-btn" id="declare-btn-2" data-suit="2"></button>
+                    <button class="declare-btn" id="declare-btn-3" data-suit="3"></button>
+                </div>
+            </div>
+            <div class="corner" id="corner-rt">
+                <div id="div-score-area" class="blocks-rt">
+                    <div id="div-score-container">
+                        <div id="div-score">0</div>
+                    </div>
+                    <div id="div-penalty-and-base">
+                        <div id="div-penalty"></div>
+                        <div id="div-base-score"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="game-desk-container">
+            <div id="desk-north"  class="desk-slot"><div class="desk-player-label" id="label-north"></div><div class="bot-deal-count" id="count-north"></div></div>
+            <div id="desk-west"   class="desk-slot"><div class="desk-player-label" id="label-west"></div><div class="bot-deal-count" id="count-west"></div></div>
+            <div id="desk-center" class="desk-center"><div id="desk-center-info"></div></div>
+            <div id="desk-east"   class="desk-slot"><div class="desk-player-label" id="label-east"></div><div class="bot-deal-count" id="count-east"></div></div>
+            <div id="desk-south"  class="desk-slot"></div>
+        </div>
+        <div class="nscontainer" id="shand-row">
+            <div class="corner" id="corner-lb">
+                <div id="game-actions">
+                    <button class="button game-btn" id="btn-new-game">新对局</button>
+                    <button class="button game-btn" id="btn-play" disabled>出牌</button>
+                    <button class="button game-btn" id="btn-declare" style="display:none">亮牌</button>
+                </div>
+                <div id="game-phase-info"></div>
+            </div>
+            <div class="nshand" id="shand"></div>
+            <div class="corner" id="corner-rb">
+                <div id="game-log"></div>
+            </div>
+        </div>
+        <div class="footer">
+            <menu class="menubar">
+                <li><button class="footer-link-btn" id="btn-goto-recap">&#8617; 牌谱</button></li>
+            </menu>
+            <div id="statusbar">
+                <div id="errorbar"></div>
+                准备开始
+            </div>
+        </div>
+    </div>
+
+    <!-- Shared core -->
+    <script src="static/js/core/cards.js"></script>
+    <script src="static/js/games/shengji/shengji_types.js"></script>
+    <script src="static/js/games/shengji/shengji_cards.js"></script>
+
+    <!-- Game engine & bot -->
+    <script src="static/js/games/shengji/shengji_engine.js"></script>
+    <script src="static/js/games/shengji/shengji_bot.js"></script>
+
+    <!-- Page entry -->
+    <script src="static/js/pages/game/index.js"></script>
+</body>
+</html>

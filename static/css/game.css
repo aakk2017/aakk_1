@@ -1,0 +1,268 @@
+/* =========================================================
+   game.css
+   ---------------------------------------------------------
+   Purpose:
+   Live-play game page layout.
+
+   Layout structure mirrors index.html exactly:
+     .container
+       .nscontainer         ← corner-lt | #game-top-info.nshand | corner-rt
+       .game-desk-container ← fills same space as .middle-container
+       .nscontainer         ← corner-lb | #shand.nshand | corner-rb
+       .footer
+
+   The four corners and footer are at identical vh positions to index.html.
+   All space between the two nscontainers is the game desk area.
+   ========================================================= */
+
+/* Shrink the top strip to recover 4vh for desk rows.
+   Corner widgets are 18vh but overflow the 14vh container outward at the
+   very top of the page where nothing sits above them. */
+#game-top-row {
+    height: 14vh;
+    overflow: visible;
+}
+#game-top-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: visible;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: 2.5vh;
+    color: #444;
+}
+
+/* Full-width desk container — 3 rows at 20vh each = 60vh.
+   Budget: 98vh − 14vh (top) − 0vh (no margins) − 60vh (desk) − 17vh (shand) − 7vh (footer) = 98 ✓ */
+.game-desk-container {
+    display: grid;
+    width: 175vh;
+    height: 60vh;
+    margin: 0;
+    grid-template-areas:
+        ".     north  ."
+        "west  center east"
+        ".     south  .";
+    grid-template-columns: 1fr 80vh 1fr;
+    grid-template-rows: 20vh 20vh 20vh;
+}
+
+#desk-north { grid-area: north; }
+#desk-west  { grid-area: west; }
+.desk-center { grid-area: center; }
+#desk-east  { grid-area: east; }
+#desk-south { grid-area: south; }
+
+.desk-slot {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Cards on the desk render at full card size */
+.desk-slot .hand {
+    justify-content: center;
+}
+.desk-slot .card-container[card-show^="show"]:not(:has(~ .card-container[card-show^="show"])) {
+    width: var(--card-width);
+}
+
+/* Player labels inside each desk slot */
+.desk-player-label {
+    font-family: "Noto Sans SC";
+    font-size: 1.8vh;
+    color: #888;
+    padding: 0.3vh 0;
+}
+
+.desk-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: "Noto Sans SC";
+    font-size: 2.5vh;
+    color: #555;
+    border: 1px solid #ddd;
+    border-radius: var(--radius);
+    background: rgba(255,255,255,0.6);
+    margin: 2vh;
+}
+
+#desk-center-info {
+    text-align: center;
+    line-height: 3.5vh;
+}
+
+/* Highlight whose turn it is */
+.desk-slot[data-active="true"] {
+    background-color: rgba(255, 206, 0, 0.15);
+    border-radius: var(--radius);
+}
+
+/* Winner highlight */
+.desk-slot[data-winner="true"] {
+    background-color: rgba(0, 160, 0, 0.12);
+    border-radius: var(--radius);
+}
+
+/* Bottom row: 17vh fits the budget; overflow:visible lets 18vh cards render without clip */
+#shand-row {
+    height: 17vh;
+}
+/* Let the nshand itself grow to fill the row */
+#shand-row #shand {
+    height: 100%;
+}
+
+/* Card selection in human hand (shand) */
+/* Allow cards to lift above the row without clipping */
+#shand {
+    overflow: visible;
+}
+#shand .card-container[card-selected="true"] {
+    transform: translateY(-2vh);
+}
+#shand .card-container[card-selected="true"] .card {
+    box-shadow: 0 0 0.5vh 0.3vh #48f;
+}
+#shand .card-container {
+    cursor: pointer;
+}
+
+/* Game action buttons */
+#game-actions {
+    display: flex;
+    gap: 0.5vh;
+    padding: 0.4vh 1vh;
+    flex-wrap: wrap;
+}
+
+.game-btn {
+    min-width: 8vh;
+    text-align: center;
+}
+.game-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+    background: #999;
+    border-color: #777;
+}
+.game-btn:disabled:hover {
+    background: #999;
+}
+
+/* Game phase info */
+#game-phase-info {
+    font-family: "Noto Sans SC";
+    font-size: 2vh;
+    padding: 0.2vh 1vh;
+    color: #333;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Game log */
+#game-log {
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: 1.8vh;
+    padding: 0.4vh;
+    max-height: var(--card-height);
+    overflow-y: auto;
+    color: #555;
+    line-height: 2.2vh;
+}
+
+/* Footer button back to recap */
+.footer-link-btn {
+    background: transparent;
+    border: none;
+    color: #eee;
+    font-family: "Noto Sans SC";
+    font-size: 2vh;
+    cursor: pointer;
+    padding: 0 2vh;
+    height: 6vh;
+    line-height: 6vh;
+}
+.footer-link-btn:hover {
+    text-decoration: underline;
+}
+
+
+/* Highlight whose turn it is */
+.desk-slot[data-active="true"] {
+    background-color: rgba(255, 206, 0, 0.15);
+    border-radius: var(--radius);
+}
+
+/* Winner highlight on desk */
+.desk-slot[data-winner="true"] {
+    background-color: rgba(0, 160, 0, 0.15);
+    border-radius: var(--radius);
+}
+
+/* -----------------------------------------------------------
+   Declaration matrix (shown in #game-top-info during dealing)
+   ----------------------------------------------------------- */
+#declare-matrix {
+    display: flex;
+    gap: 1.2vh;
+    align-items: center;
+}
+
+#declare-label {
+    font-family: "Noto Sans SC";
+    font-size: 1.8vh;
+    color: #888;
+    margin-right: 0.4vh;
+}
+
+.declare-btn {
+    min-width: 7vh;
+    height: 4vh;
+    border-radius: var(--radius);
+    border: 1.5px solid currentColor;
+    background: white;
+    font-family: "suit", "Noto Sans SC";
+    font-size: 2.2vh;
+    cursor: pointer;
+    transition: background 0.12s;
+    padding: 0 1vh;
+    line-height: 1;
+}
+.declare-btn small {
+    font-family: "Noto Sans SC";
+    font-size: 1.4vh;
+    margin-left: 0.2vh;
+}
+.declare-btn:not(:disabled):hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+.declare-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+    border-color: #bbb !important;
+    color: #bbb !important;
+    background: white;
+}
+/* Suit colors */
+.declare-btn[data-suit="0"] { color: var(--d-color); }
+.declare-btn[data-suit="1"] { color: var(--c-color); }
+.declare-btn[data-suit="2"] { color: var(--h-color); }
+.declare-btn[data-suit="3"] { color: var(--s-color); }
+/* Active declared button */
+.declare-btn[data-declared="true"] {
+    background: rgba(0, 160, 80, 0.12);
+    border-width: 2px;
+}
+
+/* Bot card count badge inside desk slot during dealing */
+.bot-deal-count {
+    font-family: "Roboto Mono";
+    font-size: 1.7vh;
+    color: #aaa;
+}

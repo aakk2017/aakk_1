@@ -136,6 +136,15 @@ function testFnc() {
 
 document.addEventListener('DOMContentLoaded', function() {
     initializeRecapPage();
+
+    const btnGotoGame = document.getElementById('btn-goto-game');
+    if (btnGotoGame) {
+        btnGotoGame.addEventListener('click', function (e) {
+            e.preventDefault();
+            window.location.href = 'game.html';
+        });
+    }
+
     console.log("Shengji Recap Page Initialized");
 });
 
