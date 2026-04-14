@@ -15,29 +15,8 @@ let declarations = [];
 let typeOfCurrentRound = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 let theDeck = createDeck();
-const numberToDivisionName = ["d", "c", "h", "s", "t"];
-const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
-const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
-const ntsHtml = '<div class="div-denomination-nts-text">无主</div>';
-const numberToPositionInGameShengji = ['庄家', '右家', '前家', '左家'];
-const numberToNaturalPositionText4 = ['东', '北', '西', '南'];
-const numberToRelativePositionText4 = ['本家', '下家', '对家', '上家'];
 
-// view
-const seatsDiv = document.getElementById("div-seats");
-const tableNumberDiv = document.getElementById("div-table-number");
-const denominationAreaDiv = document.getElementById("div-denomination-area");
-const levelDiv = document.getElementById("div-denomination-level");
-const strainDiv = document.getElementById("div-denomination-strain");
-const declarationDiv = document.getElementById("div-declaration");
-const declarerSpan = document.getElementById("span-declarer");
-const declareMethodSpan = document.getElementById("span-declare-method");
-const scoreDiv = document.getElementById("div-score");
-const scoreContainerDiv = document.getElementById("div-score-container");
-const penaltyDiv = document.getElementById("div-penalty");
-const baseScoreDiv = document.getElementById("div-base-score");
-const fileNameDiv = document.getElementById("file-name-container");
-const saveUpgBtn = document.getElementById("save-upg-btn");
+// Shengji-specific DOM refs are now centralized in core/dom_refs.js
 
 // sematic functions
 function nextChar(l) {
@@ -45,167 +24,6 @@ function nextChar(l) {
 }
 function prevChar(l) {
   return String.fromCharCode(l.charCodeAt(0) - 1);
-}
-
-class ShengjiCard extends Card {
-  constructor(suit, rank, level, strain) {
-    super(suit, rank);
-    this.orderName = this.rankName;
-    if(this.isJoker() || this.suit === strain || this.rank === level) {
-      this.division = 4;
-    } else {
-      let theSuit = this.suit;
-      this.division = theSuit;
-    }
-    if(this.isJoker()) {
-      let theRank = this.rank;
-      this.order = theRank;
-    } else if(this.rank === level) {
-      this.order = 13;
-      this.orderName = "T";
-      if(strain !== 4 && this.suit !== strain) {
-        this.order = 12;
-        this.orderName = this.suitName.toUpperCase();
-      }
-      if(strain === 4) {
-        this.orderName = this.suitName.toUpperCase();
-      }
-    } else if(this.rank > level) {
-      this.order = this.rank - 1;
-    } else {
-      this.order = this.rank;
-    }
-    switch(this.rank) {
-      case 8:
-      case 11:
-        this.score = 10;
-        break;
-      case 3:
-        this.score = 5;
-        break;
-      default:
-        this.score = 0;
-    }
-    this.divisionName = numberToDivisionName[this.division];
-  }
-
-  fillDivisionAndOrder(l, s) {
-    if(this.isJoker() || this.suit === s || this.rank === l) {
-      this.division = 4;
-    } else {
-      let theSuit = this.suit;
-      this.division = theSuit;
-    }
-    if(this.isJoker()) {
-      let theRank = this.rank;
-      this.order = theRank;
-    } else if(this.rank === l) {
-      this.order = 13;
-      if(s !== 4 && this.suit !== s) {
-        this.order = 12;
-      }
-    } else if(this.rank > l) {
-      this.order = this.rank - 1;
-    } else {
-      this.order = this.rank;
-    }
-  }
-
-  setCardByString(cardString) {}
-
-  isTrump() {
-    return this.division === 4;
-  }
-  isCounter() {
-    return this.score > 0;
-  }
-  isSameDivision(card) {
-    return this.division === card.division;
-  }
-  isConsecutive(card) {
-    let delta = this.order - card.order;
-    return this.division === card.division && (delta === 1 || delta === -1);
-  }
-  isNextLower(card) {
-    return this.division === card.division && card.order - this.order === 1;
-  }
-  isHigherThan(card) {}
-  isLowerThan(card) {}
-}
-
-class ShengjiMove extends Move {
-    constructor(player, id, cards, isBase, isLead){
-      super(player, id, cards);
-      this.isBase = isBase;
-      this.isLead = isLead;
-      this.revokedCards = [];
-      this.moveText = '';
-    }
-
-    setId(newId) {
-      this.moveId = newId;
-    }
-    setMoveText(isLead, leadType) {
-
-    }
-
-    isTypeFollow(){}
-    isDivisionFollow(){}
-    isRuff(){}
-    isHighest(){}
-    isMultiplay(){}
-    isWrongMultiplay(){}
-    isIllegalMultiplay(){}
-
-    type(){}
-    score(){}
-
-    // temporary searching methods
-    isAfter(m) {
-      // input: m is a moveId
-      if(m === '' || m === '^') return true;
-      let ids1 = this.moveId.split('-');
-      let ids2 = m.split('-');
-      let mid1 = ids1[ids1.length - 1];
-      let mid2 = ids2[ids2.length - 1];
-      let branch1 = ids1.toSpliced(ids1.length - 1, 1).join('-');
-      let branch2 = ids2.toSpliced(ids2.length - 1, 1).join('-');
-      let a = false;
-      if(mid1 !== '_') {
-        if(mid2 === '_' || mid2[0] < mid1[0] || (mid2[0] === mid1[0] && mid2[1] < mid1[1])) {
-          a = true;
-        }
-      }
-      return branch1.includes(branch2) && a;
-    }
-    isBefore(m) {
-      // input: m is a moveId
-      let ids1 = this.moveId.split('-');
-      let ids2 = m.split('-');
-      let mid1 = ids1[ids1.length - 1];
-      let mid2 = ids2[ids2.length - 1];
-      let branch1 = ids1.toSpliced(ids1.length - 1, 1).join('-');
-      let branch2 = ids2.toSpliced(ids2.length - 1, 1).join('-');
-      let a = false;
-      if(mid2 !== '_') {
-        if(mid1 === '_' || mid1[0] < mid2[0] || (mid1[0] === mid2[0] && mid1[1] < mid2[1])) {
-          a = true;
-        }
-      }
-      return branch2.includes(branch1) && a;
-    }
-    previousMove() {
-      return moves.find((m) => m.moveId === previousMoveId(this.moveId));
-    }
-    // previousMoveId() {
-    //   // temporary
-    // }
-    nextMove() {
-      return moves.find((m) => m.moveId === nextMoveId(this.moveId));
-    }
-    // nextMoveId(){}
-    // nextMoveList(){}
-    // nextMoveIdList(){}
 }
 
 class ShengjiType {
@@ -427,6 +245,7 @@ function sortMove(move, leadDivision){
 
 
 // moves
+// OLD IMPLEMENTATIONS - now in shengji_game_controller.js
 function previousMoveId(mid) {
   // temporary
   // input: moveId of a move, string
@@ -718,6 +537,7 @@ function resolveFollow(m, leadInfo) {
     moveText: moveText
   }
 }
+// OLD IMPLEMENTATION - now in shengji_game_controller.js
 function normalizeMoves(m) {
   // m is an array of ShengjiMove object
   let roundId = 'a';
@@ -743,6 +563,7 @@ function normalizeMoves(m) {
   endMove.isEnd = true;
   m.push(endMove);
 }
+// OLD IMPLEMENTATION - now in shengji_game_controller.js
 function generateInitialHands(m) {
   // m is an Array of ShengjiMove
   initHands = [[], [], [], []]; // index is the absolute position in upg file
@@ -755,6 +576,7 @@ function generateInitialHands(m) {
     sortHand(hand);
   }
 }
+// OLD IMPLEMENTATION - now in shengji_recap_view.js
 function generateTableRecord(m) {
   let firstMove = m.find((move) => move.moveId === nextMoveId('^'));
   if(firstMove) {
@@ -769,7 +591,9 @@ function generateTableRecord(m) {
       roundTds[0].innerText = i + 1;
       roundTds[0].className = 'round-number';
       roundTds[0].id = 'td-' + String.fromCharCode(i + 97);
-      roundTds[0].onclick = handleClickOnRoundNumber;
+      if(typeof handleClickOnRoundNumber === 'function') {
+        roundTds[0].onclick = handleClickOnRoundNumber;
+      }
       for(let j = 0; j < 4; j++) {
         if(aMove.nextMove()) {
           aMove = aMove.nextMove();
@@ -780,7 +604,9 @@ function generateTableRecord(m) {
           }
           roundTds[(aMove.player+4-pivotPosition) % 4 +1].innerHTML = aMove.moveInfo.moveText;
           roundTds[(aMove.player+4-pivotPosition) % 4 +1].id = 'td-' + aMove.moveId;
-          roundTds[(aMove.player+4-pivotPosition) % 4 +1].onclick = handleClickOnTd;
+          if(typeof handleClickOnTd === 'function') {
+            roundTds[(aMove.player+4-pivotPosition) % 4 +1].onclick = handleClickOnTd;
+          }
           if(j === 0) {
             roundTds[(aMove.player+4-pivotPosition) % 4 +1].className = 'td-lead';
           }
@@ -796,22 +622,28 @@ function generateTableRecord(m) {
       if(!aMove.nextMove()) break;
     }
     aMove = aMove.nextMove();
-    let baseString = '';
-    for(let c of firstMove.moveCards) {
-      baseString += (c.suitName + c.rankName + " ");
+    if(aMove) {
+      let baseString = '';
+      for(let c of firstMove.moveCards) {
+        baseString += (c.suitName + c.rankName + " ");
+      }
+      let baseTr = document.createElement('tr');
+      let baseTd = document.createElement('td');
+      let baseDivInTable = document.getElementsByClassName('base-div-in-table')[0];
+      baseTd.id = 'td-' + aMove.moveId;
+      baseTd.setAttribute('colspan', '5');
+      baseTd.innerHTML = baseString;
+      if(typeof handleClickOnTd === 'function') {
+        baseTd.onclick = handleClickOnTd;
+      }
+      baseTr.appendChild(baseTd);
+      tableRecordBody.appendChild(baseTr);
+      baseDivInTable.innerHTML = baseString;
+      baseDivInTable.id = 'td-_';
+      if(typeof handleClickOnTd === 'function') {
+        baseDivInTable.onclick = handleClickOnTd;
+      }
     }
-    let baseTr = document.createElement('tr');
-    let baseTd = document.createElement('td');
-    let baseDivInTable = document.getElementsByClassName('base-div-in-table')[0];
-    baseTd.id = 'td-' + aMove.moveId;
-    baseTd.setAttribute('colspan', '5');
-    baseTd.innerHTML = baseString;
-    baseTd.onclick = handleClickOnTd;
-    baseTr.appendChild(baseTd);
-    tableRecordBody.appendChild(baseTr);
-    baseDivInTable.innerHTML = baseString;
-    baseDivInTable.id = 'td-_';
-    baseDivInTable.onclick = handleClickOnTd;
   }
 }
 function bufferToString(b) {
@@ -933,7 +765,7 @@ function parseUpgBodyBuffer(b) {
     }
   }
 }
-// read and parse .upg file
+// OLD readUpg - now in shengji_recap_parser.js
 function readUpg(file) {
   const reader = new FileReader();
   reader.addEventListener("load", () => {
@@ -977,6 +809,78 @@ function readUpg(file) {
   reader.readAsArrayBuffer(file);
   }
 }
+
+// Game-specific render functions
+function generateEwhandHtmlInClasses() {
+    let eFirstRow = createHandElement("n");
+    let wFirstRow = createHandElement("n");
+    ehandElement.appendChild(eFirstRow);
+    whandElement.appendChild(wFirstRow);
+    if(strain === 4) {
+        for(let i = 3; i >= 0; i--) {
+            let eRow = createHandElement(numberToDivisionName[i]);
+            let wRow = createHandElement(numberToDivisionName[i]);
+            ehandElement.appendChild(eRow);
+            whandElement.appendChild(wRow);
+        }
+    } else {
+        let eSecondRow = createHandElement("t");
+        let wSecondRow = createHandElement("t");
+        ehandElement.appendChild(eSecondRow);
+        whandElement.appendChild(wSecondRow);
+        for(let i = (strain+3)%4; i !== strain; i = (i+3)%4) {
+            let eRow = createHandElement(numberToDivisionName[i]);
+            let wRow = createHandElement(numberToDivisionName[i]);
+            ehandElement.appendChild(eRow);
+            whandElement.appendChild(wRow);
+        }
+    }
+}
+
+function renderHands4() {
+    for(let hand of handElements) {
+      hand.innerHTML = '';
+    }
+    generateEwhandHtmlInClasses();
+    let nRow = createHandElement("n");
+    let sRow = createHandElement("n");
+    for(const card of initHands[(mainPlayerPosition + 2) %4]) {
+      nRow.appendChild(createCardContainer(card));
+    }
+    for(const card of initHands[mainPlayerPosition]) {
+      sRow.appendChild(createCardContainer(card));
+    }
+    nhandElement.appendChild(nRow);
+    shandElement.appendChild(sRow);
+    for(const card of initHands[(mainPlayerPosition + 3) %4]) {
+      let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
+      let row = whandElement.querySelector("[sort-group='" + sortGroup + "']");
+      row.appendChild(createCardContainer(card));
+    }
+    for(const card of initHands[(mainPlayerPosition + 1) %4]) {
+      let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
+      let row = ehandElement.querySelector("[sort-group='" + sortGroup + "']");
+      row.appendChild(createCardContainer(card));
+    }
+    for(let i = 0; i < 4; i++) {
+        let namebarDiv = document.createElement("div");
+        namebarDiv.setAttribute("class", "namebar");
+        namebarDiv.setAttribute("show", "show");
+        namebarDiv.setAttribute("status", "idle");
+        let positionArea = document.createElement("div");
+        positionArea.setAttribute("class", "game-position-area");
+        if(gameName === 'shengji') {
+            positionArea.innerHTML = numberToPositionInGameShengji[(i + 4 - pivotPosition) % 4][0];
+        }
+        namebarDiv.appendChild(positionArea);
+        let nameArea = document.createElement("div");
+        nameArea.setAttribute("class", "name-area");
+        nameArea.innerHTML = playerNames[i];
+        namebarDiv.appendChild(nameArea);
+        handElements[i].appendChild(namebarDiv);
+    }
+}
+
 function viewFile() {
   const file = document.getElementById("open-file").files[0];
   readUpg(file);
@@ -1025,7 +929,11 @@ function test() {
     shandElement.innerHTML = "";
     ehandElement.innerHTML = "";
     whandElement.innerHTML = "";
-    generateEwhandHtml();
+    if(typeof generateEwhandHtml === 'function') {
+        generateEwhandHtml();
+    } else if(typeof generateEwhandHtmlInClasses === 'function') {
+        generateEwhandHtmlInClasses();
+    }
     for(const card of nhand) {
         nhandElement.appendChild(createCardContainer(card));
     }

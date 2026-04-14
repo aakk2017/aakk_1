@@ -11,10 +11,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:ital,wght@0,100..900;1,100..900&family=Roboto+Mono:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet"> -->
     <link rel="icon" href="favicon.ico">
-    <link rel="stylesheet" href="tokens.css">
-    <link rel="stylesheet" href="card.css">
-    <link rel="stylesheet" href="widgets.css">
-    <link rel="stylesheet" href="recap.css">
+    <link rel="stylesheet" href="static/css/tokens.css">
+    <link rel="stylesheet" href="static/css/card.css">
+    <link rel="stylesheet" href="static/css/widgets.css">
+    <link rel="stylesheet" href="static/css/recap.css">
 </head>
 <body>
     <div class="container">
@@ -75,9 +75,9 @@
                         id="open-file" 
                         name="open-file" 
                         accept=".upg, .qyp, .qypc" 
-                        onchange="viewFile()" />
+                        onchange="if(typeof viewFile === 'function') viewFile()" />
                 </div>
-                <a class="button" id="save-upg-btn">保存为.upg</a>
+                <a class="button" id="save-upg-btn" href="#" download>保存为.upg</a>
             </div>
             <div class="nshand" id="shand"></div>
             <div class="corner" id="corner-rb"></div>
@@ -108,7 +108,28 @@
         <div class="tree-record" id="tree-record" area-show="hide"></div>
     </div>
     
-    <script src="recap.js"></script>
-    <script src="shengji_recap.js"></script>
+    <!-- Core Generic Replay Layer (Reusable) -->
+    <script src="static/js/core/cards.js"></script>
+    <script src="static/js/core/dom_refs.js"></script>
+    <script src="static/js/core/replay_state.js"></script>
+    <script src="static/js/core/recap_view.js"></script>
+    
+    <!-- Shengji-Specific Layer -->
+    <script src="static/js/games/shengji/shengji_types.js"></script>
+    <script src="static/js/games/shengji/shengji_cards.js"></script>
+    
+    <!-- Legacy bridge for old Shengji functions migrated into modular path -->
+    <script src="static/js/games/shengji/shengji_legacy_bridge.js"></script>
+    
+    <!-- Generic Event System (loaded BEFORE view module so handlers are defined) -->
+    <script src="static/js/core/events.js"></script>
+    
+    <!-- Shengji Modular Implementation -->
+    <script src="static/js/games/shengji/shengji_recap_view.js"></script>
+    <script src="static/js/games/shengji/shengji_game_controller.js"></script>
+    <script src="static/js/games/shengji/shengji_recap_parser.js"></script>
+    
+    <!-- Page Entry Point (Orchestrator) -->
+    <script src="static/js/pages/recap/index.js"></script>
 </body>
 </html>
