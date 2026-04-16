@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>青云谱 - 升级</title>
+    <title data-i18n="page.recapTitle">青云谱 - 升级</title>
 
     <!-- Fonts -->
     <!-- Roboto Mono, for 10 -->
@@ -22,7 +22,7 @@
             <div class="corner" id="corner-lt">
                 <div id="div-seats" class="blocks-lt" pivot="undetermined">
                     <div id="div-table-number"></div>
-                    <div class="div-pivot-mark">庄</div>
+                    <div class="div-pivot-mark" data-i18n="labels.pivotMark">庄</div>
                 </div>
                 <div id="div-denomination-area" class="blocks-lt">
                     <div id="div-denomination">
@@ -53,10 +53,10 @@
                             <div class="base-div-in-table"></div>
                             <tr>
                                 <th></th>
-                                <th>庄</th>
-                                <th>右</th>
-                                <th>前</th>
-                                <th>左</th>
+                                <th data-i18n="table.pivot">庄</th>
+                                <th data-i18n="table.successor">右</th>
+                                <th data-i18n="table.ally">前</th>
+                                <th data-i18n="table.predecessor">左</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -67,10 +67,10 @@
         </div>
         <div class="nscontainer">
             <div class="corner" id="corner-lb">
-                <button class="button" id="btn-goto-game" style="display:block; text-align:center; width:100%; margin-bottom:0.4vh; cursor:pointer;">开始对局</button>
+                <button class="button" id="btn-goto-game" style="display:block; text-align:center; width:100%; margin-bottom:0.4vh; cursor:pointer;" data-i18n="buttons.gotoGame">开始对局</button>
                 <div class="text ellipsis" id="file-name-container"></div>
                 <div class="input-container">
-                    <label for="open-file" class="button">选择牌谱(.upg)</label>
+                    <label for="open-file" class="button" data-i18n="buttons.openFile">选择牌谱(.upg)</label>
                     <input 
                         type="file" 
                         id="open-file" 
@@ -78,37 +78,42 @@
                         accept=".upg, .qyp, .qypc" 
                         onchange="if(typeof viewFile === 'function') viewFile()" />
                 </div>
-                <a class="button" id="save-upg-btn" href="#" download>保存为.upg</a>
+                <a class="button" id="save-upg-btn" href="#" download data-i18n="buttons.saveUpg">保存为.upg</a>
             </div>
             <div class="nshand" id="shand"></div>
             <div class="corner" id="corner-rb"></div>
         </div>
         <div class="footer">
             <menu class="menubar">
-                <li id="menu-open"><div class="key">1</div>打开</li>
-                <li id="menu-save"><div class="key">2</div>保存</li>
-                <li id="menu-settings"><div class="key">3</div>设置</li>
-                <li id="menu-display"><div class="key">4</div>显示</li>
-                <li id="menu-play"><div class="key">5</div>行牌</li>
-                <li id="menu-edit"><div class="key">6</div>打谱</li>
-                <li id="menu-help"><div class="key">0</div>指南</li>
+                <li id="menu-open"><div class="key">1</div><span data-i18n="menus.open">打开</span></li>
+                <li id="menu-save"><div class="key">2</div><span data-i18n="menus.save">保存</span></li>
+                <li id="menu-settings"><div class="key">3</div><span data-i18n="menus.settings">设置</span></li>
+                <li id="menu-display"><div class="key">4</div><span data-i18n="menus.display">显示</span></li>
+                <li id="menu-play"><div class="key">5</div><span data-i18n="menus.play">行牌</span></li>
+                <li id="menu-edit"><div class="key">6</div><span data-i18n="menus.edit">打谱</span></li>
+                <li id="menu-help"><div class="key">0</div><span data-i18n="menus.help">指南</span></li>
             </menu>
             <menu class="toolbar">
-                <li id="button-to-start" title="回到开始">&#8617;</li>
-                <li id="button-previous-of-reference" title="本家上一手">&#8810;</li>
-                <li id="button-previous-move" title="上一步">&lt;</li>
-                <li id="button-next-move" title="下一步">&gt;</li>
-                <li id="button-next-of-reference" title="本家下一手">&#8811;</li>
+                <li id="button-to-start" title="" data-i18n-title="tooltips.toStart">&#8617;</li>
+                <li id="button-previous-of-reference" title="" data-i18n-title="tooltips.previousOfReference">&#8810;</li>
+                <li id="button-previous-move" title="" data-i18n-title="tooltips.previousMove">&lt;</li>
+                <li id="button-next-move" title="" data-i18n-title="tooltips.nextMove">&gt;</li>
+                <li id="button-next-of-reference" title="" data-i18n-title="tooltips.nextOfReference">&#8811;</li>
             </menu>
             <div id="statusbar">
                 <div id="errorbar"></div>
-                状态栏
+                <span id="statustext" data-i18n="status.barDefault">状态栏</span>
             </div>
         </div>
         <div class="comment" id="comment" area-show="hide"></div>
         <div class="tree-record" id="tree-record" area-show="hide"></div>
     </div>
     
+    <!-- i18n -->
+    <script src="static/js/i18n/zh-CN.js"></script>
+    <script src="static/js/i18n/en.js"></script>
+    <script src="static/js/i18n/index.js"></script>
+
     <!-- Core Generic Replay Layer (Reusable) -->
     <script src="static/js/core/cards.js"></script>
     <script src="static/js/core/dom_refs.js"></script>
@@ -132,5 +137,6 @@
     
     <!-- Page Entry Point (Orchestrator) -->
     <script src="static/js/pages/recap/index.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', applyI18n);</script>
 </body>
 </html>

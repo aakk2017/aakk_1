@@ -715,10 +715,10 @@ function read8214(buffer) {
   pivotPosition = b[2];
   if(b[2] >= 0) {
     isQiangzhuang = false;
-    declareMethodSpan.innerHTML = "亮主：";
+    declareMethodSpan.innerHTML = t('labels.declareMethod');
   } else {
     isQiangzhuang = true;
-    declareMethodSpan.innerHTML = "抢庄";
+    declareMethodSpan.innerHTML = t('labels.qiangzhuang');
   }
 }
 function read8218(b) {

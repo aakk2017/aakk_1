@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>青云谱 - 升级 - 对局</title>
+    <title data-i18n="page.gameTitle">青云谱 - 升级 - 对局</title>
     <link rel="icon" href="favicon.ico">
     <link rel="stylesheet" href="static/css/tokens.css">
     <link rel="stylesheet" href="static/css/card.css">
@@ -17,7 +17,7 @@
             <div class="corner" id="corner-lt">
                 <div id="div-seats" class="blocks-lt" pivot="undetermined">
                     <div id="div-table-number"></div>
-                    <div class="div-pivot-mark">庄</div>
+                    <div class="div-pivot-mark" data-i18n="labels.pivotMark">庄</div>
                 </div>
                 <div id="div-denomination-area" class="blocks-lt">
                     <div id="div-denomination">
@@ -32,11 +32,20 @@
             </div>
             <div class="nshand" id="game-top-info">
                 <div id="declare-matrix" style="display:none">
-                    <span id="declare-label">亮牌</span>
-                    <button class="declare-btn" id="declare-btn-0" data-suit="0"></button>
-                    <button class="declare-btn" id="declare-btn-1" data-suit="1"></button>
-                    <button class="declare-btn" id="declare-btn-2" data-suit="2"></button>
-                    <button class="declare-btn" id="declare-btn-3" data-suit="3"></button>
+                    <div class="declare-row">
+                        <button class="declare-btn" id="declare-btn-s0" data-suit="0"></button>
+                        <button class="declare-btn" id="declare-btn-s1" data-suit="1"></button>
+                        <button class="declare-btn" id="declare-btn-s2" data-suit="2"></button>
+                        <button class="declare-btn" id="declare-btn-s3" data-suit="3"></button>
+                        <button class="declare-btn" id="declare-btn-s4" data-suit="4"></button>
+                    </div>
+                    <div class="declare-row">
+                        <button class="declare-btn" id="declare-btn-d0" data-suit="0"></button>
+                        <button class="declare-btn" id="declare-btn-d1" data-suit="1"></button>
+                        <button class="declare-btn" id="declare-btn-d2" data-suit="2"></button>
+                        <button class="declare-btn" id="declare-btn-d3" data-suit="3"></button>
+                        <button class="declare-btn" id="declare-btn-d4" data-suit="4"></button>
+                    </div>
                 </div>
             </div>
             <div class="corner" id="corner-rt">
@@ -52,18 +61,21 @@
             </div>
         </div>
         <div class="game-desk-container">
-            <div id="desk-north"  class="desk-slot"><div class="desk-player-label" id="label-north"></div><div class="bot-deal-count" id="count-north"></div></div>
-            <div id="desk-west"   class="desk-slot"><div class="desk-player-label" id="label-west"></div><div class="bot-deal-count" id="count-west"></div></div>
+            <div id="desk-north"  class="desk-slot"></div>
+            <div id="desk-west"   class="desk-slot"></div>
             <div id="desk-center" class="desk-center"><div id="desk-center-info"></div></div>
-            <div id="desk-east"   class="desk-slot"><div class="desk-player-label" id="label-east"></div><div class="bot-deal-count" id="count-east"></div></div>
+            <div id="desk-east"   class="desk-slot"></div>
             <div id="desk-south"  class="desk-slot"></div>
         </div>
         <div class="nscontainer" id="shand-row">
             <div class="corner" id="corner-lb">
                 <div id="game-actions">
-                    <button class="button game-btn" id="btn-new-game">新对局</button>
-                    <button class="button game-btn" id="btn-play" disabled>出牌</button>
-                    <button class="button game-btn" id="btn-declare" style="display:none">亮牌</button>
+                    <button class="button game-btn" id="btn-new-game" data-i18n="buttons.newGame">新对局</button>
+                    <button class="button game-btn" id="btn-play" disabled data-i18n="buttons.play">出牌</button>
+                    <div id="fc-mode-selector" style="display:none;">
+                        <label><input type="radio" name="fc-mode" value="must-play" checked> <span data-i18n="fc.mustPlay">必出</span></label>
+                        <label><input type="radio" name="fc-mode" value="must-hold"> <span data-i18n="fc.mustHold">必留</span></label>
+                    </div>
                 </div>
                 <div id="game-phase-info"></div>
             </div>
@@ -74,14 +86,20 @@
         </div>
         <div class="footer">
             <menu class="menubar">
-                <li><button class="footer-link-btn" id="btn-goto-recap">&#8617; 牌谱</button></li>
+                <li><button class="footer-link-btn" id="btn-goto-recap" data-i18n="buttons.gotoRecap">&#8617; 牌谱</button></li>
+                <li><button class="footer-link-btn" id="btn-toggle-test" data-i18n="buttons.testModeOff" onclick="toggleTestMode()">测试模式: 关</button></li>
             </menu>
             <div id="statusbar">
                 <div id="errorbar"></div>
-                准备开始
+                <span data-i18n="status.ready">准备开始</span>
             </div>
         </div>
     </div>
+
+    <!-- i18n -->
+    <script src="static/js/i18n/zh-CN.js"></script>
+    <script src="static/js/i18n/en.js"></script>
+    <script src="static/js/i18n/index.js"></script>
 
     <!-- Shared core -->
     <script src="static/js/core/cards.js"></script>
@@ -94,5 +112,6 @@
 
     <!-- Page entry -->
     <script src="static/js/pages/game/index.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', applyI18n);</script>
 </body>
 </html>

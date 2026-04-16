@@ -78,7 +78,7 @@ function saveAsUpg(e) {
     const href = saveUpgBtn.getAttribute('href') || '';
     if(!href.startsWith('blob:')) {
         if(errorbar) {
-            errorbar.innerHTML = '请先打开牌谱，再保存。';
+            errorbar.innerHTML = t('errors.openBeforeSave');
         }
         return false;
     }

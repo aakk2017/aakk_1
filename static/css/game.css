@@ -58,8 +58,25 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    overflow: hidden;
+    overflow: visible;
     position: relative;
+    /* padding-bottom: 2.5vh; */
+}
+
+#desk-north .hand {
+    max-width: calc(9 * var(--card-width));
+}
+#desk-north .namebar {
+    max-width: calc(9 * var(--card-width));
+}
+
+#desk-west .hand, #desk-west .namebar,
+#desk-east .hand, #desk-east .namebar {
+    max-width: calc(4 * var(--card-width));
+}
+
+#desk-south .hand, #desk-south .namebar {
+    max-width: calc(9 * var(--card-width));
 }
 
 /* Cards on the desk render at full card size */
@@ -75,7 +92,12 @@
     font-family: "Noto Sans SC";
     font-size: 1.8vh;
     color: #888;
-    padding: 0.3vh 0;
+    position: absolute;
+    bottom: 0.5vh;
+    white-space: nowrap;
+}
+.desk-slot:has(.card-container) .desk-player-label {
+    display: none;
 }
 
 .desk-center {
@@ -108,13 +130,17 @@
     border-radius: var(--radius);
 }
 
-/* Bottom row: 17vh fits the budget; overflow:visible lets 18vh cards render without clip */
+/* Bottom row: 17vh height. */
 #shand-row {
     height: 17vh;
+    margin-top: 1vh;
 }
 /* Let the nshand itself grow to fill the row */
 #shand-row #shand {
     height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 /* Card selection in human hand (shand) */
@@ -210,20 +236,24 @@
    ----------------------------------------------------------- */
 #declare-matrix {
     display: flex;
+    flex-direction: column;
+    gap: 0.5vh;
+}
+.declare-row {
+    display: flex;
     gap: 1.2vh;
     align-items: center;
 }
-
-#declare-label {
+.declare-label {
     font-family: "Noto Sans SC";
     font-size: 1.8vh;
     color: #888;
-    margin-right: 0.4vh;
+    width: 6vh;
+    text-align: right;
 }
-
 .declare-btn {
-    min-width: 7vh;
-    height: 4vh;
+    min-width: 5.5vh;
+    height: 3.5vh;
     border-radius: var(--radius);
     border: 1.5px solid currentColor;
     background: white;
@@ -233,11 +263,6 @@
     transition: background 0.12s;
     padding: 0 1vh;
     line-height: 1;
-}
-.declare-btn small {
-    font-family: "Noto Sans SC";
-    font-size: 1.4vh;
-    margin-left: 0.2vh;
 }
 .declare-btn:not(:disabled):hover {
     background: rgba(0, 0, 0, 0.06);
@@ -254,15 +279,14 @@
 .declare-btn[data-suit="1"] { color: var(--c-color); }
 .declare-btn[data-suit="2"] { color: var(--h-color); }
 .declare-btn[data-suit="3"] { color: var(--s-color); }
-/* Active declared button */
-.declare-btn[data-declared="true"] {
-    background: rgba(0, 160, 80, 0.12);
-    border-width: 2px;
-}
+.declare-btn[data-suit="4"] { color: var(--w-color); }
 
 /* Bot card count badge inside desk slot during dealing */
 .bot-deal-count {
     font-family: "Roboto Mono";
     font-size: 1.7vh;
     color: #aaa;
+    display: inline-block;
 }
+
+@keyframes flashError { 0%, 100% { opacity: 1; color: #ff4444; } 50% { opacity: 0.5; color: #ffffff; } }

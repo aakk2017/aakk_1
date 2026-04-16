@@ -8,16 +8,16 @@
 const numberToDivisionName = ["d", "c", "h", "s", "t"];
 const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
 const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
-const ntsHtml = '<div class="div-denomination-nts-text">无主</div>';
+const ntsHtml = t('labels.noTrumpHtml');
 
 // Shengji position names (absolute positions)
-const numberToPositionInGameShengji = ['庄家', '右家', '前家', '左家'];
+const numberToPositionInGameShengji = [t('seats.pivot'), t('seats.successor'), t('seats.ally'), t('seats.predecessor')];
 
 // Cardinal directions (natural player positions)
-const numberToNaturalPositionText4 = ['东', '北', '西', '南'];
+const numberToNaturalPositionText4 = [t('natural.east'), t('natural.north'), t('natural.west'), t('natural.south')];
 
 // Relative position names from reference player's perspective
-const numberToRelativePositionText4 = ['本家', '下家', '对家', '上家'];
+const numberToRelativePositionText4 = [t('relative.self'), t('relative.afterhand'), t('relative.opposite'), t('relative.forehand')];
 
 /**
  * ShengjiType enumeration for move classifications

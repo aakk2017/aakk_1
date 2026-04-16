@@ -39,7 +39,7 @@ body {
     height: 100vh;
     width: var(--container-width);
     margin: 0 auto;
-    padding: 1vh;
+    padding: 1vh 1vh 0vh 1vh;
     box-sizing: border-box;
     /* background-image: radial-gradient(ellipse farthest-corner, bisque 20%, antiquewhite 80%); */
 }
@@ -269,7 +269,7 @@ body {
 
 /* styles for the name bar of each player */
 .namebar {
-    height: 3.5vh;
+    height: calc(var(--card-height) / 5);
     background-color: #d3d3d3;
     border-bottom: 1px solid black;
     border-left: 1px solid black;
@@ -277,11 +277,15 @@ body {
     border-radius: 0 0 var(--radius) var(--radius);
     box-sizing: border-box;
     display: flex;
-    overflow-y: hidden;
-    font-size: 2.5vh;
-    transform: translateY(-3.5vh);
+    flex-shrink: 0;
+    font-size: calc(var(--card-height) / 6.5);
+    transform: translateY(calc(var(--card-height) / -5));
     opacity: 1;
     transition: all 0.3s;
+    z-index: 10;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
 }
 .namebar:hover {
     background-color: #e3e3e3;
@@ -312,6 +316,11 @@ body {
     line-height: calc(var(--card-height) / 5);
     font-family: "Roboto Mono", "Noto Sans SC";
     text-align: left;
+    padding-left: 0.5vh;
+    padding-right: 1.5vh;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* styles for the footer, including menu bar, control buttons, and status bar */

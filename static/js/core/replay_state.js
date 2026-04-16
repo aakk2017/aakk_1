@@ -120,4 +120,4 @@ const ReplayState = {
 
 // Position mapping helpers (generic, can be extended by game-specific layer)
 const numberToPositionString = ['reference', 'afterhand', 'opposite', 'forehand'];
-const numberToPositionReference = ['本家', '下家', '对家', '上家'];
+const numberToPositionReference = [t('relative.self'), t('relative.afterhand'), t('relative.opposite'), t('relative.forehand')];
