@@ -38,27 +38,27 @@ function setScoreValue(s) {
     const h = s * 3 / gameVariation;
     scoreContainerDiv.style = "border-color: hsl(" + h + ", 100%, 50%, 100%)";
     scoreDiv.innerHTML = s.toString();
-    score = s;
+    frameScore = s;
   }
 }
 
 /**
- * Set the penalty display value
+ * Set the multiplay compensation display value
  */
-function setPenaltyValue(p) {
+function setMpCompensationValue(p) {
   if(p > 0) {
-    penaltyDiv.setAttribute("sign", "+");
-    penaltyDiv.innerHTML = "+" + p.toString();
+    mpCompensationDiv.setAttribute("sign", "+");
+    mpCompensationDiv.innerHTML = "+" + p.toString();
   } else if(p < 0) {
-    penaltyDiv.setAttribute("sign", "-");
-    penaltyDiv.innerHTML = p.toString();
+    mpCompensationDiv.setAttribute("sign", "-");
+    mpCompensationDiv.innerHTML = p.toString();
   } else {
-    penaltyDiv.innerHTML = "";
+    mpCompensationDiv.innerHTML = "";
   }
 }
 
 /**
- * Update score and penalty based on a move
+ * Update score and multiplay compensation based on a move
  */
 function setScore(move) {
   if(move.deskScore || move.deskScore === 0) {
@@ -66,12 +66,12 @@ function setScore(move) {
   } else {
     setScoreValue(-404);
   }
-  if(move.penalty) {
-    penalty = move.penalty;
-    setPenaltyValue(penalty);
+  if(move.mpCompensation) {
+    mpCompensation = move.mpCompensation;
+    setMpCompensationValue(mpCompensation);
   } else {
-    penalty = 0;
-    setPenaltyValue(0);
+    mpCompensation = 0;
+    setMpCompensationValue(0);
   }
 }
 

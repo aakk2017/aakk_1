@@ -213,11 +213,14 @@ body {
 #div-score-area {
     display: flex;
     overflow: visible;
+    position: relative;
     /* font-family: 'JetBrains Mono', monospace; */
     font-size: 3vh;
     /* background-color: darkkhaki; */
 }
 #div-score-container {
+    position: relative;
+    overflow: visible;
     width: 18vh;
     height: 15vh;
     box-sizing: border-box;
@@ -236,23 +239,23 @@ body {
     outline: 1px solid black;
     /* letter-spacing: -0.3vh; */
 }
-#div-penalty-and-base {
+#div-mp-compensation-and-base {
     width: 10vh;
     height: 15vh;
     margin: auto;
     text-align: left;
     font-size: 3vh;
 }
-#div-penalty,
+#div-mp-compensation,
 #div-base-score {
     height: 6vh;
     margin: 1vh;
     line-height: 6vh;
 }
-#div-penalty[sign="-"] {
+#div-mp-compensation[sign="-"] {
     color: #ce0000;
 }
-#div-penalty[sign="+"] {
+#div-mp-compensation[sign="+"] {
     color: #00a000;
 }
 #div-base-score {
@@ -265,6 +268,7 @@ body {
 #corner-lb {
     /* background-color: aquamarine; */
     font-size: 2vh;
+    position: relative;
 }
 
 /* styles for the name bar of each player */

@@ -149,6 +149,79 @@
     box-shadow: inset 0 0 0.2vh 0.2vh #eef;
 }
 
+/* ── Compact corner-card object (§1) ── */
+.corner-card {
+    width: calc(var(--card-width) / 3);
+    height: calc(var(--card-height) / 3);
+    border: 1px solid black;
+    border-radius: var(--radius) 0 0 0;
+    box-sizing: border-box;
+    background-color: #f8f8f8;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-family: "Roboto Mono", monospace;
+    font-size: calc(var(--card-width) / 5);
+    line-height: 1;
+    flex-shrink: 0;
+    user-select: none;
+}
+.corner-card[suit="s"] { color: var(--s-color); }
+.corner-card[suit="h"] { color: var(--h-color); }
+.corner-card[suit="d"] { color: var(--d-color); }
+.corner-card[suit="c"] { color: var(--c-color); }
+.corner-card[rank="W"] { color: var(--w-color); }
+.corner-card[rank="V"] { color: var(--v-color); }
+.corner-card[suit="w"] .cc-suit {
+    font-family: "joker";
+    font-size: calc(var(--card-width) / 5);
+}
+.corner-card[rank="X"] .cc-rank {
+    letter-spacing: -0.1em;
+    transform: scaleX(0.7);
+}
+.corner-card .cc-rank {
+    font-weight: 400;
+    line-height: 1;
+}
+.corner-card .cc-suit {
+    font-family: "suit";
+    font-size: calc(var(--card-width) / 5);
+    line-height: 1;
+}
+/* FC color states on corner cards (others' view) */
+.corner-card[data-fc="must-play"] { background-color: #b3d9ff; }
+.corner-card[data-fc="must-hold"] { background-color: #525; color: #d66; }
+/* FC selection highlight during exercise */
+.corner-card[data-fc-selected] { background-color: #fff3b0; outline: 2px solid #f0c040; }
+
+/* Exposed-card highlight in own hand view */
+.card-container[data-exposed="true"] .card {
+    background-color: #525;
+    color: #d66;
+}
+
+/* FC marker icons in own hand view (under card rank) */
+.fc-marker {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: calc(var(--card-width) / 4);
+    line-height: 1;
+    pointer-events: none;
+}
+.fc-marker-must-hold::after {
+    content: '\26D4'; /* red forbidden sign ⛔ */
+    color: #c00;
+}
+.fc-marker-must-play::after {
+    content: '\25B2'; /* blue upward triangle ▲ */
+    color: #0066cc;
+}
+
 .card-rank,
 .card-suit {
     /* for card index area */

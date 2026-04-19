@@ -57,13 +57,13 @@ class ShengjiCard extends Card {
         switch(this.rank) {
             case 8:   // 10 - 1 = 9
             case 11:  // K = 11
-                this.score = 10;
+                this.counterValue = 10;
                 break;
             case 3:   // 5
-                this.score = 5;
+                this.counterValue = 5;
                 break;
             default:
-                this.score = 0;
+                this.counterValue = 0;
         }
         
         this.divisionName = numberToDivisionName[this.division];
@@ -83,7 +83,9 @@ class ShengjiCard extends Card {
         }
         
         if(this.isJoker()) {
-            this.order = this.rank;
+            // Small joker (rank 14) → order 14, Big joker (rank 15) → order 15
+            // Must be consecutive with strain leveler (order 13) for tractor formation
+            this.order = this.rank === 14 ? 14 : 15;
         } else if(this.rank === l) {
             this.order = 13;
             if(s !== 4 && this.suit !== s) {
@@ -111,7 +113,7 @@ class ShengjiCard extends Card {
      * Check if this card counts toward the base score
      */
     isCounter() {
-        return this.score > 0;
+        return this.counterValue > 0;
     }
 
     /**

@@ -26,7 +26,7 @@
                     </div>
                     <div id="div-declaration">
                         <span id="span-declare-method"></span>
-                        <span id="span-declarer"></span>
+                        <span id="span-declaration"></span>
                     </div>
                 </div>
             </div>
@@ -52,9 +52,10 @@
                 <div id="div-score-area" class="blocks-rt">
                     <div id="div-score-container">
                         <div id="div-score">0</div>
+                        <div id="counter-drawer"><div id="counter-drawer-inner"></div></div>
                     </div>
-                    <div id="div-penalty-and-base">
-                        <div id="div-penalty"></div>
+                    <div id="div-mp-compensation-and-base">
+                        <div id="div-mp-compensation"></div>
                         <div id="div-base-score"></div>
                     </div>
                 </div>
@@ -78,6 +79,8 @@
                     </div>
                 </div>
                 <div id="game-phase-info"></div>
+                <button id="btn-show-base" data-i18n="buttons.showBase">查看底牌</button>
+                <div id="base-preview"></div>
             </div>
             <div class="nshand" id="shand"></div>
             <div class="corner" id="corner-rb">
@@ -92,6 +95,20 @@
             <div id="statusbar">
                 <div id="errorbar"></div>
                 <span data-i18n="status.ready">准备开始</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Counting-phase dialog (§7) -->
+    <div id="counting-overlay"></div>
+    <div id="counting-dialog">
+        <div id="counting-dialog-inner">
+            <div class="cd-cell" id="cd-base"><div id="cd-base-label">底牌</div></div>
+            <div class="cd-cell" id="cd-score"></div>
+            <div class="cd-cell" id="cd-result"><div id="cd-result-name"></div><div id="cd-result-levels"></div></div>
+            <div class="cd-cell" id="cd-buttons">
+                <button class="button" id="cd-btn-ready" data-i18n="buttons.ready">准备</button>
+                <button class="button" id="cd-btn-leave" data-i18n="buttons.leave">离开</button>
             </div>
         </div>
     </div>

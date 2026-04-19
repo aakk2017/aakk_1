@@ -639,7 +639,7 @@ function botFallbackFollow(hand, leadInfo) {
 
 /**
  * Classify a follow for the bot's covering logic.
- * Returns { kind: 'DISCARD'|'DIVISION_FOLLOWER'|'POTENTIAL_RUFF', orderKey }.
+ * Returns { kind: 'DISCARD'|'DIVISION_FOLLOW'|'POTENTIAL_RUFF', orderKey }.
  */
 function botClassifyFollow(leadInfo, followCards) {
     let leadDiv = leadInfo.division;
@@ -649,14 +649,14 @@ function botClassifyFollow(leadInfo, followCards) {
     let leadTypeMultiset = engineMultisetOfTypes(leadInfo.elements);
 
     if (isAllDiv) {
-        if (!leadIsOneElement) return { kind: 'DIVISION_FOLLOWER', orderKey: null };
+        if (!leadIsOneElement) return { kind: 'DIVISION_FOLLOW', orderKey: null };
 
-        let followInfo = engineDecomposeLead(followCards);
+        let followInfo = engineResolveLead(followCards);
         if (!followInfo || followInfo.elements.length !== 1) return { kind: 'DISCARD', orderKey: null };
 
         let fEl = followInfo.elements[0], lEl = leadInfo.elements[0];
         if (fEl.copy === lEl.copy && fEl.span === lEl.span) {
-            return { kind: 'DIVISION_FOLLOWER', orderKey: fEl.order };
+            return { kind: 'DIVISION_FOLLOW', orderKey: fEl.order };
         }
         return { kind: 'DISCARD', orderKey: null };
     }
@@ -679,9 +679,9 @@ function botIsCover(leadInfo, followCards, ruffed, highestOrder) {
     if (cls.kind === 'POTENTIAL_RUFF') {
         return !ruffed || cls.orderKey > highestOrder;
     }
-    // DIVISION_FOLLOWER
+    // DIVISION_FOLLOW
     if (ruffed) return false;
-    if (leadInfo.elements.length > 1) return false; // multiplay can't be covered by div-follower
+    if (leadInfo.elements.length > 1) return false; // multiplay can't be covered by div-follow
     return cls.orderKey !== null && cls.orderKey > highestOrder;
 }
 
@@ -713,7 +713,7 @@ function botChooseFollow(player) {
                 ruffed = true;
                 highestOrder = cls.orderKey;
             }
-        } else if (cls.kind === 'DIVISION_FOLLOWER' && !ruffed) {
+        } else if (cls.kind === 'DIVISION_FOLLOW' && !ruffed) {
             if (cls.orderKey !== null && cls.orderKey > highestOrder) {
                 highestOrder = cls.orderKey;
             }
@@ -734,9 +734,9 @@ function botChooseFollow(player) {
 
         if (cls.kind === 'POTENTIAL_RUFF' && botIsCover(leadInfo, move, ruffed, highestOrder)) {
             coveringRuffs.push(move);
-        } else if (cls.kind === 'DIVISION_FOLLOWER' && botIsCover(leadInfo, move, ruffed, highestOrder)) {
+        } else if (cls.kind === 'DIVISION_FOLLOW' && botIsCover(leadInfo, move, ruffed, highestOrder)) {
             coveringDivFollows.push(move);
-        } else if (cls.kind === 'DIVISION_FOLLOWER' || cls.kind === 'POTENTIAL_RUFF') {
+        } else if (cls.kind === 'DIVISION_FOLLOW' || cls.kind === 'POTENTIAL_RUFF') {
             lowFollows.push(move);
         } else {
             discards.push(move);

@@ -51,7 +51,7 @@ function readMove(buffer) {
   }
   sortHand(cards);
   let m = new ShengjiMove(player, '', cards, false, false);
-  m.penalty = b[4];
+  m.mpCompensation = b[4];
   m.deskScore = b[7];
   moves.push(m);
 }

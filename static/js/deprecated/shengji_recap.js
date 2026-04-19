@@ -7,7 +7,7 @@ let level = 5;
 let strain = 2;
 let baseScore = 0;
 let baseRawScore = 0;
-let baseMultiplier = 0;
+let baseEndgameFactor = 0;
 
 let isQiangzhuang = true;
 let declarations = [];
@@ -105,8 +105,8 @@ function initializePage(){
   moves = [];
   // moves.push(Move.startMove());
   base = [];
-  score = 0;
-  penalty = 0;
+  frameScore = 0;
+  mpCompensation = 0;
   currentMoveId = "^";
   currentRound = "";
   currentBranch = "";
@@ -115,7 +115,7 @@ function initializePage(){
   scoreDiv.innerHTML = "";
   scoreContainerDiv.removeAttribute("style");
   seatsDiv.setAttribute("pivot", "undetermined");
-  penaltyDiv.innerHTML = "";
+  mpCompensationDiv.innerHTML = "";
   baseScoreDiv.innerHTML = "";
   fileNameDiv.innerHTML = "";
 }
@@ -193,18 +193,18 @@ function setScoreValue(s) {
     const h = s * 3 / gameVariation;
     scoreContainerDiv.style = "border-color: hsl(" + h + ", 100%, 50%, 100%)";
     scoreDiv.innerHTML = s.toString();
-    score = s;
+    frameScore = s;
   }
 }
-function setPenaltyValue(p) {
+function setMpCompensationValue(p) {
   if(p > 0) {
-    penaltyDiv.setAttribute("sign", "+");
-    penaltyDiv.innerHTML = "+" + p.toString();
+    mpCompensationDiv.setAttribute("sign", "+");
+    mpCompensationDiv.innerHTML = "+" + p.toString();
   } else if(p < 0) {
-    penaltyDiv.setAttribute("sign", "-");
-    penaltyDiv.innerHTML = p.toString();
+    mpCompensationDiv.setAttribute("sign", "-");
+    mpCompensationDiv.innerHTML = p.toString();
   } else {
-    penaltyDiv.innerHTML = "";
+    mpCompensationDiv.innerHTML = "";
   }
 }
 function setScore(move) {
@@ -213,12 +213,12 @@ function setScore(move) {
   } else {
     setScoreValue(-404);
   }
-  if(move.penalty) {
-    penalty = move.penalty;
-    setPenaltyValue(penalty);
+  if(move.mpCompensation) {
+    mpCompensation = move.mpCompensation;
+    setMpCompensationValue(mpCompensation);
   } else {
-    penalty = 0;
-    setPenaltyValue(0);
+    mpCompensation = 0;
+    setMpCompensationValue(0);
   }
 }
 function setBaseScore() {
@@ -389,7 +389,7 @@ function goToNextMove() {
     currentMoveId = nextMove.moveId;
     if(nextMove.isEnd) {
       setBaseScore();
-      setScoreValue(score + baseScore + penalty);
+      setScoreValue(frameScore + baseScore + mpCompensation);
     } else {
       setScore(nextMove);
     }
@@ -694,7 +694,7 @@ function readMove(buffer) {
   }
   sortHand(cards);
   let m = new ShengjiMove(player, '', cards, false, false);
-  m.penalty = b[4];
+  m.mpCompensation = b[4];
   m.deskScore = b[7];
   moves.push(m);
 }

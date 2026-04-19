@@ -22,6 +22,9 @@ const messages_zhCN = {
     nextFrame:      '下一局',
     testModeOn:     '测试模式: 开',
     testModeOff:    '测试模式: 关',
+    showBase:       '查看底牌',
+    ready:          '准备',
+    leave:          '离开',
   },
 
   // ── Menu bar (recap page) ──
@@ -97,13 +100,13 @@ const messages_zhCN = {
     baseDone:       '{playerName} 埋好底牌',
     humanBaseDone:  '你埋好了底牌',
     botError:       'Bot 错误: {error}',
-    multiplayFailed: '{playerName} 甩牌失败 — {blockerName} 有更大的{shapeType}，改出{actualVolume}张',
+    multiplayFailed: '{playerName} 甩牌失败 — {allBlockerNames} 有更大的牌，{blockerName} 为实际阻止者，改出{actualVolume}张',
     forehandControlActivated: '{controllerName} 获得对 {targetName} 的一次上控门跟机会',
     forehandControlBotExercised: '{controllerName} (bot) 行使上控门跟: 必跟(无标记)',
     forehandControlMarked: '{controllerName} 标记了 {count} 张牌 ({mode})',
     forehandControlNoMarks: '{controllerName} 未标记任何牌',
     roundResult:    '第 {round} 轮: {playerName} 赢{score}',
-    roundScore:     ' (+{points}分)',
+    trickPoints:    ' (+{points}分)',
     finalScore:     '最终得分: {totalScore} 分',
     baseScoreBonus: ' (底分 +{baseScore})',
     levelAdvance:   '{players} 升 {delta} 级',
@@ -117,7 +120,7 @@ const messages_zhCN = {
     qiangzhuang:    '抢庄',
     noTrump:         '无主',
     noTrumpHtml:     '<div class="div-denomination-nts-text">无主</div>',
-    baseMultiplier:  '底×{multiplier}={baseScore}',
+    endgameFactor:  '底×{endgameFactor}={baseScore}',
   },
 
   // ── Strain / suit ──
@@ -169,7 +172,7 @@ const messages_zhCN = {
   errors: {
     selectCards:             '请选择要出的牌',
     sameDivision:            '出牌必须来自同一花色(同为主牌或同为某一副牌)',
-    decomposeFailed:         '分解牌型失败',
+    resolveFailed:          '解析牡型失败',
     multiplayFailed:         '甩牌失败: 其他玩家有更大的{shapeType}',
     pairTractor:             '对子/拖拉机',
     single:                  '单牌',
@@ -195,11 +198,29 @@ const messages_zhCN = {
     mustHold: '禁跟',
   },
 
+  // ── Counting dialog ──
+  counting: {
+    baseLabel:       '底牌',
+    scoreLabel:      '得分明细',
+    deskScore:       '分牌',
+    baseScore:       '底分',
+    endingCompensation: '终盘补分',
+    multiplayCompensation: '甩牌补分',
+    totalScore:      '总分',
+    resultLabel:     '结果',
+    levelChange:     '升级 +{delta}',
+    noLevelChange:   '不升级',
+    teamLevels:      '南北: {nsLevel} / 东西: {ewLevel}',
+  },
+
   // ── Game result messages ──
   results: {
-    defendBigWin:     '防守大胜 (庄家升3级)',
-    defendSmallWin:   '防守小胜 (庄家升1级)',
-    attackSmallWin:   '进攻小胜 (进攻方升1级)',
-    attackBigWin:     '进攻大胜 (进攻方升3级)',
+    grandSlam:    '大光 (庄家升3级)',
+    smallSlam:    '小光 (庄家升2级)',
+    retainStage:  '连庄 (庄家升1级)',
+    takeStage:    '上台 (攻方上台)',
+    upOne:        '上一 (攻方升1级)',
+    upTwo:        '上二 (攻方升2级)',
+    upN:          '上{n} (攻方升{n}级)',
   },
 };

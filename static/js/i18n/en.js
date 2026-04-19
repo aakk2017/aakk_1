@@ -22,6 +22,9 @@ const messages_en = {
     nextFrame:      'Next Frame',
     testModeOn:     'Test Mode: ON',
     testModeOff:    'Test Mode: OFF',
+    showBase:       'Show Base',
+    ready:          'Ready',
+    leave:          'Leave',
   },
 
   // ── Menu bar (recap page) ──
@@ -97,13 +100,13 @@ const messages_en = {
     baseDone:       '{playerName} set the base',
     humanBaseDone:  'You set the base',
     botError:       'Bot error: {error}',
-    multiplayFailed: '{playerName} multiplay failed — {blockerName} blocks with a stronger {shapeType}; forced to lead {actualVolume} card(s)',
+    multiplayFailed: '{playerName} multiplay failed — blocked by {allBlockerNames} (actual blocker: {blockerName}); forced to lead {actualVolume} card(s)',
     forehandControlActivated: '{controllerName} gains one forehand control on {targetName}',
     forehandControlBotExercised: '{controllerName} (bot) exercises forehand control: must-play (no marks)',
     forehandControlMarked: '{controllerName} marked {count} card(s) ({mode})',
     forehandControlNoMarks: '{controllerName} marked no cards',
     roundResult:    'Round {round}: {playerName} wins{score}',
-    roundScore:     ' (+{points})',
+    trickPoints:    ' (+{points})',
     finalScore:     'Final score: {totalScore}',
     baseScoreBonus: ' (base +{baseScore})',
     levelAdvance:   '{players} advance {delta} level(s)',
@@ -117,7 +120,7 @@ const messages_en = {
     qiangzhuang:    'Competitive',
     noTrump:         'No Trump',
     noTrumpHtml:     '<div class="div-denomination-nts-text">NT</div>',
-    baseMultiplier:  'Base×{multiplier}={baseScore}',
+    endgameFactor:  'Base×{endgameFactor}={baseScore}',
   },
 
   // ── Strain / suit ──
@@ -169,7 +172,7 @@ const messages_en = {
   errors: {
     selectCards:             'Please select cards to play.',
     sameDivision:            'All cards in a lead must be from the same division.',
-    decomposeFailed:         'Failed to decompose lead.',
+    resolveFailed:          'Failed to resolve lead.',
     multiplayFailed:         'Multiplay failed: another player has a stronger {shapeType}.',
     pairTractor:             'pair/tractor',
     single:                  'single',
@@ -195,11 +198,29 @@ const messages_en = {
     mustHold: 'Must Hold',
   },
 
+  // ── Counting dialog ──
+  counting: {
+    baseLabel:       'Base',
+    scoreLabel:      'Score Breakdown',
+    deskScore:       'Counter cards',
+    baseScore:       'Base Score',
+    endingCompensation: 'Ending Compensation',
+    multiplayCompensation: 'Multiplay Compensation',
+    totalScore:      'Total',
+    resultLabel:     'Result',
+    levelChange:     'Level +{delta}',
+    noLevelChange:   'No level change',
+    teamLevels:      'N-S: {nsLevel} / E-W: {ewLevel}',
+  },
+
   // ── Game result messages ──
   results: {
-    defendBigWin:     'Defenders win big (pivot +3 levels)',
-    defendSmallWin:   'Defenders win (pivot +1 level)',
-    attackSmallWin:   'Attackers win (attackers +1 level)',
-    attackBigWin:     'Attackers win big (attackers +3 levels)',
+    grandSlam:    'Grand Slam (pivot +3 levels)',
+    smallSlam:    'Small Slam (pivot +2 levels)',
+    retainStage:  'Retain Stage (pivot +1 level)',
+    takeStage:    'Take Stage (attackers on stage)',
+    upOne:        'Up One (attackers +1 level)',
+    upTwo:        'Up Two (attackers +2 levels)',
+    upN:          'Up {n} (attackers +{n} levels)',
   },
 };

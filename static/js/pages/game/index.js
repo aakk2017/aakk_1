@@ -46,9 +46,15 @@ const gLevelDiv    = document.getElementById('div-denomination-level');
 const gStrainDiv   = document.getElementById('div-denomination-strain');
 const gDenomArea   = document.getElementById('div-denomination-area');
 const gSeatsDiv    = document.getElementById('div-seats');
-const gDeclareSp   = document.getElementById('span-declarer');
+const gDeclareSp   = document.getElementById('span-declaration');
 const gDeclMethodSp= document.getElementById('span-declare-method');
 const gBaseScoreDiv= document.getElementById('div-base-score');
+const gCounterDrawerInner = document.getElementById('counter-drawer-inner');
+const gCounterDrawer = document.getElementById('counter-drawer');
+const gBtnShowBase = document.getElementById('btn-show-base');
+const gBasePreview = document.getElementById('base-preview');
+const gCountingDialog  = document.getElementById('counting-dialog');
+const gCountingOverlay = document.getElementById('counting-overlay');
 
 // ---------------------------------------------------------------------------
 // Test mode: human controls both South (0) and East (1)
@@ -67,8 +73,10 @@ function toggleTestMode() {
 // Track which human-controlled player's hand is currently displayed
 let activeHumanPlayer = HUMAN_PLAYER;
 
-// Forehand control exercise state
-let forehandControlExercising = false;
+// ForehandControlInteractionState
+// When active: { target, controller, exposedDivisionCards, exposedCardIds: Set,
+//   selectedCornerIds: Set, mode: string|null, selectionMounted: bool, commitButtonsMounted: bool }
+let gFCInteraction = null;
 
 // ---------------------------------------------------------------------------
 // Card selection state
@@ -81,6 +89,12 @@ const BOT_DELAY = 600;
 // Dealing phase state
 let currentDeclaration = null;   // declaration made by human during dealing
 let dealingTimer     = null;   // setInterval handle for deal animation
+
+// Attackers' won counter cards (temporal order, reset per frame) — for §2 drawer
+let wonCounterCards = [];
+
+// Persistent name bar DOM refs [south, east, north, west]
+let gDeskNamebars = [null, null, null, null];
 
 // ---------------------------------------------------------------------------
 // Card rendering
@@ -115,6 +129,139 @@ function gameCreateCardContainer(card) {
 }
 
 // ---------------------------------------------------------------------------
+// Corner-card rendering (§1)
+// ---------------------------------------------------------------------------
+function createCornerCard(card, fcMode) {
+    let el = document.createElement('div');
+    el.className = 'corner-card';
+    el.setAttribute('suit', card.suitName);
+    el.setAttribute('rank', card.rankName);
+    if (fcMode) el.setAttribute('data-fc', fcMode);
+    let r = document.createElement('div');
+    r.className = 'cc-rank';
+    r.textContent = card.rankName === 'X' ? '1O' : card.rankName;
+    let s = document.createElement('div');
+    s.className = 'cc-suit';
+    s.innerHTML = card.suitName === 'w' ? jokerHtml : suitTexts[card.suit];
+    el.appendChild(r);
+    el.appendChild(s);
+    return el;
+}
+
+// ---------------------------------------------------------------------------
+// Counter drawer (§2) — attackers' won counters
+// ---------------------------------------------------------------------------
+function updateCounterDrawer() {
+    if (!gCounterDrawerInner) return;
+    gCounterDrawerInner.innerHTML = '';
+    for (let card of wonCounterCards) {
+        gCounterDrawerInner.appendChild(createCornerCard(card));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persistent name bars (§3)
+// ---------------------------------------------------------------------------
+function initPersistentNamebars() {
+    // Create persistent name bars for all players
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        let container = (p === HUMAN_PLAYER) ? gShand : gDeskSlots[p];
+        if (!container) continue;
+
+        // Remove any old persistent namebar
+        let old = container.querySelector('.desk-namebar');
+        if (old) old.remove();
+
+        let nb = document.createElement('div');
+        nb.className = (p === HUMAN_PLAYER) ? 'desk-namebar shand-namebar' : 'desk-namebar';
+        nb.setAttribute('data-status', 'idle');
+
+        let posArea = document.createElement('div');
+        posArea.className = 'game-position-area';
+        posArea.textContent = POSITION_LABELS[p];
+        nb.appendChild(posArea);
+
+        let nameArea = document.createElement('div');
+        nameArea.className = 'name-area';
+        let pName = PLAYER_NAMES[p].replace(/^[\u4e1c\u5357\u897f\u5317]\s*\(?/, '').replace(/\)?$/, '');
+        nameArea.textContent = pName;
+        nb.appendChild(nameArea);
+
+        if (p !== HUMAN_PLAYER) {
+            // Exposed-card preview container (non-human only)
+            let preview = document.createElement('div');
+            preview.className = 'exposed-preview';
+            nb.appendChild(preview);
+        }
+
+        container.appendChild(nb);
+        gDeskNamebars[p] = nb;
+    }
+}
+
+function updateNamebarStatus(player, status) {
+    let nb = gDeskNamebars[player];
+    if (nb) nb.setAttribute('data-status', status);
+}
+
+function updateNamebarWidth(player, cardCount) {
+    let nb = gDeskNamebars[player];
+    if (!nb) return;
+    if (cardCount >= 4) {
+        nb.style.width = `calc(var(--card-width) + (${cardCount - 1} * var(--card-width) / 3))`;
+    } else {
+        nb.style.width = '';
+    }
+}
+
+function updateExposedPreview(player) {
+    let nb = gDeskNamebars[player];
+    if (!nb) return;
+    let preview = nb.querySelector('.exposed-preview');
+    if (!preview) return;
+    preview.innerHTML = '';
+    let exposed = game.exposedCards && game.exposedCards[player];
+    if (!exposed || Object.keys(exposed).length === 0) {
+        preview.classList.remove('has-exposed');
+        if (gDeskSlots[player]) gDeskSlots[player].removeAttribute('data-has-exposed');
+        return;
+    }
+    // Build a set of FC-selected cardIds and the FC mode (if active for this player)
+    let fc = game.forehandControl;
+    let fcSelectedIds = null;
+    let fcMode = null;
+    if (fc && fc.target === player && fc.selectedCards) {
+        fcMode = fc.mode;
+        fcSelectedIds = new Set(fc.selectedCards.map(c => c.cardId));
+    }
+    for (let div in exposed) {
+        for (let card of exposed[div]) {
+            let cardFc = null;
+            if (fcSelectedIds) {
+                cardFc = fcSelectedIds.has(card.cardId) ? fcMode : null;
+            }
+            preview.appendChild(createCornerCard(card, cardFc));
+        }
+    }
+    preview.classList.add('has-exposed');
+    if (gDeskSlots[player]) gDeskSlots[player].setAttribute('data-has-exposed', '');
+}
+
+function resetAllNamebars() {
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        if (gDeskNamebars[p]) {
+            gDeskNamebars[p].setAttribute('data-status', 'idle');
+            gDeskNamebars[p].style.width = '';
+            let preview = gDeskNamebars[p].querySelector('.exposed-preview');
+            if (preview) {
+                preview.innerHTML = '';
+                preview.classList.remove('has-exposed');
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Hand rendering — only the human player's hand is displayed
 // ---------------------------------------------------------------------------
 
@@ -126,9 +273,30 @@ function renderHand(player) {
     if (!isHumanControlled(player)) return;
     if (player !== activeHumanPlayer) return;
     let el = gShand;
+    // Preserve persistent namebar; clear only hand content
+    let existingNb = el.querySelector('.desk-namebar');
     el.innerHTML = '';
+    if (existingNb) el.appendChild(existingNb);
 
     let hand = game.hands[player];
+
+    // Build set of exposed cardIds for own-view highlighting
+    let exposedCardIds = new Set();
+    if (game.exposedCards && game.exposedCards[player]) {
+        for (let div in game.exposedCards[player]) {
+            for (let c of game.exposedCards[player][div]) {
+                exposedCardIds.add(c.cardId);
+            }
+        }
+    }
+
+    // Build set of FC-marked cardIds and mode for own-view icons
+    let fcMarkedIds = null;
+    let fcMode = null;
+    if (game.forehandControl && game.forehandControl.target === player && game.forehandControl.selectedCards) {
+        fcMode = game.forehandControl.mode;
+        fcMarkedIds = new Set(game.forehandControl.selectedCards.map(c => c.cardId));
+    }
 
     // Wrap in a .hand div
     let handRow = document.createElement('div');
@@ -147,30 +315,19 @@ function renderHand(player) {
         if (selectedCardIds.has(card.cardId)) {
             cc.setAttribute('card-selected', 'true');
         }
+        if (exposedCardIds.has(card.cardId)) {
+            cc.setAttribute('data-exposed', 'true');
+        }
+        // FC marking icons in own view
+        if (fcMarkedIds && fcMarkedIds.has(card.cardId)) {
+            let marker = document.createElement('div');
+            marker.className = 'fc-marker fc-marker-' + fcMode;
+            cc.querySelector('.card').appendChild(marker);
+        }
         handRow.appendChild(cc);
     }
 
-    // Add namebar
-    let namebar = document.createElement('div');
-    namebar.className = 'namebar';
-    namebar.setAttribute('show', 'show');
-    namebar.setAttribute('status', 'idle');
-    namebar.style.width = '100%';
-    namebar.style.minWidth = 'calc(var(--card-width) * 1.5)';
-
-    let posArea = document.createElement('div');
-    posArea.className = 'game-position-area';
-    posArea.textContent = POSITION_LABELS[player];
-    namebar.appendChild(posArea);
-
-    let nameArea = document.createElement('div');
-    nameArea.className = 'name-area';
-    let pName = PLAYER_NAMES[player].replace(/^[东南西北]\s*\(?/, '').replace(/\)?$\(?/, '').replace(/\)?$/, '');
-    nameArea.textContent = pName;
-    namebar.appendChild(nameArea);
-
-    el.appendChild(handRow);
-    el.appendChild(namebar);
+    el.insertBefore(handRow, existingNb);
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +336,8 @@ function renderHand(player) {
 
 function toggleCardSelection(cardId, el) {
     // Allow selection during forehand control exercise — restrict to exposed cards only
-    if (forehandControlExercising) {
-        if (pendingFCExercise && !pendingFCExercise.exposedCardIds.has(cardId)) return;
+    if (gFCInteraction) {
+        if (!gFCInteraction.exposedCardIds.has(cardId)) return;
         if (selectedCardIds.has(cardId)) {
             selectedCardIds.delete(cardId);
             el.setAttribute('card-selected', 'false');
@@ -222,7 +379,7 @@ function getSelectedCards(player) {
 }
 
 function updatePlayButton() {
-    if (forehandControlExercising) {
+    if (gFCInteraction) {
         gBtnPlay.disabled = false;
         gBtnPlay.textContent = t('buttons.confirmMarks');
         return;
@@ -259,64 +416,52 @@ function initDeskLabels() {
 function clearDesk() {
     for (let i = 0; i < gDeskSlots.length; i++) {
         let slot = gDeskSlots[i];
-        // Remove cards and namebar
-        slot.querySelectorAll('.card-container, .hand, .namebar').forEach(el => el.remove());
+        // Remove cards and transient namebar, but keep persistent .desk-namebar
+        slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
         slot.removeAttribute('data-active');
         slot.removeAttribute('data-winner');
+        slot.removeAttribute('data-has-exposed');
     }
     if (gDeskInfo) gDeskInfo.textContent = '';
+    resetAllNamebars();
 }
 
 function renderDeskCards(player, cards) {
     let slot = gDeskSlots[player];
-    // Remove previous cards (not the label)
-    slot.querySelectorAll('.card-container, .hand, .namebar').forEach(el => el.remove());
+    // Remove previous cards (not persistent namebar)
+    slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
+
+    // §6: Auto-sort played cards before display
+    let sorted = [...cards];
+    engineSortHand(sorted);
+
     let row = document.createElement('div');
     row.className = 'hand';
-    for (let card of cards) {
+    for (let card of sorted) {
         let cc = gameCreateCardContainer(card);
-        // No card-show attribute override — plain face-up (show-inhand default)
         row.appendChild(cc);
     }
     slot.appendChild(row);
 
     if (player !== HUMAN_PLAYER) {
-        let namebar = document.createElement('div');
-        namebar.className = 'namebar';
-        
-        let handSize = cards.length;
-        if(slot === document.getElementById('desk-west') || slot === document.getElementById('desk-east')) {
-             namebar.style.width = `calc(max(var(--card-width) * 1.5, var(--card-width) + (${handSize - 1} * var(--card-width) / 3)))`;
-             namebar.style.minWidth = 'calc(var(--card-width) * 1.5)';
-        } else {
-             namebar.style.width = `calc(max(var(--card-width) * 1.5, var(--card-width) + (${handSize - 1} * var(--card-width) / 3)))`; 
-             namebar.style.minWidth = 'calc(var(--card-width) * 1.5)';
-        }
-
-        namebar.setAttribute('show', 'show');
-        namebar.setAttribute('status', 'played');
-
-        let posArea = document.createElement('div');
-        posArea.className = 'game-position-area';
-        posArea.textContent = POSITION_LABELS[player];
-        namebar.appendChild(posArea);
-
-        let nameArea = document.createElement('div');
-        nameArea.className = 'name-area';
-        let pName = PLAYER_NAMES[player].replace(/^[东南西北]\s*\(?/, '').replace(/\)?$/, '');
-        nameArea.textContent = pName;
-        namebar.appendChild(nameArea);
-
-        slot.appendChild(namebar);
+        // Update persistent namebar width to match cards (§3.3)
+        updateNamebarWidth(player, sorted.length);
+        updateNamebarStatus(player, 'played');
     }
 }
 
 
 function highlightActivePlayer(player) {
-    for (let i = 0; i < gDeskSlots.length; i++) {
+    // Use name bar breathing color for all players including reference player (§6)
+    for (let i = 0; i < NUM_PLAYERS; i++) {
         gDeskSlots[i].removeAttribute('data-active');
+        if (gDeskNamebars[i] && gDeskNamebars[i].getAttribute('data-status') === 'on-play') {
+            gDeskNamebars[i].setAttribute('data-status', 'idle');
+        }
     }
-    if (player >= 0) gDeskSlots[player].setAttribute('data-active', 'true');
+    if (player >= 0 && gDeskNamebars[player]) {
+        gDeskNamebars[player].setAttribute('data-status', 'on-play');
+    }
 }
 
 function showDeclaredCardsOnDesk(player, suit, count) {
@@ -339,7 +484,7 @@ function showDeclaredCardsOnDesk(player, suit, count) {
 
 function updateScoreDisplay() {
     if (!gScoreDiv || !gScoreCont) return;
-    const s = game.score;
+    const s = game.frameScore;
     gScoreDiv.textContent = s;
 
     if (game.phase === GamePhase.IDLE || game.phase === GamePhase.DEALING || game.phase === GamePhase.DECLARING || game.phase === GamePhase.BASING) {
@@ -412,15 +557,44 @@ function startNewGame() {
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
     currentDeclaration = null;
 
+    // §3: Clear forehand-control and failed-multiplay aftermath UI state
+    gFCInteraction = null;
+
     clearLog();
     clearSelection();
     clearDesk();
     initDeskLabels();
     clearBotDealCounts();
     gDeclareMatrix.style.display = 'none';
+    hideCountingDialog();
+    gBtnPlay.disabled = true;
+    gBtnPlay.textContent = t('buttons.play');
+
+    // Reset won counters (§2)
+    wonCounterCards = [];
+    updateCounterDrawer();
+
+    // Hide show-base button (§5)
+    if (gBtnShowBase) gBtnShowBase.style.display = 'none';
+    if (gBasePreview) gBasePreview.innerHTML = '';
+
+    let level, pivot, playerLevels, isQiangzhuang;
+    if (pendingNextFrame) {
+        // Continue session: use computed next-frame parameters
+        level = pendingNextFrame.level;
+        pivot = pendingNextFrame.pivot;
+        playerLevels = pendingNextFrame.playerLevels;
+        isQiangzhuang = false;
+        pendingNextFrame = null;
+    } else {
+        // Fresh game
+        level = 0;
+        pivot = Math.floor(Math.random() * NUM_PLAYERS);
+        playerLevels = null;
+        isQiangzhuang = true;
+    }
 
     // Clear corner infos
-    gSeatsDiv.setAttribute('pivot', 'undetermined');
     document.getElementById('div-table-number').textContent = '';
     gDenomArea.removeAttribute('strain');
     gStrainDiv.innerHTML = '';
@@ -431,25 +605,23 @@ function startNewGame() {
         gScoreCont.style.backgroundColor = 'transparent';
         gScoreCont.style.borderColor = '#f8f8f8';
     }
-    document.getElementById('div-penalty').textContent = '';
+    document.getElementById('div-mp-compensation').textContent = '';
     if (gBaseScoreDiv) gBaseScoreDiv.textContent = '';
 
-    let level, pivot, playerLevels;
-    if (pendingNextFrame) {
-        // Continue session: use computed next-frame parameters
-        level = pendingNextFrame.level;
-        pivot = pendingNextFrame.pivot;
-        playerLevels = pendingNextFrame.playerLevels;
-        pendingNextFrame = null;
+    // Seat marks: frame 2+ shows pivot immediately; frame 1 starts undetermined
+    if (!isQiangzhuang) {
+        let humanRelPivot = (pivot + 4 - HUMAN_PLAYER) % 4;
+        let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
+        gSeatsDiv.setAttribute('pivot', pivotPosNames[humanRelPivot]);
     } else {
-        // Fresh game
-        level = 0;
-        pivot = Math.floor(Math.random() * NUM_PLAYERS);
-        playerLevels = null;
+        gSeatsDiv.setAttribute('pivot', 'undetermined');
     }
 
     gBtnNewGame.textContent = t('buttons.newGame');
-    engineStartGame(level, pivot, playerLevels);
+    engineStartGame(level, pivot, playerLevels, isQiangzhuang);
+
+    // Initialize persistent name bars (§3)
+    initPersistentNamebars();
 
     // Display level
     gLevelDiv.textContent = numberToLevel[game.level];
@@ -569,6 +741,7 @@ function runDealingPhase() {
     updateStatus(t('status.dealingHint'));
     gBtnPlay.disabled = true;
     
+    // Always show declaration UI during dealing (declaration is part of all frame-start flows)
     gDeclareMatrix.style.display = 'flex';
     updateDeclareMatrix();
 
@@ -578,7 +751,7 @@ function runDealingPhase() {
 
         // Bots consider overcalling as they get cards
         for (let i = 0; i < NUM_PLAYERS; i++) {
-            let p = (game.dealer + i) % NUM_PLAYERS;
+            let p = (game.pivot + i) % NUM_PLAYERS;
             if (p === HUMAN_PLAYER) continue;
 
             let decl = botChooseDeclaration(p, currentDeclaration);
@@ -627,7 +800,7 @@ function resolveDeclaredPhase() {
 
     // Bots have one last chance to overcall once dealt (if rules allow doing it at the very end of deal)
     for (let i = 0; i < NUM_PLAYERS; i++) {
-        let p = (game.dealer + i) % NUM_PLAYERS;
+        let p = (game.pivot + i) % NUM_PLAYERS;
         if (p === HUMAN_PLAYER) continue;
         let decl = botChooseDeclaration(p, bestDeclaration);
         if (decl) {
@@ -641,7 +814,11 @@ function resolveDeclaredPhase() {
     if (bestDeclaration) {
         let suitName = bestDeclaration.suit === 4 ? (bestDeclaration.count >= 4 ? 'w' : 'v') : numberToSuitName[bestDeclaration.suit];
         engineSetStrain(bestDeclaration.suit);
-        game.pivot = bestDeclaration.player;
+        // In qiangzhuang frames, the declarer becomes the pivot;
+        // in later frames, the pivot is already determined from the previous frame result
+        if (game.isQiangzhuang) {
+            game.pivot = bestDeclaration.player;
+        }
         game.declarations.push(bestDeclaration);
 
         gDenomArea.setAttribute('strain', suitName);
@@ -712,6 +889,24 @@ function startPlayingPhase() {
     gBtnPlay.textContent = t('buttons.play');
     clearSelection();
     renderAllHands();
+
+    // Show-base button if reference player is the baser (§5)
+    if (gBtnShowBase && game.pivot === HUMAN_PLAYER && game.base) {
+        gBtnShowBase.style.display = 'block';
+        // Populate base preview
+        if (gBasePreview) {
+            gBasePreview.innerHTML = '';
+            let row = document.createElement('div');
+            row.className = 'hand';
+            let sorted = [...game.base];
+            engineSortHand(sorted);
+            for (let c of sorted) {
+                row.appendChild(gameCreateCardContainer(c));
+            }
+            gBasePreview.appendChild(row);
+        }
+    }
+
     promptCurrentPlayer();
 }
 
@@ -728,74 +923,129 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
         targetName: PLAYER_NAMES[targetPlayer]
     }));
 
-    // Store trigger info for confirmForehandControl
-    pendingFCExercise = {
+    // Create ForehandControlInteractionState
+    gFCInteraction = {
         target: targetPlayer,
         controller: controller,
         exposedDivisionCards: exposedDivCards,
-        exposedCardIds: new Set(exposedDivCards.map(c => c.cardId))
+        exposedCardIds: new Set(exposedDivCards.map(c => c.cardId)),
+        selectedCornerIds: new Set(),
+        mode: null,
+        selectionMounted: false,
+        commitButtonsMounted: false
     };
 
     if (!isHumanControlled(controller)) {
-        // Bot controller: mustPlay with empty selectedCards (effectively a no-op)
+        // Bot controller: must-play with empty selectedCards (effectively a no-op)
         engineExerciseFC(targetPlayer, 'must-play', []);
         appendLog(t('log.forehandControlBotExercised', { controllerName: PLAYER_NAMES[controller] }));
-        pendingFCExercise = null;
+        gFCInteraction = null;
         promptCurrentPlayer();
     } else {
-        // Human controller: show target's hand, let them select exposed cards in led division
-        forehandControlExercising = true;
-        activeHumanPlayer = targetPlayer;
-        clearSelection();
+        // Human controller: mount selection UI on the target's namebar
         highlightActivePlayer(targetPlayer);
 
         updatePhaseDisplay(t('phase.forehandControl', { controllerName: PLAYER_NAMES[controller], targetName: PLAYER_NAMES[targetPlayer] }));
         updateStatus(t('status.forehandControl', { targetName: PLAYER_NAMES[targetPlayer] }));
-        gBtnPlay.textContent = t('buttons.confirmMarks');
-        gBtnPlay.disabled = false; // allow confirming with 0 marks (= no constraint)
-        // Show mode selector
-        let fcModeSel = document.getElementById('fc-mode-selector');
-        if (fcModeSel) fcModeSel.style.display = '';
-        renderHand(targetPlayer);
+
+        // Show exposed-preview in interactive FC mode on the target's namebar
+        let nb = gDeskNamebars[targetPlayer];
+        if (nb) {
+            let preview = nb.querySelector('.exposed-preview');
+            if (preview) {
+                preview.classList.add('fc-active');
+                renderFCCorners(targetPlayer, preview);
+                gFCInteraction.selectionMounted = true;
+                gFCInteraction.commitButtonsMounted = true;
+            }
+        }
+
+        // Enable main play button as FC commit fallback (must-play with current selection)
+        updatePlayButton();
     }
 }
 
-// Pending FC exercise state (set by exerciseForehandControl, consumed by confirmForehandControl)
-let pendingFCExercise = null;
+/**
+ * Render selectable corner cards and FC action buttons inside the exposed-preview.
+ */
+function renderFCCorners(targetPlayer, preview) {
+    let fci = gFCInteraction;
+    preview.innerHTML = '';
 
-function confirmForehandControl() {
-    let pfc = pendingFCExercise;
-    let targetPlayer = pfc.target;
+    // Render selectable corner cards
+    for (let card of fci.exposedDivisionCards) {
+        let el = createCornerCard(card);
+        if (fci.selectedCornerIds.has(card.cardId)) {
+            el.setAttribute('data-fc-selected', '');
+        }
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', () => {
+            if (fci.selectedCornerIds.has(card.cardId)) {
+                fci.selectedCornerIds.delete(card.cardId);
+            } else {
+                fci.selectedCornerIds.add(card.cardId);
+            }
+            renderFCCorners(targetPlayer, preview);
+        });
+        preview.appendChild(el);
+    }
 
-    // Get selected cards — only those that are in the exposed set for the led division
-    let markedCards = getSelectedCards(targetPlayer)
-        .filter(c => pfc.exposedCardIds.has(c.cardId));
+    // Action buttons row
+    let btnRow = document.createElement('div');
+    btnRow.className = 'fc-btn-row';
 
-    // Determine mode from the UI mode selector (if present), default to must-play
-    let mode = 'must-play';
-    let modeRadio = document.querySelector('input[name="fc-mode"]:checked');
-    if (modeRadio) mode = modeRadio.value;
+    let btnPlay = document.createElement('button');
+    btnPlay.className = 'button fc-action-btn';
+    btnPlay.textContent = t('fc.mustPlay');
+    btnPlay.addEventListener('click', () => commitForehandControl('must-play'));
+    btnRow.appendChild(btnPlay);
+
+    let btnHold = document.createElement('button');
+    btnHold.className = 'button fc-action-btn';
+    btnHold.textContent = t('fc.mustHold');
+    btnHold.addEventListener('click', () => commitForehandControl('must-hold'));
+    btnRow.appendChild(btnHold);
+
+    preview.appendChild(btnRow);
+}
+
+/**
+ * Commit forehand control: consume chance, apply constraint, deactivate interaction.
+ */
+function commitForehandControl(mode) {
+    let fci = gFCInteraction;
+    if (!fci) return;
+    let targetPlayer = fci.target;
+
+    // Get selected cards from the corner selection
+    let markedCards = fci.exposedDivisionCards.filter(c => fci.selectedCornerIds.has(c.cardId));
 
     engineExerciseFC(targetPlayer, mode, markedCards);
-    forehandControlExercising = false;
-    pendingFCExercise = null;
 
-    // Hide mode selector and reset
-    let fcModeSel = document.getElementById('fc-mode-selector');
-    if (fcModeSel) {
-        fcModeSel.style.display = 'none';
-        let defaultRadio = fcModeSel.querySelector('input[value="must-play"]');
-        if (defaultRadio) defaultRadio.checked = true;
+    // Clean up FC-active preview — deactivate ForehandControlInteractionState
+    let nb = gDeskNamebars[targetPlayer];
+    if (nb) {
+        let preview = nb.querySelector('.exposed-preview');
+        if (preview) {
+            preview.classList.remove('fc-active');
+        }
     }
 
     if (markedCards.length > 0) {
         appendLog(t('log.forehandControlMarked', {
-            controllerName: PLAYER_NAMES[pfc.controller],
+            controllerName: PLAYER_NAMES[fci.controller],
             count: markedCards.length,
             mode: mode === 'must-play' ? t('fc.mustPlay') : t('fc.mustHold')
         }));
     } else {
-        appendLog(t('log.forehandControlNoMarks', { controllerName: PLAYER_NAMES[pfc.controller] }));
+        appendLog(t('log.forehandControlNoMarks', { controllerName: PLAYER_NAMES[fci.controller] }));
+    }
+
+    gFCInteraction = null;
+
+    // Update exposed previews with FC markings
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
     }
 
     clearSelection();
@@ -884,6 +1134,62 @@ function promptCurrentPlayer() {
     }
 }
 
+/**
+ * Handle failed multiplay display sequence:
+ * 1) Announce all blockers
+ * 2) Show intended lead (with revoked cards highlighted) for 1 second
+ * 3) Replace desk with actual led element, show exposed corners, re-render hand
+ * 4) Continue game flow
+ */
+function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue) {
+    // Mark FailedMultiplayState hold in progress
+    game.failedMultiplay.holdInProgress = true;
+
+    // 1) Announce all blockers
+    let allBlockerNames = fm.allBlockerSeats.map(s => PLAYER_NAMES[s]).join(', ');
+    appendLog(t('log.multiplayFailed', {
+        playerName: PLAYER_NAMES[player],
+        blockerName: PLAYER_NAMES[fm.blockerSeat],
+        allBlockerNames: allBlockerNames,
+        actualVolume: fm.actualElement.cards.length
+    }));
+
+    // 2) Show all intended cards on desk, with revoked cards highlighted
+    let revokedIds = new Set(fm.revokedCards.map(c => c.cardId));
+    let slot = gDeskSlots[player];
+    slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
+    let sorted = [...allIntendedCards];
+    engineSortHand(sorted);
+    let row = document.createElement('div');
+    row.className = 'hand';
+    for (let card of sorted) {
+        let cc = gameCreateCardContainer(card);
+        if (revokedIds.has(card.cardId)) {
+            cc.setAttribute('card-show', 'show-revoked');
+        }
+        row.appendChild(cc);
+    }
+    slot.appendChild(row);
+    if (player !== HUMAN_PLAYER) {
+        updateNamebarWidth(player, sorted.length);
+        updateNamebarStatus(player, 'played');
+    }
+
+    // 3) After 1 second: revoke display, replace desk with actual element
+    setTimeout(() => {
+        game.failedMultiplay.holdInProgress = false;
+        game.failedMultiplay.revocationApplied = true;
+
+        renderDeskCards(player, fm.actualElement.cards);
+        // Update exposed-card previews from ExposedCardState
+        for (let p = 0; p < NUM_PLAYERS; p++) {
+            if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+        }
+        renderHand(player);
+        onContinue();
+    }, 1000);
+}
+
 function botTakeTurn(player) {
     let cards = botPlay(player);
     let result = enginePlayCards(player, cards);
@@ -894,20 +1200,23 @@ function botTakeTurn(player) {
     }
 
     if (result.failedMultiplay) {
-        let fm = result.failedMultiplay;
-        let shapeType = fm.actualElement.copy === 2 ? t('errors.pairTractor') : t('errors.single');
-        appendLog(t('log.multiplayFailed', {
-            playerName: PLAYER_NAMES[player],
-            blockerName: PLAYER_NAMES[fm.blockerSeat],
-            shapeType: shapeType,
-            actualVolume: fm.actualElement.cards.length
-        }));
-        // Render only the actual led element on desk
-        renderDeskCards(player, fm.actualElement.cards);
-    } else {
-        renderDeskCards(player, cards);
+        handleFailedMultiplay(player, result.failedMultiplay, cards, result, () => {
+            if (result.roundComplete) {
+                finishRound();
+            } else {
+                promptCurrentPlayer();
+            }
+        });
+        return;
     }
+
+    renderDeskCards(player, cards);
     renderHand(player);
+
+    // Update exposed previews after each play
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+    }
 
     if (result.roundComplete) {
         finishRound();
@@ -917,9 +1226,9 @@ function botTakeTurn(player) {
 }
 
 function humanPlayCards() {
-    // Handle forehand control exercise mode
-    if (forehandControlExercising) {
-        confirmForehandControl();
+    // During forehand control exercise, the main play button commits FC with must-play
+    if (gFCInteraction) {
+        commitForehandControl('must-play');
         return;
     }
 
@@ -955,20 +1264,23 @@ function humanPlayCards() {
     clearSelection();
 
     if (result.failedMultiplay) {
-        let fm = result.failedMultiplay;
-        let shapeType = fm.actualElement.copy === 2 ? t('errors.pairTractor') : t('errors.single');
-        appendLog(t('log.multiplayFailed', {
-            playerName: PLAYER_NAMES[cp],
-            blockerName: PLAYER_NAMES[fm.blockerSeat],
-            shapeType: shapeType,
-            actualVolume: fm.actualElement.cards.length
-        }));
-        // Render only the actual led element on desk
-        renderDeskCards(cp, fm.actualElement.cards);
-    } else {
-        renderDeskCards(cp, cards);
+        handleFailedMultiplay(cp, result.failedMultiplay, cards, result, () => {
+            if (result.roundComplete) {
+                finishRound();
+            } else {
+                promptCurrentPlayer();
+            }
+        });
+        return;
     }
+
+    renderDeskCards(cp, cards);
     renderHand(cp);
+
+    // Update exposed previews after each play
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+    }
 
     if (result.roundComplete) {
         finishRound();
@@ -987,8 +1299,26 @@ function finishRound() {
     gDeskSlots[result.winner].setAttribute('data-winner', 'true');
     updateScoreDisplay();
 
+    // Track counters won by attackers (§2)
+    if (game.attackingTeam.includes(result.winner)) {
+        let lastRound = game.roundHistory[game.roundHistory.length - 1];
+        for (let i = 0; i < NUM_PLAYERS; i++) {
+            if (lastRound.played[i]) {
+                for (let c of lastRound.played[i]) {
+                    if (engineCounterValue(c) > 0) wonCounterCards.push(c);
+                }
+            }
+        }
+        updateCounterDrawer();
+    }
+
+    // Update exposed-card previews on name bars (§3.5)
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+    }
+
     let winnerName = PLAYER_NAMES[result.winner];
-    let msg = t('log.roundResult', { round: game.currentRound - 1, playerName: winnerName, score: result.roundScore > 0 ? t('log.roundScore', { points: result.roundScore }) : '' });
+    let msg = t('log.roundResult', { round: game.currentRound - 1, playerName: winnerName, score: result.trickPoints > 0 ? t('log.trickPoints', { points: result.trickPoints }) : '' });
     appendLog(msg);
     updatePhaseDisplay(t('phase.roundWinner', { playerName: winnerName }));
 
@@ -998,6 +1328,10 @@ function finishRound() {
         // Short pause then start next round
         setTimeout(() => {
             clearDesk();
+            // Restore exposed-card previews that clearDesk() wiped
+            for (let p = 0; p < NUM_PLAYERS; p++) {
+                if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+            }
             promptCurrentPlayer();
         }, BOT_DELAY * 2);
     }
@@ -1021,7 +1355,7 @@ function finishGame() {
     gBtnPlay.disabled = true;
     gBtnPlay.textContent = t('buttons.play');
     if (gBaseScoreDiv && result.baseScore > 0) {
-        gBaseScoreDiv.textContent = t('labels.baseMultiplier', { multiplier: result.multiplier, baseScore: result.baseScore });
+        gBaseScoreDiv.textContent = t('labels.endgameFactor', { endgameFactor: result.endgameFactor, baseScore: result.baseScore });
     }
 
     // Apply level update (§12)
@@ -1038,7 +1372,7 @@ function finishGame() {
             appendLog(t('log.gameWon', { players: winnerNames }));
             updatePhaseDisplay(t('phase.gameWon'));
         } else {
-            // Store next frame info for "Next Frame" button
+            // Store next frame info
             pendingNextFrame = {
                 pivot: applied.nextPivot,
                 level: applied.nextLevel,
@@ -1046,7 +1380,116 @@ function finishGame() {
             };
             gBtnNewGame.textContent = t('buttons.nextFrame');
         }
+
+        // Show counting-phase dialog (§7)
+        showCountingDialog(result, fr, applied);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Counting-phase dialog (§7)
+// ---------------------------------------------------------------------------
+function showCountingDialog(result, frameResult, applied) {
+    if (!gCountingDialog) return;
+
+    // Size: match #desk-south width × 2× height
+    let deskSouth = document.getElementById('desk-south');
+    if (deskSouth) {
+        let w = deskSouth.offsetWidth;
+        let h = deskSouth.offsetHeight * 2;
+        gCountingDialog.style.width = w + 'px';
+        gCountingDialog.style.height = h + 'px';
+    }
+
+    // Row 1 left: base cards as corner-cards
+    let cdBase = document.getElementById('cd-base');
+    cdBase.innerHTML = '<div id="cd-base-label">' + t('counting.baseLabel') + '</div>';
+    if (game.base) {
+        let sorted = [...game.base];
+        engineSortHand(sorted);
+        for (let c of sorted) {
+            cdBase.appendChild(createCornerCard(c));
+        }
+    }
+
+    // Row 1 right: score breakdown
+    let cdScore = document.getElementById('cd-score');
+    cdScore.innerHTML = '<div style="font-weight:bold;margin-bottom:0.5vh;">' + t('counting.scoreLabel') + '</div>';
+    let deskScore = result.totalScore - result.baseScore;
+    addScoreRow(cdScore, t('counting.deskScore'), deskScore);
+    if (result.baseScore > 0) {
+        addScoreRow(cdScore, t('counting.baseScore'), result.baseScore);
+    }
+    if (result.endingCompensationActive) {
+        addScoreRow(cdScore, t('counting.endingCompensation'), result.endingCompensation);
+    }
+    if (result.multiplayCompensationActive) {
+        addScoreRow(cdScore, t('counting.multiplayCompensation'), result.multiplayCompensation);
+    }
+    let totalDiv = document.createElement('div');
+    totalDiv.className = 'cd-score-row cd-score-total';
+    totalDiv.innerHTML = '<span>' + t('counting.totalScore') + '</span><span>' + result.totalScore + '</span>';
+    cdScore.appendChild(totalDiv);
+
+    // Row 2 left: result summary
+    let cdResultName = document.getElementById('cd-result-name');
+    cdResultName.textContent = result.result;
+    let cdLevels = document.getElementById('cd-result-levels');
+    cdLevels.innerHTML = '';
+    if (frameResult) {
+        let chLine = document.createElement('div');
+        if (frameResult.levelDelta > 0) {
+            chLine.textContent = t('counting.levelChange', { delta: frameResult.levelDelta });
+        } else {
+            chLine.textContent = t('counting.noLevelChange');
+        }
+        cdLevels.appendChild(chLine);
+        if (applied && applied.newLevels) {
+            // Use stable natural team labels (南北 = seats 0,2; 东西 = seats 1,3)
+            let nsLevel = applied.newLevels[0]; // South/North team
+            let ewLevel = applied.newLevels[1]; // East/West team
+            let teamLine = document.createElement('div');
+            teamLine.textContent = t('counting.teamLevels', {
+                nsLevel: numberToLevel[nsLevel] || nsLevel,
+                ewLevel: numberToLevel[ewLevel] || ewLevel
+            });
+            cdLevels.appendChild(teamLine);
+        }
+    }
+
+    // Row 2 right: buttons (already in HTML)
+    let btnReady = document.getElementById('cd-btn-ready');
+    let btnLeave = document.getElementById('cd-btn-leave');
+    btnReady.onclick = () => {
+        hideCountingDialog();
+        startNewGame();
+    };
+    btnLeave.onclick = () => {
+        hideCountingDialog();
+        pendingNextFrame = null;
+        // Reset page to initial state
+        clearDesk();
+        clearLog();
+        gShand.innerHTML = '';
+        gBtnNewGame.textContent = t('buttons.newGame');
+        updatePhaseDisplay(t('phase.initial'));
+        updateStatus(t('status.ready'));
+    };
+
+    gCountingOverlay.style.display = 'block';
+    gCountingDialog.style.display = 'block';
+}
+
+function addScoreRow(parent, label, value) {
+    let row = document.createElement('div');
+    row.className = 'cd-score-row';
+    row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
+    parent.appendChild(row);
+}
+
+function hideCountingDialog() {
+    if (gCountingDialog) gCountingDialog.style.display = 'none';
+    if (gCountingOverlay) gCountingOverlay.style.display = 'none';
 }
 
 // Pending next-frame parameters (set by finishGame, consumed by startNewGame)

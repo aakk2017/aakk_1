@@ -27,7 +27,7 @@ let currentMoveId = "^";
 let currentPlayer = -1;
 
 // Game state
-let score = 0;
+let frameScore = 0;
 let penalty = 0;
 
 // Keyboard and input state
@@ -88,7 +88,7 @@ const ReplayState = {
         },
     },
     gameState: {
-        score: () => score,
+        score: () => frameScore,
         penalty: () => penalty,
     },
     keyboard: {

@@ -33,7 +33,7 @@ const TOTAL_ROUNDS   = 25;
 const PRESET_CONFIGS = {
     'default': {
         deckCount: 2,
-        mustStopLevels: [0, 4, 8, 10, 12], // 2, 6, X, Q, A (indices)
+        mustStopLevels: [0, 3, 8, 11, 12], // 2, 5, X, K, A (indices)
         allowOverbase: false,
         overbaseRestrictions: null,
         doubleDeclarationOrdering: null,
@@ -101,7 +101,6 @@ let game = {
     level:          0,       // rank index: 0→'2', 1→'3', … 12→'A'
     strain:         -1,      // -1 undetermined, 0–3 suited, 4 nts
     pivot:          0,       // pivot player position
-    dealer:         0,       // who dealt first card
 
     deck:           [],
     hands:          [[], [], [], []],
@@ -113,7 +112,7 @@ let game = {
     roundPlayed:        [null, null, null, null],
     leadInfo:           null,
 
-    score:          0,       // attackers' running score
+    frameScore:     0,       // attackers' running frame score
     roundHistory:   [],
 
     defendingTeam:  [],
@@ -121,14 +120,25 @@ let game = {
 
     declarations:   [],      // { player, suit, count }
 
-    // Forehand control after failed multiplay
-    // exposedCards[failer] = { [division]: [card, ...] } — remaining exposed cards
-    // forehandControlChances[failer] = integer — remaining chances this frame
-    // activeFC: { mode, selectedCards, target, controller } — active exercise
+    // FailedMultiplayState — aftermath of the most recent failed multiplay
+    // { failer, intendedLead, actualElement, blockers, actualBlocker,
+    //   revokedCards, exposedCards:{[div]:Card[]}, holdInProgress, revocationApplied }
+    failedMultiplay: null,
+
+    // ExposedCardState — all remaining exposed cards
+    // { [failer]: { [division]: Card[] } }
     exposedCards: {},
-    forehandControlChances: {},
-    activeFC: null,
-    // Legacy compat alias (used by engine helpers)
+
+    // ForehandControlChanceState — stored FC chances per failer
+    // { [failer]: { forehand: int, count: int } }
+    fcChances: {},
+
+    // ForehandControlPendingTriggerState — trigger activated, awaiting decision
+    // { forehand, failer, ledDivision, exposedDivisionCards, active, chanceConsuming }
+    fcPending: null,
+
+    // Committed FC constraint used by follow-legality checks
+    // { mode, selectedCards, target, controller }
     forehandControl: null,
 
     // Incremental round state (§13b–§13e)
@@ -242,12 +252,12 @@ function engineCountScore(cards) {
 // ---------------------------------------------------------------------------
 // Lead decomposition (mirrors legacy resolveLead pattern)
 // ---------------------------------------------------------------------------
-function engineDecomposeLead(cards) {
+function engineResolveLead(cards) {
     if (cards.length === 0) return null;
     if (!engineIsSingleDivision(cards)) return null;
 
     let division = cards[0].division;
-    let sorted = [...cards].sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+    let sorted = [...cards].sort((a, b) => b.order - a.order || a.suit - b.suit || a.cardId - b.cardId);
 
     // Pick out pairs
     let pairs = [];
@@ -334,7 +344,7 @@ function engineDecomposeLead(cards) {
 function engineCouldBeatShape(hand, division, copy, span, thresholdOrder) {
     let divCards = hand.filter(c => c.division === division);
     if (!divCards || divCards.length < copy * span) return false;
-    let sorted = [...divCards].sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+    let sorted = [...divCards].sort((a, b) => b.order - a.order || a.suit - b.suit || a.cardId - b.cardId);
     
     let pairOrders = [];
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -378,9 +388,9 @@ function engineIsLegalLead(player, cards) {
     }
 
     // Attempt canonical decomposition
-    let leadInfo = engineDecomposeLead(cards);
+    let leadInfo = engineResolveLead(cards);
     if (!leadInfo || leadInfo.elements.length === 0) {
-        return { valid: false, error: t('errors.decomposeFailed') };
+        return { valid: false, error: t('errors.resolveFailed') };
     }
 
     // one-element lead → always valid, no multiplay check
@@ -402,11 +412,6 @@ function engineIsLegalLead(player, cards) {
 
     if (blockedEvents.length === 0) {
         // Multiplay survives — all elements pass
-        // Check for fake multiplay (§12)
-        let fakeCheck = engineDetectFakeMultiplay(player, cards);
-        if (fakeCheck.isFakeMultiplay) {
-            return { valid: false, error: t('errors.fakeMultiplay') };
-        }
         return { valid: true };
     }
 
@@ -479,9 +484,13 @@ function engineResolveFailedMultiplay(leader, leadInfo, blockedEvents) {
         .flatMap(el => el.cards)
         .filter(c => !actualCardIds.has(c.cardId));
 
+    // Collect ALL unique blocker seats (for announcement)
+    let allBlockerSeats = [...new Set(blockedEvents.map(ev => ev.blockerSeat))];
+
     return {
         actualElement: actualElement,
         blockerSeat: chosenBlocker,
+        allBlockerSeats: allBlockerSeats,
         revokedCards: revokedCards,
         originalLeadInfo: leadInfo
     };
@@ -500,7 +509,7 @@ function engineResolveFailedMultiplay(leader, leadInfo, blockedEvents) {
  * - structured part compressed by type, each checked individually
  */
 function engineDetectFakeMultiplay(leader, leadCards) {
-    let resolvedLead = engineDecomposeLead(leadCards);
+    let resolvedLead = engineResolveLead(leadCards);
     if (!resolvedLead || resolvedLead.elements.length <= 1) {
         return { isMultiplay: false, isFakeMultiplay: false, fakeCause: null };
     }
@@ -789,13 +798,32 @@ function computeLegalMarkedCountInFillers(poolCards, fillerCount, forehandContro
 // ---------------------------------------------------------------------------
 
 /**
- * Register exposed cards after a failed multiplay.
- * revokedCards: the non-led cards from the failed multiplay (returned to failer's hand).
- * failer: player index of the failed multiplay leader.
- * controller: failer's forehand (who gets the control chance).
+ * Register a failed multiplay: store FailedMultiplayState, update ExposedCardState,
+ * increment ForehandControlChanceState.
  */
-function engineRegisterFailedMultiplay(failer, revokedCards) {
-    // Add exposed cards grouped by division
+function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allBlockerSeats, actualBlocker, revokedCards) {
+    // Group revoked cards by division
+    let byDiv = {};
+    for (let card of revokedCards) {
+        let div = card.division;
+        if (!byDiv[div]) byDiv[div] = [];
+        byDiv[div].push(card);
+    }
+
+    // FailedMultiplayState
+    game.failedMultiplay = {
+        failer: failer,
+        intendedLead: intendedLead,
+        actualElement: actualElement,
+        blockers: allBlockerSeats,
+        actualBlocker: actualBlocker,
+        revokedCards: revokedCards,
+        exposedCards: byDiv,
+        holdInProgress: false,
+        revocationApplied: false
+    };
+
+    // Update ExposedCardState
     if (!game.exposedCards[failer]) game.exposedCards[failer] = {};
     for (let card of revokedCards) {
         let div = card.division;
@@ -806,9 +834,10 @@ function engineRegisterFailedMultiplay(failer, revokedCards) {
         }
     }
 
-    // Grant one forehand-control chance
-    if (!game.forehandControlChances[failer]) game.forehandControlChances[failer] = 0;
-    game.forehandControlChances[failer]++;
+    // Increment ForehandControlChanceState
+    let forehand = (failer + NUM_PLAYERS - 1) % NUM_PLAYERS;
+    if (!game.fcChances[failer]) game.fcChances[failer] = { forehand: forehand, count: 0 };
+    game.fcChances[failer].count++;
 }
 
 /**
@@ -844,42 +873,54 @@ function engineCheckFCTrigger(failer) {
         return { shouldTrigger: false };
     }
 
-    // Condition 2: failer has remaining chances
-    if (!game.forehandControlChances[failer] || game.forehandControlChances[failer] <= 0) {
+    // Condition 2: failer has remaining chances (ForehandControlChanceState)
+    if (!game.fcChances[failer] || game.fcChances[failer].count <= 0) {
         return { shouldTrigger: false };
     }
 
-    // Controller is the failer's forehand
-    let controller = (failer + NUM_PLAYERS - 1) % NUM_PLAYERS;
+    let controller = game.fcChances[failer].forehand;
+    let exposedDivisionCards = [...game.exposedCards[failer][ledDiv]];
+
+    // Activate ForehandControlPendingTriggerState
+    game.fcPending = {
+        forehand: controller,
+        failer: failer,
+        ledDivision: ledDiv,
+        exposedDivisionCards: exposedDivisionCards,
+        active: true,
+        chanceConsuming: true
+    };
 
     return {
         shouldTrigger: true,
         controller: controller,
-        exposedDivisionCards: [...game.exposedCards[failer][ledDiv]]
+        exposedDivisionCards: exposedDivisionCards
     };
 }
 
 /**
- * Exercise a forehand-control chance: consume one chance and create the activeFC.
+ * Exercise a forehand-control chance: consume one chance, commit FC constraint,
+ * deactivate ForehandControlPendingTriggerState.
  * mode: 'must-play' or 'must-hold'
  * selectedCards: subset of exposed cards in the led division (may be empty).
- * Sets game.forehandControl (the active FC object used by legality checks).
  */
 function engineExerciseFC(failer, mode, selectedCards) {
-    // Consume one chance
-    game.forehandControlChances[failer]--;
-    if (game.forehandControlChances[failer] <= 0) {
-        delete game.forehandControlChances[failer];
+    // Consume one chance from ForehandControlChanceState
+    game.fcChances[failer].count--;
+    if (game.fcChances[failer].count <= 0) {
+        delete game.fcChances[failer];
     }
 
-    // Create the active FC (used by follow legality pipeline)
+    // Create committed FC constraint (used by follow legality pipeline)
     game.forehandControl = {
         mode: mode,
         selectedCards: selectedCards || [],
         target: failer,
-        controller: (failer + NUM_PLAYERS - 1) % NUM_PLAYERS
+        controller: game.fcPending ? game.fcPending.forehand : (failer + NUM_PLAYERS - 1) % NUM_PLAYERS
     };
-    game.activeFC = game.forehandControl;
+
+    // Deactivate ForehandControlPendingTriggerState
+    game.fcPending = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1341,7 +1382,7 @@ function engineInitializeRoundState(leader, leadInfo) {
 
 /**
  * Classify a legal follow for cover checking (§13c).
- * Returns { kind: 'DISCARD'|'DIVISION_FOLLOWER'|'POTENTIAL_RUFF', orderKey }
+ * Returns { kind: 'DISCARD'|'DIVISION_FOLLOW'|'POTENTIAL_RUFF', orderKey }
  */
 function engineClassifyFollowForCover(roundState, followCards) {
     let divSet = new Set(followCards.map(c => c.division));
@@ -1355,19 +1396,19 @@ function engineClassifyFollowForCover(roundState, followCards) {
     // All same division as lead
     if (divSet.size === 1 && followCards[0].division === roundState.leadDivision) {
         if (roundState.leadIsOneElement) {
-            let followInfo = engineDecomposeLead(followCards);
+            let followInfo = engineResolveLead(followCards);
             if (followInfo && followInfo.elements.length === 1) {
                 let followEl = followInfo.elements[0];
                 let leadEl = roundState.resolvedLead[0];
                 if (followEl.copy === leadEl.copy && followEl.span === leadEl.span) {
-                    return { kind: 'DIVISION_FOLLOWER', orderKey: followEl.order };
+                    return { kind: 'DIVISION_FOLLOW', orderKey: followEl.order };
                 }
             }
             // Same division but different type → cannot cover
             return { kind: 'DISCARD', orderKey: null };
         } else {
-            // Multiplay division-followers can't cover individually
-            return { kind: 'DIVISION_FOLLOWER', orderKey: null };
+            // Multiplay division follows can't cover individually
+            return { kind: 'DIVISION_FOLLOW', orderKey: null };
         }
     }
 
@@ -1409,9 +1450,9 @@ function engineUpdateRoundStateAfterFollow(player, acceptedFollow) {
         return;
     }
 
-    // DIVISION_FOLLOWER
-    if (rs.ruffed) return; // ruff beats all division-followers
-    if (!rs.leadIsOneElement) return; // multiplay: division-followers can't cover
+    // DIVISION_FOLLOW
+    if (rs.ruffed) return; // ruff beats all division follows
+    if (!rs.leadIsOneElement) return; // multiplay: division follows can't cover
 
     if (followState.orderKey > rs.highestOrder) {
         rs.highestOrder = followState.orderKey;
@@ -1444,7 +1485,7 @@ function engineDetermineRoundWinner() {
         // 1. Classify follow
         let classification = 'discard';
         if (isAllDivision) {
-            classification = 'division-follower';
+            classification = 'division-follow';
         } else if (isAllTrump && leadDiv !== 4) {
             classification = 'potential-ruff';
         }
@@ -1467,13 +1508,13 @@ function engineDetermineRoundWinner() {
                 bestOrder  = order;
             }
         } else {
-            // Division-follower
-            if (bestIsRuff) continue; // ruff beats all division-followers
+            // Division follow
+            if (bestIsRuff) continue; // ruff beats all division follows
 
-            if (!leadIsOneElement) continue; // multiplay division-followers can't cover
+            if (!leadIsOneElement) continue; // multiplay division follows can't cover
 
             // One-element round: only same-type can cover
-            let followInfo = engineDecomposeLead(cards);
+            let followInfo = engineResolveLead(cards);
             if (!followInfo || followInfo.elements.length !== 1) continue;
             let followEl = followInfo.elements[0];
             let leadEl = leadInfo.elements[0];
@@ -1512,27 +1553,28 @@ function engineSetTeams() {
 /** Start a new game — shuffles deck but does NOT deal.
  *  The page calls engineDealNextBatch() to animate dealing one round at a time.
  */
-function engineStartGame(level, pivot, playerLevels) {
+function engineStartGame(level, pivot, playerLevels, isQiangzhuang) {
     game.phase          = GamePhase.DEALING;
     game.level          = level;
     game.strain         = -1;
     game.pivot          = pivot;
-    game.dealer         = pivot;
-    game.score          = 0;
+    game.frameScore     = 0;
     game.currentRound   = 0;
     game.roundHistory   = [];
     game.declarations   = [];
     game.dealIndex      = 0;
     game.roundState     = null;
+    game.failedMultiplay = null;
     game.exposedCards   = {};
-    game.forehandControlChances = {};
-    game.activeFC       = null;
+    game.fcChances      = {};
+    game.fcPending      = null;
     game.forehandControl = null;
+    game.isQiangzhuang  = (isQiangzhuang !== false); // true by default, false only for later frames
 
     // Per-player levels: use provided or initialize all to 0
     if (playerLevels) {
         game.playerLevels = [...playerLevels];
-    } else if (!game.playerLevels || game.playerLevels.length !== NUM_PLAYERS) {
+    } else {
         game.playerLevels = new Array(NUM_PLAYERS).fill(0);
     }
 
@@ -1636,7 +1678,7 @@ function enginePlayCards(player, cards) {
             let actual = failedMultiplay.actualElement;
 
             // The actual led element becomes the real lead
-            let actualLeadInfo = engineDecomposeLead(actual.cards);
+            let actualLeadInfo = engineResolveLead(actual.cards);
             game.leadInfo = actualLeadInfo;
 
             // Only the actual element cards are played; revoked cards stay in hand
@@ -1645,7 +1687,7 @@ function enginePlayCards(player, cards) {
             game.roundPlayed[player] = actual.cards;
         } else {
             // Normal lead (single element or surviving multiplay)
-            game.leadInfo = engineDecomposeLead(cards);
+            game.leadInfo = engineResolveLead(cards);
             let playedIds = new Set(cards.map(c => c.cardId));
             game.hands[player] = game.hands[player].filter(c => !playedIds.has(c.cardId));
             game.roundPlayed[player] = cards;
@@ -1657,8 +1699,12 @@ function enginePlayCards(player, cards) {
         engineDecayExposedCards(player, game.roundPlayed[player]);
 
         if (leadValid.failedMultiplay) {
-            // Register exposed cards and grant one forehand-control chance
-            engineRegisterFailedMultiplay(player, failedMultiplay.revokedCards);
+            // Register FailedMultiplayState, ExposedCardState, ForehandControlChanceState
+            engineRegisterFailedMultiplay(
+                player, cards, failedMultiplay.actualElement,
+                failedMultiplay.allBlockerSeats, failedMultiplay.blockerSeat,
+                failedMultiplay.revokedCards
+            );
         }
     } else {
         // Build the active forehand control for this follow
@@ -1682,7 +1728,6 @@ function enginePlayCards(player, cards) {
         // Clear active FC after the target follows (one-shot per exercise)
         if (fc) {
             game.forehandControl = null;
-            game.activeFC = null;
         }
     }
 
@@ -1695,28 +1740,31 @@ function enginePlayCards(player, cards) {
     };
 }
 
-/** End the current round. Returns {winner, roundScore, gameOver}. */
+/** End the current round. Returns {winner, trickPoints, gameOver}. */
 function engineEndRound() {
     // Use incremental round state if available, otherwise fall back to legacy scan
     let winner = game.roundState ? game.roundState.highestPlayer : engineDetermineRoundWinner();
-    let roundScore = 0;
+    let trickPoints = 0;
     for (let i = 0; i < NUM_PLAYERS; i++) {
-        if (game.roundPlayed[i]) roundScore += engineCountScore(game.roundPlayed[i]);
+        if (game.roundPlayed[i]) trickPoints += engineCountScore(game.roundPlayed[i]);
     }
-    if (game.attackingTeam.includes(winner)) game.score += roundScore;
+    if (game.attackingTeam.includes(winner)) game.frameScore += trickPoints;
 
     game.roundHistory.push({
         round:  game.currentRound,
         leader: game.currentLeader,
         played: [...game.roundPlayed],
         winner: winner,
-        score:  roundScore
+        trickPoints: trickPoints
     });
 
     game.currentRound++;
-    if (game.currentRound > TOTAL_ROUNDS) {
+    // Game ends when all hands are empty (not a fixed round count, since
+    // pair/tractor/multiplay leads consume more than 1 card per trick)
+    let allHandsEmpty = game.hands.every(h => h.length === 0);
+    if (allHandsEmpty) {
         game.phase = GamePhase.COUNTING;
-        return { winner, roundScore, gameOver: true };
+        return { winner, trickPoints, gameOver: true };
     }
 
     game.currentLeader    = winner;
@@ -1724,74 +1772,95 @@ function engineEndRound() {
     game.roundPlayed      = [null, null, null, null];
     game.leadInfo         = null;
     game.roundState       = null;
-    return { winner, roundScore, gameOver: false };
+    return { winner, trickPoints, gameOver: false };
 }
 
 /** Counting phase — finalize score. */
 function engineFinalize() {
     let lastRound = game.roundHistory[game.roundHistory.length - 1];
     let baseScore = 0;
-    let multiplier = 1;
+    let endgameFactor = 1;
 
     if (game.attackingTeam.includes(lastRound.winner)) {
-        // Attackers win last round: calculate base multiplier (endgame factor)
-        // A single = x2, pair = x4, etc (2 ^ max_element_length_in_winning_trick)
+        // Attackers win last round: calculate endgame factor
+        // A single = x2, pair = x4, etc (2 ^ max_element_volume_in_winning_trick)
         let lastPlayed = lastRound.played[lastRound.winner];
-        let decomp = engineDecomposeLead(lastPlayed);
+        let decomp = engineResolveLead(lastPlayed);
         let maxCopySpan = (decomp && decomp.elements.length > 0) ? Math.max(...decomp.elements.map(e => e.copy * e.span)) : 1;
-        multiplier = Math.pow(2, maxCopySpan);
+        endgameFactor = Math.pow(2, maxCopySpan);
 
         // Clamp endgame factor by config limit
         let limit = (game.gameConfig && game.gameConfig.endgameFactorLimit) || 4;
-        if (multiplier > Math.pow(2, limit)) multiplier = Math.pow(2, limit);
+        if (endgameFactor > Math.pow(2, limit)) endgameFactor = Math.pow(2, limit);
 
-        baseScore = engineCountScore(game.base) * multiplier;
-        game.score += baseScore;
+        baseScore = engineCountScore(game.base) * endgameFactor;
+        game.frameScore += baseScore;
     }
 
     game.phase = GamePhase.GAME_OVER;
 
     // Compute frame result (§12)
-    let frameResult = engineComputeFrameResult(game.score);
+    let frameResult = engineComputeFrameResult(game.frameScore);
 
     return {
-        totalScore: game.score,
+        totalScore: game.frameScore,
         baseScore,
-        multiplier,
-        result: t('results.' + frameResult.resultKey),
+        endgameFactor,
+        endingCompensation: 0,
+        multiplayCompensation: 0,
+        endingCompensationActive: !!(game.gameConfig && game.gameConfig.endingCompensation),
+        multiplayCompensationActive: !!(game.gameConfig && game.gameConfig.multiplayCompensation),
+        result: t('results.' + frameResult.resultKey, { n: frameResult.levelDelta }),
         frameResult: frameResult
     };
 }
 
 /**
- * Compute frame result from final score (§12).
+ * Compute frame result from final score (§12 + terminology §15).
+ * stageThreshold = 80, levelThreshold = 40.
+ * Results: grandSlam (=0, def+3), smallSlam (1-39, def+2), retainStage (40-79, def+1),
+ *   takeStage (80-119, atk+0), upOne (120-159, atk+1), upTwo (160-199, atk+2), upN (200+).
  * Returns { defenseHolds, levelDelta, resultKey, nextPivot, advancingPlayers }.
  */
 function engineComputeFrameResult(finalScore) {
-    let defenseHolds = finalScore < 80;
+    const stageThreshold = 80;
+    const levelThreshold = 40;
+
+    let defenseHolds;
     let levelDelta;
     let resultKey;
 
-    if (finalScore < 40) {
+    if (finalScore === 0) {
+        defenseHolds = true;
         levelDelta = 3;
-        resultKey = 'defendBigWin';
-    } else if (finalScore < 80) {
+        resultKey = 'grandSlam';
+    } else if (finalScore < stageThreshold - levelThreshold) {
+        defenseHolds = true;
+        levelDelta = 2;
+        resultKey = 'smallSlam';
+    } else if (finalScore < stageThreshold) {
+        defenseHolds = true;
         levelDelta = 1;
-        resultKey = 'defendSmallWin';
-    } else if (finalScore < 120) {
-        levelDelta = 1;
-        resultKey = 'attackSmallWin';
+        resultKey = 'retainStage';
+    } else if (finalScore < stageThreshold + levelThreshold) {
+        defenseHolds = false;
+        levelDelta = 0;
+        resultKey = 'takeStage';
     } else {
-        levelDelta = 3;
-        resultKey = 'attackBigWin';
+        defenseHolds = false;
+        let n = Math.floor((finalScore - stageThreshold) / levelThreshold);
+        levelDelta = n;
+        if (n === 1) resultKey = 'upOne';
+        else if (n === 2) resultKey = 'upTwo';
+        else resultKey = 'upN';
     }
 
     let advancingPlayers = defenseHolds ? [...game.defendingTeam] : [...game.attackingTeam];
 
-    // Next pivot: defense holds → same pivot; attack wins → first attacker clockwise
+    // Next pivot: defense holds → pivot's ally; attack wins → first attacker clockwise
     let nextPivot;
     if (defenseHolds) {
-        nextPivot = game.pivot;
+        nextPivot = (game.pivot + 2) % NUM_PLAYERS;
     } else {
         for (let i = 1; i < NUM_PLAYERS; i++) {
             let p = (game.pivot + i) % NUM_PLAYERS;

@@ -21,7 +21,7 @@ function initializePage(){
   initHands = [];
   moves = [];
   base = [];
-  score = 0;
+  frameScore = 0;
   penalty = 0;
   currentMoveId = "^";
   currentRound = "";
@@ -31,7 +31,7 @@ function initializePage(){
   scoreDiv.innerHTML = "";
   scoreContainerDiv.removeAttribute("style");
   seatsDiv.setAttribute("pivot", "undetermined");
-  penaltyDiv.innerHTML = "";
+  mpCompensationDiv.innerHTML = "";
   baseScoreDiv.innerHTML = "";
   fileNameDiv.innerHTML = "";
 }

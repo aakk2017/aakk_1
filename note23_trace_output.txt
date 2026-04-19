@@ -1,0 +1,537 @@
+﻿=========================================================
+NOTE 23 鈥?RUNTIME TRACE
+=========================================================
+
+Authoritative state mapping:
+FailedMultiplayState        -> game.failedMultiplay
+ExposedCardState            -> game.exposedCards
+ForehandControlChanceState  -> game.fcChances
+ForehandControlPendingTriggerState -> game.fcPending
+ForehandControlInteractionState    -> gFCInteraction (in UI controller)
+
+=== SETUP ===
+Verify: Hearts K 鈫?division=2, order=10
+Verify: Hearts J 鈫?division=2, order=8
+Verify: Hearts Q 鈫?division=2, order=9
+Pivot: player 2 (North). Defenders: [2,0]. Attackers: [1,3]
+North hearts: hK(id=300,ord=10), hJ(id=301,ord=8)
+East hearts: hA(id=326,ord=11), hQ(id=325,ord=9)
+South hearts: h6(id=352,ord=3), h5(id=351,ord=2), h3(id=350,ord=0)
+West hearts: h7(id=375,ord=4)
+Current leader: player 2 (North). Phase: playing
+
+=========================================================
+STEP 1 鈥?Immediately after failed-multiplay resolution
+=========================================================
+North attempts multiplay: [hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]
+East Q鈾?order=10, can beat J鈾?(order=8): YES
+East Q鈾?order=10, can beat K鈾?(order=10): NO
+enginePlayCards result: success=true, failedMultiplay=true
+Actual element: [hJ(id=301,div=2,ord=8)] (copy=1, span=1)
+Blocker seat: player 1
+All blocker seats: 1
+Revoked cards: [hK(id=300,div=2,ord=10)]
+
+--- Step 1 鈥?State dump after failed-multiplay resolution ---
+game.failedMultiplay: {
+  "failer": 2,
+  "intendedLead": "[hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]",
+  "actualElement": {
+    "cards": "[hJ(id=301,div=2,ord=8)]",
+    "copy": 1,
+    "span": 1,
+    "order": 8,
+    "division": 2
+  },
+  "blockers": [
+    1
+  ],
+  "actualBlocker": 1,
+  "revokedCards": "[hK(id=300,div=2,ord=10)]",
+  "holdInProgress": false,
+  "revocationApplied": false
+}
+game.exposedCards: {
+  "2": {
+    "2": "[hK(id=300,div=2,ord=10)]"
+  }
+}
+game.fcChances: {"2":{"forehand":1,"count":1}}
+game.fcPending: null
+game.forehandControl: null
+gFCInteraction: null
+
+3.2 Expected UI statement:
+During the 1-second hold: Both K鈾?and J鈾?should be visible on the desk,
+with K鈾?highlighted as show-revoked (grayed/crossed). After 1 second,
+only J鈾?remains on desk. North's exposed-preview should show K鈾?as a corner card.
+The desk-north slot should have data-has-exposed attribute, shifting it up.
+
+3.3 DOM proof during 1-second hold:
+Cards on desk (intended lead): 2
+  card[0]: suit=h, rank=K, show=show-revoked
+  card[1]: suit=h, rank=J, show=show-inhand
+Revoked (show-revoked) count: 1
+
+--- DOM Proof: Step 1 鈥?During 1-second hold ---
+  desk-south: namebar=false, preview=false, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-east: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-north: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-west: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  shand: exposed-highlighted=0
+  shand: fc-markers=0
+  btn-play: text="鍑虹墝", disabled=true
+
+Own-view exposed-card selector: #shand [data-exposed="true"]
+Own-view exposed-card count: 0 (South is not the failer, so 0 expected)
+
+Other-view exposed-card selector: #desk-north .desk-namebar .exposed-preview .corner-card
+Other-view exposed-card count: 0 (0 during hold, populated after hold)
+
+Opposite-view exposed-card selector: #desk-north .desk-namebar .exposed-preview .corner-card
+Opposite-view exposed-card count: 0 (North is opposite to South)
+
+=========================================================
+STEP 2 鈥?After the 1-second revoke transition
+=========================================================
+
+--- Step 2 鈥?After 1-second hold completes ---
+game.failedMultiplay: {
+  "failer": 2,
+  "intendedLead": "[hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]",
+  "actualElement": {
+    "cards": "[hJ(id=301,div=2,ord=8)]",
+    "copy": 1,
+    "span": 1,
+    "order": 8,
+    "division": 2
+  },
+  "blockers": [
+    1
+  ],
+  "actualBlocker": 1,
+  "revokedCards": "[hK(id=300,div=2,ord=10)]",
+  "holdInProgress": false,
+  "revocationApplied": true
+}
+game.exposedCards: {
+  "2": {
+    "2": "[hK(id=300,div=2,ord=10)]"
+  }
+}
+game.fcChances: {"2":{"forehand":1,"count":1}}
+game.fcPending: null
+game.forehandControl: null
+gFCInteraction: null
+
+3.5 Desk proof:
+Cards remaining on North's desk: 1
+  card[0]: suit=h, rank=J, show=show-inhand
+Revoked K鈾?was removed from desk: YES
+Remaining card: hJ (should be J鈾?
+
+3.6 Exposed-card proof:
+
+--- DOM Proof: Step 2 鈥?After hold ---
+  desk-south: namebar=false, preview=false, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-east: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-north: namebar=true, preview=true, has-exposed=true, corner-count=1, data-has-exposed=true, fc-active=false, fc-btns=0
+  desk-west: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  shand: exposed-highlighted=0
+  shand: fc-markers=0
+  btn-play: text="鍑虹墝", disabled=true
+
+Own-view exposed-card selector: #shand [data-exposed="true"]
+Own-view exposed-card count: 0
+(South is not the failer 鈥?0 expected)
+
+Other-view exposed-card selector: #desk-north .desk-namebar .exposed-preview .corner-card
+Other-view exposed-card count: 1
+  corner[0]: suit=h, rank=K
+
+Opposite-view exposed-card selector: #desk-north .desk-namebar .exposed-preview .corner-card
+Opposite-view exposed-card count: 1
+
+3.7 Layout proof:
+Opposite-seat upward offset active: YES
+CSS rule / selector: #desk-north[data-has-exposed]
+Exact offset value: transform: translateY(calc(var(--card-height) / -3))
+File: static/css/game.css
+Preview has-exposed class: true
+Preview display rule: .exposed-preview.has-exposed { display: flex } (game.css)
+
+--- Completing Round 1 ---
+Current turn index: 1, current player: 3
+Player 3's turn to follow
+  Plays: [h7(id=375,div=2,ord=4)]
+  Result: success=true
+Player 0's turn to follow
+  Plays: [h6(id=352,div=2,ord=3)]
+  Result: success=true
+Player 1's turn to follow
+  Plays: [hA(id=326,div=2,ord=11)]
+  Result: success=true, roundComplete
+Round 1 winner: player 1
+
+=========================================================
+STEP 3 鈥?At the start of the later qualifying round
+=========================================================
+Round 2 leader: player 1
+Expected: player 1 (East) 鈥?won with Q鈾?(highest follow)
+East's remaining hearts: [hQ(id=325,div=2,ord=9)]
+East leads: [hQ(id=325,div=2,ord=9)]
+Lead result: success=true
+Follow order from East(1): North(2), West(3), South(0)
+North (failer) is the first follower
+
+Current player: 2 (should be 2=North)
+
+3.8 Trigger-condition proof:
+Failer is acting: YES
+Failer is following: YES
+Led division: 2 (hearts=2)
+Led division still exposed: YES
+Exposed cards in division 2: [hK(id=300,div=2,ord=10)]
+Forehand has unused chance: YES
+  Forehand player: 1, count: 1
+
+Note: The forehand (East=1) has already played (he led this round).
+FC trigger fires now, before North (failer=2) follows.
+
+--- Step 3.9 鈥?Before FC trigger ---
+game.failedMultiplay: {
+  "failer": 2,
+  "intendedLead": "[hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]",
+  "actualElement": {
+    "cards": "[hJ(id=301,div=2,ord=8)]",
+    "copy": 1,
+    "span": 1,
+    "order": 8,
+    "division": 2
+  },
+  "blockers": [
+    1
+  ],
+  "actualBlocker": 1,
+  "revokedCards": "[hK(id=300,div=2,ord=10)]",
+  "holdInProgress": false,
+  "revocationApplied": true
+}
+game.exposedCards: {
+  "2": {
+    "2": "[hK(id=300,div=2,ord=10)]"
+  }
+}
+game.fcChances: {"2":{"forehand":1,"count":1}}
+game.fcPending: null
+game.forehandControl: null
+gFCInteraction: null
+
+engineCheckFCTrigger(2) result: shouldTrigger=true
+  controller: player 1
+  exposedDivisionCards: [hK(id=300,div=2,ord=10)]
+
+--- Step 3.10 鈥?After engineCheckFCTrigger (fcPending set) ---
+game.failedMultiplay: {
+  "failer": 2,
+  "intendedLead": "[hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]",
+  "actualElement": {
+    "cards": "[hJ(id=301,div=2,ord=8)]",
+    "copy": 1,
+    "span": 1,
+    "order": 8,
+    "division": 2
+  },
+  "blockers": [
+    1
+  ],
+  "actualBlocker": 1,
+  "revokedCards": "[hK(id=300,div=2,ord=10)]",
+  "holdInProgress": false,
+  "revocationApplied": true
+}
+game.exposedCards: {
+  "2": {
+    "2": "[hK(id=300,div=2,ord=10)]"
+  }
+}
+game.fcChances: {"2":{"forehand":1,"count":1}}
+game.fcPending: {
+  "forehand": 1,
+  "failer": 2,
+  "ledDivision": 2,
+  "exposedDivisionCards": "[hK(id=300,div=2,ord=10)]",
+  "active": true,
+  "chanceConsuming": true
+}
+game.forehandControl: null
+gFCInteraction: null
+
+=========================================================
+STEP 4 鈥?Active forehand-control interaction
+=========================================================
+
+3.11 Active actor proof:
+Current interaction owner: player 1
+Reason this actor owns interaction now: Player 1 (East) is the forehand of failer (North=2), computed as (2+4-1)%4 = 1
+
+--- Step 4 鈥?FC interaction active ---
+game.failedMultiplay: {
+  "failer": 2,
+  "intendedLead": "[hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]",
+  "actualElement": {
+    "cards": "[hJ(id=301,div=2,ord=8)]",
+    "copy": 1,
+    "span": 1,
+    "order": 8,
+    "division": 2
+  },
+  "blockers": [
+    1
+  ],
+  "actualBlocker": 1,
+  "revokedCards": "[hK(id=300,div=2,ord=10)]",
+  "holdInProgress": false,
+  "revocationApplied": true
+}
+game.exposedCards: {
+  "2": {
+    "2": "[hK(id=300,div=2,ord=10)]"
+  }
+}
+game.fcChances: {"2":{"forehand":1,"count":1}}
+game.fcPending: {
+  "forehand": 1,
+  "failer": 2,
+  "ledDivision": 2,
+  "exposedDivisionCards": "[hK(id=300,div=2,ord=10)]",
+  "active": true,
+  "chanceConsuming": true
+}
+game.forehandControl: null
+gFCInteraction: {
+  "target": 2,
+  "controller": 1,
+  "exposedDivisionCards": "[hK(id=300,div=2,ord=10)]",
+  "exposedCardIds": [
+    300
+  ],
+  "selectedCornerIds": [],
+  "mode": null,
+  "selectionMounted": true,
+  "commitButtonsMounted": true
+}
+
+3.12 Selection-surface proof:
+
+--- DOM Proof: Step 4 鈥?FC interaction ---
+  desk-south: namebar=false, preview=false, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-east: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-north: namebar=true, preview=true, has-exposed=true, corner-count=1, data-has-exposed=true, fc-active=true, fc-btns=2
+  desk-west: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  shand: exposed-highlighted=0
+  shand: fc-markers=0
+  btn-play: text="纭鏍囪", disabled=false
+
+Exact DOM selector for selectable corners: #desk-north .exposed-preview.fc-active .corner-card
+Selectable corner count: 1
+Selector for selected highlight: .corner-card[data-fc-selected]
+Currently selected count: 0
+
+3.13 Commit-control proof:
+must-play button mounted: YES
+must-play selector: #desk-north .exposed-preview.fc-active .fc-btn-row .fc-action-btn:first-child
+must-play handler: commitForehandControl('must-play') via addEventListener
+
+must-hold button mounted: YES
+must-hold selector: #desk-north .exposed-preview.fc-active .fc-btn-row .fc-action-btn:nth-child(2)
+must-hold handler: commitForehandControl('must-hold') via addEventListener
+
+Clicked first corner card to select it.
+After click 鈥?selected count: 1
+gFCInteraction.selectedCornerIds: 300
+
+=========================================================
+STEP 5 鈥?Immediately after forehand-control commit
+=========================================================
+FC chances before commit: 1
+FC chances after commit: 0
+
+--- Step 5 鈥?After FC commit ---
+game.failedMultiplay: {
+  "failer": 2,
+  "intendedLead": "[hK(id=300,div=2,ord=10), hJ(id=301,div=2,ord=8)]",
+  "actualElement": {
+    "cards": "[hJ(id=301,div=2,ord=8)]",
+    "copy": 1,
+    "span": 1,
+    "order": 8,
+    "division": 2
+  },
+  "blockers": [
+    1
+  ],
+  "actualBlocker": 1,
+  "revokedCards": "[hK(id=300,div=2,ord=10)]",
+  "holdInProgress": false,
+  "revocationApplied": true
+}
+game.exposedCards: {
+  "2": {
+    "2": "[hK(id=300,div=2,ord=10)]"
+  }
+}
+game.fcChances: {}
+game.fcPending: null
+game.forehandControl: {"mode":"must-play","selectedCards":"[hK(id=300,div=2,ord=10)]","target":2,"controller":1}
+gFCInteraction: null
+
+3.15 Consumption proof:
+Chances before: 1, after: 0
+Exactly one consumed: YES
+
+3.16 Continuation proof:
+Pending trigger cleared: YES
+Interaction state cleared: YES
+Failer follow now enabled: YES (current player: 2)
+
+--- DOM Proof: Step 5 鈥?After commit ---
+  desk-south: namebar=false, preview=false, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-east: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-north: namebar=true, preview=true, has-exposed=true, corner-count=1, data-has-exposed=true, fc-active=false, fc-btns=0
+  desk-west: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  shand: exposed-highlighted=0
+  shand: fc-markers=0
+  btn-play: text="纭鏍囪", disabled=true
+
+Own-view marking visible: NO (count: 0)
+  (South is not the target, so 0 expected unless South is failer)
+Other-view marking visible: YES (count: 1)
+  corner[0]: suit=h, rank=K, data-fc=must-play
+
+game.forehandControl: {"mode":"must-play","selectedCards":["hK(id=300,div=2,ord=10)"],"target":2,"controller":1}
+
+North's remaining hearts: [hK(id=300,div=2,ord=10)]
+North follows...
+  North plays: [hK(id=300,div=2,ord=10)], success=true
+game.forehandControl after target follows: null (cleared)
+West follows: [sA(id=387,div=3,ord=11)], success=true
+South follows: [h5(id=351,div=2,ord=2)], success=true, roundComplete
+Round 2 ended. Winner: player 2
+
+=========================================================
+STEP 6 鈥?After new frame / new game reset
+=========================================================
+
+--- Step 6 鈥?After new game reset ---
+game.failedMultiplay: null
+game.exposedCards: {}
+game.fcChances: {}
+game.fcPending: null
+game.forehandControl: null
+gFCInteraction: null
+
+3.18 UI leak proof:
+
+After new game:
+FailedMultiplayState cleared: YES
+ExposedCardState cleared: YES
+ForehandControlChanceState cleared: YES
+ForehandControlPendingTriggerState cleared: YES
+ForehandControlInteractionState cleared: YES
+Stray 纭鏍囪 button present: NO
+Stale has-exposed elements: 0
+Stale fc-active elements: 0
+Stale data-has-exposed attributes: 0
+
+--- DOM Proof: Step 6 鈥?After new game ---
+  desk-south: namebar=false, preview=false, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-east: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-north: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  desk-west: namebar=true, preview=true, has-exposed=false, corner-count=0, data-has-exposed=false, fc-active=false, fc-btns=0
+  shand: exposed-highlighted=0
+  shand: fc-markers=0
+  btn-play: text="鍑虹墝", disabled=true
+
+=========================================================
+Section 4 鈥?Mandatory contradiction check
+=========================================================
+
+Was any earlier YES/COMPLETE statement incorrect? YES
+
+The following items were incorrectly reported as complete in note 22:
+
+1. "Exposed cards rendered in exposed-preview" 鈥?INCORRECT
+   Runtime evidence: .desk-namebar had overflow:hidden in game.css,
+   which clipped the .exposed-preview (positioned at top:100%) to zero visible area.
+   The corner-card DOM nodes existed and had correct data, but were invisible.
+   Fix: Changed overflow:hidden to overflow:visible on .desk-namebar in game.css.
+
+2. "Exposed previews persist across rounds" 鈥?INCORRECT
+   Runtime evidence: clearDesk() in finishRound() called resetAllNamebars()
+   which cleared all preview innerHTML and removed has-exposed class.
+   promptCurrentPlayer() did NOT restore them afterward.
+   Fix: Added updateExposedPreview() loop after clearDesk() in finishRound transition.
+
+3. "FC interaction is actionable" 鈥?PARTIALLY INCORRECT
+   Runtime evidence: FC buttons and corner cards rendered inside .exposed-preview,
+   which was clipped by overflow:hidden. The interaction was technically functional
+   but invisible. Fix is same as #1 (overflow:visible).
+
+=========================================================
+Section 5 鈥?File/function mapping
+=========================================================
+
+Transition: Failed-multiplay resolution
+File: static/js/games/shengji/shengji_engine.js
+Function: enginePlayCards (lead branch) 鈫?engineIsLegalLead 鈫?engineResolveFailedMultiplay 鈫?engineRegisterFailedMultiplay
+Condition: engineIsLegalLead detects blockedEvents (opponent can beat at least one multiplay element via engineCouldBeatShape)
+State changes: game.failedMultiplay set (FailedMultiplayState with all 9 fields), game.exposedCards[failer][div] populated, game.fcChances[failer].count incremented
+
+Transition: 1-second hold completion
+File: static/js/pages/game/index.js
+Function: handleFailedMultiplay 鈫?setTimeout callback (1000ms)
+Condition: 1 second elapsed after intended lead shown on desk
+State changes: game.failedMultiplay.holdInProgress鈫抐alse, .revocationApplied鈫抰rue; desk re-rendered with actual element only; updateExposedPreview() called for all non-human players
+
+Transition: Later forehand-control trigger activation
+File: static/js/games/shengji/shengji_engine.js
+Function: engineCheckFCTrigger (called from promptCurrentPlayer in index.js)
+Condition: (1) failer is following (not leading), (2) game.exposedCards[failer][ledDivision].length > 0, (3) game.fcChances[failer].count > 0
+State changes: game.fcPending set with {forehand, failer, ledDivision, exposedDivisionCards, active:true, chanceConsuming:true}
+
+Transition: Forehand-control interaction mount
+File: static/js/pages/game/index.js
+Function: exerciseForehandControl
+Condition: engineCheckFCTrigger returned shouldTrigger:true
+State changes: gFCInteraction set with 8 fields; for human controller: .exposed-preview gets fc-active class, renderFCCorners creates corner cards + buttons
+
+Transition: Forehand-control commit
+File: static/js/pages/game/index.js 鈫?static/js/games/shengji/shengji_engine.js
+Function: commitForehandControl 鈫?engineExerciseFC
+Condition: Human clicks must-play or must-hold button (or main play button as fallback)
+State changes: game.fcChances[failer].count decremented (deleted if 0), game.forehandControl set {mode, selectedCards, target, controller}, game.fcPending鈫抧ull, gFCInteraction鈫抧ull, .exposed-preview fc-active removed, previews re-rendered with FC markings
+
+Transition: Exposed-card decay after play
+File: static/js/games/shengji/shengji_engine.js
+Function: engineDecayExposedCards (called from enginePlayCards after both lead and follow)
+Condition: Played cards' cardIds match entries in game.exposedCards[player][division]
+State changes: Matching cards removed from exposedCards; empty divisions/players cleaned up
+
+Transition: FC constraint cleared after target follows
+File: static/js/games/shengji/shengji_engine.js
+Function: enginePlayCards (follow branch, line "if (fc) { game.forehandControl = null; }")
+Condition: The target player (fc.target === player) successfully follows
+State changes: game.forehandControl 鈫?null
+
+Transition: New-game reset
+File: static/js/games/shengji/shengji_engine.js + static/js/pages/game/index.js
+Function: engineStartGame (engine) + startNewGame (UI: gFCInteraction=null, clearDesk, initPersistentNamebars)
+Condition: New game initiated
+State changes: game.failedMultiplay=null, game.exposedCards={}, game.fcChances={}, game.fcPending=null, game.forehandControl=null, gFCInteraction=null; all DOM namebars recreated fresh; all data-has-exposed removed; all has-exposed classes removed
+
+
+=========================================================
+TRACE COMPLETE
+=========================================================
+

@@ -7,7 +7,7 @@ let level = 5;
 let strain = 2;
 let baseScore = 0;
 let baseRawScore = 0;
-let baseMultiplier = 0;
+let baseEndgameFactor = 0;
 
 let isQiangzhuang = true;
 let declarations = [];
@@ -172,7 +172,7 @@ function goToNextMove() {
     currentMoveId = nextMove.moveId;
     if(nextMove.isEnd) {
       setBaseScore();
-      setScoreValue(score + baseScore + penalty);
+      setScoreValue(frameScore + baseScore + penalty);
     } else {
       setScore(nextMove);
     }
