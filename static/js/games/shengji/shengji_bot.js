@@ -423,13 +423,69 @@ function botFindBestStructuredElement(hand) {
 }
 
 /**
- * Choose cards to lead.
+ * Build void info: which players have showed out in which divisions.
+ * A player showed out if they failed to follow a lead division in any round.
+ * Returns { playerIndex -> { division -> true } }
+ */
+function botGetVoidInfo() {
+    let voidInfo = {};
+    for (let p = 0; p < NUM_PLAYERS; p++) voidInfo[p] = {};
+    for (let rh of game.roundHistory) {
+        if (!rh.played[rh.leader]) continue;
+        let leadDiv = rh.played[rh.leader][0] ? rh.played[rh.leader][0].division : null;
+        if (leadDiv === null) continue;
+        for (let i = 0; i < NUM_PLAYERS; i++) {
+            if (i === rh.leader || !rh.played[i]) continue;
+            let hasDiv = rh.played[i].some(c => c.division === leadDiv);
+            if (!hasDiv) voidInfo[i][leadDiv] = true;
+        }
+    }
+    return voidInfo;
+}
+
+/**
+ * Check if all other players have showed out in a given division.
+ */
+function botAllOthersShowedOut(player, division, voidInfo) {
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        if (p === player) continue;
+        if (!voidInfo[p][division]) return false;
+    }
+    return true;
+}
+
+/**
+ * Multiplay tie-break: compare two candidates.
+ * 1. Largest volume wins
+ * 2. Highest core element order wins
+ * 3. Deterministic by first card id
+ * Returns negative if a wins, positive if b wins, 0 if tie.
+ */
+function botMultiplayTieBreak(a, b) {
+    // 1. Largest volume
+    if (a.cards.length !== b.cards.length) return b.cards.length - a.cards.length;
+    // 2. Highest core element order
+    if (a.coreOrder !== b.coreOrder) return b.coreOrder - a.coreOrder;
+    // 3. Deterministic by lowest cardId in candidate
+    let aMinId = Math.min(...a.cards.map(c => c.cardId));
+    let bMinId = Math.min(...b.cards.map(c => c.cardId));
+    return aMinId - bMinId;
+}
+
+/**
+ * Choose cards to lead (Note 28 priority order).
+ *
+ * Priority:
+ *   Case 1: Others-showed-out full division with structure
+ *   Case 2: Good-structure core, with good singles appended if present
+ *   Case 3: Others-showed-out full division single-only
+ *   Case 4: A few good singles
  */
 function botChooseLead(player) {
     let hand = game.hands[player];
     if (hand.length === 0) return [];
 
-    // 1. Try multiplay: group hand by division, attempt multiplay in each
+    // Group hand by division
     let divGroups = {};
     for (let c of hand) {
         let d = c.division;
@@ -437,17 +493,97 @@ function botChooseLead(player) {
         divGroups[d].push(c);
     }
 
-    let bestMultiplay = null;
-    let bestMultiplayVolume = 0;
-    for (let d in divGroups) {
-        let mp = botBuildMultiplay(player, divGroups[d], parseInt(d));
-        if (mp && mp.length > bestMultiplayVolume) {
-            bestMultiplay = mp;
-            bestMultiplayVolume = mp.length;
-        }
-    }
-    if (bestMultiplay) return bestMultiplay;
+    let voidInfo = botGetVoidInfo();
 
+    // --- Case 1: Others-showed-out full division WITH structure ---
+    let case1Candidates = [];
+    for (let d in divGroups) {
+        let div = parseInt(d);
+        if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
+        let divCards = divGroups[d];
+        if (divCards.length < 2) continue; // need multiple cards for multiplay
+        // Check if there's at least one structure
+        let elements = botFindAllStructuredElements(divCards, div);
+        if (elements.length === 0) continue;
+        // Case 1 applies: play the entire division
+        let coreOrder = Math.max(...elements.map(el => el.order));
+        case1Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
+    }
+    if (case1Candidates.length > 0) {
+        case1Candidates.sort(botMultiplayTieBreak);
+        return case1Candidates[0].cards;
+    }
+
+    // --- Case 2: Good-structure core + good singles appended if present ---
+    let case2Candidates = [];
+    for (let d in divGroups) {
+        let div = parseInt(d);
+        let divCards = divGroups[d];
+        let unseenMap = botGetUnseenByOrder(player, div);
+
+        // Find all structured elements
+        let allElements = botFindAllStructuredElements(divCards, div);
+        // Filter to good structures (grade <= 4)
+        let goodStructures = allElements.filter(el => botComputeGrade(el, unseenMap) <= 4);
+        if (goodStructures.length === 0) continue;
+
+        // Build multiplay: all good structures + good singles
+        let structuredIds = new Set(goodStructures.flatMap(el => el.cards.map(c => c.cardId)));
+        let remainingDivCards = divCards.filter(c => !structuredIds.has(c.cardId));
+        let goodSingles = botFindTopEstablishedSingles(remainingDivCards, unseenMap);
+
+        let multiplayCards = [];
+        for (let el of goodStructures) multiplayCards.push(...el.cards);
+        multiplayCards.push(...goodSingles);
+
+        // Must form a multiplay (more than one element after decomposition)
+        let elementCount = goodStructures.length + goodSingles.length;
+        if (elementCount <= 1) continue;
+
+        let coreOrder = Math.max(...goodStructures.map(el => el.order));
+        case2Candidates.push({ cards: multiplayCards, division: div, coreOrder: coreOrder });
+    }
+    if (case2Candidates.length > 0) {
+        case2Candidates.sort(botMultiplayTieBreak);
+        return case2Candidates[0].cards;
+    }
+
+    // --- Case 3: Others-showed-out full division single-only ---
+    let case3Candidates = [];
+    for (let d in divGroups) {
+        let div = parseInt(d);
+        if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
+        let divCards = divGroups[d];
+        if (divCards.length < 2) continue;
+        // Must NOT have structure (those went to Case 1)
+        let elements = botFindAllStructuredElements(divCards, div);
+        if (elements.length > 0) continue;
+        // Play entire division (all singles)
+        let coreOrder = Math.max(...divCards.map(c => c.order));
+        case3Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
+    }
+    if (case3Candidates.length > 0) {
+        case3Candidates.sort(botMultiplayTieBreak);
+        return case3Candidates[0].cards;
+    }
+
+    // --- Case 4: A few good singles ---
+    let case4Candidates = [];
+    for (let d in divGroups) {
+        let div = parseInt(d);
+        let divCards = divGroups[d];
+        let unseenMap = botGetUnseenByOrder(player, div);
+        let goodSingles = botFindTopEstablishedSingles(divCards, unseenMap);
+        if (goodSingles.length < 2) continue;
+        let coreOrder = Math.max(...goodSingles.map(c => c.order));
+        case4Candidates.push({ cards: goodSingles, division: div, coreOrder: coreOrder });
+    }
+    if (case4Candidates.length > 0) {
+        case4Candidates.sort(botMultiplayTieBreak);
+        return case4Candidates[0].cards;
+    }
+
+    // --- Fallback: no multiplay applies ---
     // 2. Try highest structured element (single element lead)
     let structured = botFindBestStructuredElement(hand);
     if (structured) return structured.cards;

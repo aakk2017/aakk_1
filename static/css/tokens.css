@@ -71,6 +71,12 @@
     font-family: 'Roboto';
     src: url('../fonts/Roboto/Roboto-VariableFont_wdth\,wght.ttf') format('truetype');
 }
+@font-face {
+    /* for timers — italic monospace */
+    font-family: 'JetBrains Mono';
+    font-style: italic;
+    src: url('../fonts/JetBrains_Mono/JetBrainsMono-Italic-VariableFont_wght.ttf') format('truetype');
+}
 
 :root {
     /* heights and widths */
@@ -79,6 +85,9 @@
     --card-height: 18vh;
     --card-width: 12vh;
     --radius: 0.6vh;
+
+    /* font categories */
+    --font-timer: "JetBrains Mono";
 
     /* colors */
     /* spade */

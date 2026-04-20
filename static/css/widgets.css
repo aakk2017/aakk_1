@@ -202,7 +202,6 @@ body {
     text-align: center;
     line-height: 4vh;
 }
-
 /* styles of #corner-rt, score area */
 /* this area remains the same in games */
 .blocks-rt {
@@ -239,28 +238,30 @@ body {
     outline: 1px solid black;
     /* letter-spacing: -0.3vh; */
 }
-#div-mp-compensation-and-base {
+#div-hints {
     width: 10vh;
     height: 15vh;
     margin: auto;
     text-align: left;
     font-size: 3vh;
 }
-#div-mp-compensation,
-#div-base-score {
+#div-hint-1,
+#div-hint-2 {
     height: 6vh;
     margin: 1vh;
     line-height: 6vh;
 }
-#div-mp-compensation[sign="-"] {
+#div-hint-1[sign="-"] {
     color: #ce0000;
 }
-#div-mp-compensation[sign="+"] {
+#div-hint-1[sign="+"] {
     color: #00a000;
 }
-#div-base-score {
+#div-hint-2 {
     margin-top: 0;
-    color: #0000ce;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: 2vh;
+    color: #555;
 }
 
 /* styles for the lb block */

@@ -1,0 +1,8 @@
+{
+  "state": {
+    "di": 100,
+    "ph": "declaring",
+    "cd": true
+  },
+  "errors": []
+}

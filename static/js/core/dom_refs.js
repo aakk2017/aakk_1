@@ -53,8 +53,8 @@ const declarerSpan = document.getElementById("span-declaration");
 const declareMethodSpan = document.getElementById("span-declare-method");
 const scoreDiv = document.getElementById("div-score");
 const scoreContainerDiv = document.getElementById("div-score-container");
-const mpCompensationDiv = document.getElementById("div-mp-compensation");
-const baseScoreDiv = document.getElementById("div-base-score");
+const mpCompensationDiv = document.getElementById("div-hint-1");
+const baseScoreDiv = document.getElementById("div-hint-2");
 const fileNameDiv = document.getElementById("file-name-container");
 const saveUpgBtn = document.getElementById("save-upg-btn");
 

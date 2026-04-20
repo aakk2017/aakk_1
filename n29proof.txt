@@ -1,0 +1,39 @@
+=== Bot declared on attempt 1 ===
+
+Step A — before declaration
+Actual page scenario: Bot declaration during dealing
+Current dealt-card count: (before declaration, all fields empty)
+Declaration exists yet: NO
+Top-left declarer visible: NO
+Top-left strain visible: NO
+Top-left exposed declaration card visible: NO
+
+Step B — immediately after declaration occurs
+Actual page scenario: Bot declaration during dealing
+Declarer: 东
+Declared strain: c
+Exposed declaration card(s): [{"suit":"c","rank":"2"}]
+Top-left declarer visible now: YES
+Top-left strain visible now: YES
+Top-left exposed declaration card(s) visible now: YES
+
+Declaration-summary container selector: #div-denomination-area
+Declarer render selector: #span-declaration
+Strain render selector: #div-denomination-strain
+Exposed-card render selector: #div-declaration-cards .corner-card
+Mounted exposed-card node count: 1
+
+Step C — after additional cards are dealt
+Additional cards dealt after declaration: dealIndex 12 -> 36
+Declarer still visible correctly: YES (value: 东)
+Strain still visible correctly: YES
+Exposed declaration card(s) still visible correctly: YES (count: 1)
+
+Step D — after the full 25 cards are dealt
+Dealing finished: YES
+Final declaration window active: YES
+Phase: declaring
+Declarer still visible correctly: YES
+Strain still visible correctly: YES
+Exposed declaration card(s) still visible correctly: YES
+Exposed-card count: 2

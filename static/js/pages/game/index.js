@@ -48,13 +48,16 @@ const gDenomArea   = document.getElementById('div-denomination-area');
 const gSeatsDiv    = document.getElementById('div-seats');
 const gDeclareSp   = document.getElementById('span-declaration');
 const gDeclMethodSp= document.getElementById('span-declare-method');
-const gBaseScoreDiv= document.getElementById('div-base-score');
+const gHint1Div    = document.getElementById('div-hint-1');
+const gHint2Div    = document.getElementById('div-hint-2');
 const gCounterDrawerInner = document.getElementById('counter-drawer-inner');
 const gCounterDrawer = document.getElementById('counter-drawer');
 const gBtnShowBase = document.getElementById('btn-show-base');
 const gBasePreview = document.getElementById('base-preview');
 const gCountingDialog  = document.getElementById('counting-dialog');
 const gCountingOverlay = document.getElementById('counting-overlay');
+const gDeskCenterLeft  = document.getElementById('desk-center-left');
+const gBtnNoDeclare    = document.getElementById('btn-no-declare');
 
 // ---------------------------------------------------------------------------
 // Test mode: human controls both South (0) and East (1)
@@ -90,11 +93,57 @@ const BOT_DELAY = 600;
 let currentDeclaration = null;   // declaration made by human during dealing
 let dealingTimer     = null;   // setInterval handle for deal animation
 
+// Frame number within current game (starts at 1, increments per frame)
+let frameNumber = 0;
+
+// Attackers' consecutive-attack streak counter (reset when pivot changes teams)
+let attackersStreak = 0;
+
 // Attackers' won counter cards (temporal order, reset per frame) — for §2 drawer
 let wonCounterCards = [];
 
 // Persistent name bar DOM refs [south, east, north, west]
 let gDeskNamebars = [null, null, null, null];
+
+// ---------------------------------------------------------------------------
+// Timing state (note 24)
+// ---------------------------------------------------------------------------
+
+/**
+ * Active timing context — structurally distinct timer phases (note 24 §17).
+ * Possible timingPhase values:
+ *   'intermittent'          — 2s frame-start non-interactive
+ *   'finalDeclare'          — 5s final declaration window
+ *   'overbaseWindow'        — 10s overbase calling window
+ *   'playerMove'            — timed player move (set-base or play-card)
+ *   'blockChoice'           — block-type choice (play-card timing)
+ *   'fcContinuation'        — forehand-control continuation (same timing unit)
+ *   null                    — no active timer
+ */
+let gTimingPhase = null;
+
+// Timer interval handle (runs every 100ms for smooth countdown)
+let gTimerInterval = null;
+
+// Current countdown values (seconds, float)
+let gShotClockRemaining = 0;
+let gBankTimeRemaining  = 0;
+
+// Whether shot clock or bank time is currently counting
+// 'shot' = shot clock phase, 'bank' = bank time phase
+let gTimerStage = 'shot';
+
+// Timer DOM elements (created dynamically)
+let gTimerOverlayEl  = null;   // desk-slot timer overlay
+let gTimerCenterEl   = null;   // center-area timer
+let gShotClockEl     = null;   // shot clock digit element
+let gBankTimeEl      = null;   // bank time digit element
+
+// "No declaration" tracking: which players have clicked "不亮" in current window
+let gNoDeclareClicked = new Set();
+
+// Callback to invoke when a timed window expires or is broken
+let gTimerExpireCallback = null;
 
 // ---------------------------------------------------------------------------
 // Card rendering
@@ -156,6 +205,55 @@ function updateCounterDrawer() {
     gCounterDrawerInner.innerHTML = '';
     for (let card of wonCounterCards) {
         gCounterDrawerInner.appendChild(createCornerCard(card));
+    }
+    // Multiplay compensation row (note 25 §2.4)
+    let existingComp = gCounterDrawer.querySelector('.counter-mp-comp');
+    if (existingComp) existingComp.remove();
+    if (game && game.multiplayCompensation && game.multiplayCompensation !== 0) {
+        let compRow = document.createElement('div');
+        compRow.className = 'counter-mp-comp';
+        let sign = game.multiplayCompensation > 0 ? '+' : '-';
+        compRow.setAttribute('data-sign', sign);
+        compRow.textContent = sign + Math.abs(game.multiplayCompensation);
+        gCounterDrawer.appendChild(compRow);
+    }
+    // Zero-space rule (note 25 §8)
+    let hasContent = wonCounterCards.length > 0 || (game && game.multiplayCompensation && game.multiplayCompensation !== 0);
+    gCounterDrawer.setAttribute('data-has-content', hasContent ? 'true' : 'false');
+}
+
+/**
+ * Describe the lead type from leadInfo for status-bar display.
+ * Returns { divisionKey, leadTypeKey } for i18n lookup.
+ */
+function describeLeadInfo(leadInfo) {
+    let divisionKey = numberToDivisionName[leadInfo.division];
+    let leadTypeKey;
+    if (leadInfo.elements.length > 1) {
+        leadTypeKey = 'multiplay';
+    } else {
+        let e = leadInfo.elements[0];
+        if (e.copy === 1) leadTypeKey = 'single';
+        else if (e.span === 1) leadTypeKey = 'pair';
+        else leadTypeKey = 'tractor';
+    }
+    return { divisionKey, leadTypeKey };
+}
+
+/**
+ * Update attackers' streak display in div-hint-2 (note 26b §4).
+ * Attackers' streak = consecutive rounds won by attackers within the current frame.
+ * Display only when positive (hide when zero).
+ * Its value resets to zero when attackers lose a round.
+ */
+function updateAttackersStreakDisplay() {
+    if (!gHint2Div) return;
+    if (attackersStreak > 0) {
+        gHint2Div.textContent = t('hints.attackersStreak', { streak: attackersStreak });
+        gHint2Div.style.display = '';
+    } else {
+        gHint2Div.textContent = '';
+        gHint2Div.style.display = 'none';
     }
 }
 
@@ -322,7 +420,9 @@ function renderHand(player) {
         if (fcMarkedIds && fcMarkedIds.has(card.cardId)) {
             let marker = document.createElement('div');
             marker.className = 'fc-marker fc-marker-' + fcMode;
-            cc.querySelector('.card').appendChild(marker);
+            let cardEl = cc.querySelector('.card');
+            let suitEl = cardEl.querySelector('.card-suit');
+            suitEl.after(marker);
         }
         handRow.appendChild(cc);
     }
@@ -478,6 +578,7 @@ function showDeclaredCardsOnDesk(player, suit, count) {
 }
 
 
+
 // ---------------------------------------------------------------------------
 // Score display
 // ---------------------------------------------------------------------------
@@ -549,6 +650,310 @@ function showError(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Timing utilities (note 24)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clear all active timers and timer UI elements.
+ */
+function clearTimers() {
+    if (gTimerInterval) { clearInterval(gTimerInterval); gTimerInterval = null; }
+    gTimingPhase = null;
+    gTimerStage = 'shot';
+    gTimerExpireCallback = null;
+    gNoDeclareClicked.clear();
+    removeTimerOverlay();
+    removeTimerCenter();
+}
+
+/**
+ * Remove desk-slot timer overlay from DOM.
+ */
+function removeTimerOverlay() {
+    if (gTimerOverlayEl && gTimerOverlayEl.parentNode) {
+        gTimerOverlayEl.parentNode.removeChild(gTimerOverlayEl);
+    }
+    gTimerOverlayEl = null;
+    gShotClockEl = null;
+    gBankTimeEl = null;
+}
+
+/**
+ * Remove center-area timer from DOM.
+ */
+function removeTimerCenter() {
+    if (gTimerCenterEl && gTimerCenterEl.parentNode) {
+        gTimerCenterEl.parentNode.removeChild(gTimerCenterEl);
+    }
+    gTimerCenterEl = null;
+}
+
+/**
+ * Create and show a primary timer in the center area (for declaration calling windows).
+ * Returns the timer digit element.
+ */
+function showCenterTimer(seconds) {
+    removeTimerCenter();
+    let el = document.createElement('div');
+    el.className = 'timer-center';
+    let digit = document.createElement('span');
+    digit.className = 'timer-primary';
+    digit.textContent = Math.ceil(seconds);
+    el.appendChild(digit);
+    gDeskCenterLeft.appendChild(el);
+    gTimerCenterEl = el;
+    return digit;
+}
+
+/**
+ * Create and show shot clock + bank time overlay on a desk slot.
+ * @param {number} player - player index (0–3)
+ */
+function showTimerOverlay(player) {
+    removeTimerOverlay();
+    let slot = gDeskSlots[player];
+    let overlay = document.createElement('div');
+    overlay.className = 'timer-overlay';
+
+    let shotEl = document.createElement('span');
+    shotEl.className = 'timer-primary';
+    shotEl.textContent = Math.ceil(gShotClockRemaining);
+    overlay.appendChild(shotEl);
+    gShotClockEl = shotEl;
+
+    let bankEl = document.createElement('span');
+    bankEl.className = 'timer-secondary';
+    bankEl.textContent = Math.ceil(gBankTimeRemaining);
+    overlay.appendChild(bankEl);
+    gBankTimeEl = bankEl;
+
+    slot.appendChild(overlay);
+    gTimerOverlayEl = overlay;
+}
+
+/**
+ * Update timer display digits.
+ */
+function updateTimerDisplay() {
+    if (gShotClockEl) gShotClockEl.textContent = Math.max(0, Math.ceil(gShotClockRemaining));
+    if (gBankTimeEl)  gBankTimeEl.textContent  = Math.max(0, Math.ceil(gBankTimeRemaining));
+}
+
+/**
+ * Start a countdown timer for a declaration calling window (center area).
+ * @param {string} phase - 'finalDeclare' or 'overbaseWindow'
+ * @param {number} seconds - countdown duration
+ * @param {Function} onExpire - called when timer reaches 0 or is broken
+ */
+function startCallingWindowTimer(phase, seconds, onExpire) {
+    clearTimers();
+    gTimingPhase = phase;
+    gShotClockRemaining = seconds;
+    gTimerExpireCallback = onExpire;
+
+    let digitEl = showCenterTimer(seconds);
+
+    gTimerInterval = setInterval(() => {
+        gShotClockRemaining -= 0.1;
+        if (digitEl) digitEl.textContent = Math.max(0, Math.ceil(gShotClockRemaining));
+        if (gShotClockRemaining <= 0) {
+            clearTimers();
+            onExpire();
+        }
+    }, 100);
+}
+
+/**
+ * Break the current calling window timer immediately.
+ */
+function breakCallingWindowTimer() {
+    let cb = gTimerExpireCallback;
+    clearTimers();
+    if (cb) cb();
+}
+
+/**
+ * Start shot clock + bank time for a human player's move.
+ * @param {number} player - player index
+ * @param {string} moveType - 'base' or 'play' (determines shot clock duration)
+ * @param {Function} onTimeout - called when both shot clock and bank time expire
+ */
+function startPlayerMoveTimer(player, moveType, onTimeout) {
+    if (!isHumanControlled(player)) return; // bots are untimed (note 24 §2)
+    clearTimers();
+    gTimingPhase = moveType === 'base' ? 'playerMove' : 'playerMove';
+    let shotDuration = (moveType === 'base') ? TIMING_CONFIG.baseShotClock : TIMING_CONFIG.playShotClock;
+    gShotClockRemaining = shotDuration;
+    gBankTimeRemaining = game.playerBankTimes[player];
+    gTimerStage = 'shot';
+    gTimerExpireCallback = onTimeout;
+
+    showTimerOverlay(player);
+
+    gTimerInterval = setInterval(() => {
+        if (gTimerStage === 'shot') {
+            gShotClockRemaining -= 0.1;
+            if (gShotClockRemaining <= 0) {
+                gShotClockRemaining = 0;
+                if (gBankTimeRemaining > 0) {
+                    gTimerStage = 'bank';
+                } else {
+                    // Both expired — auto-play as bot
+                    clearTimers();
+                    game.playerBankTimes[player] = 0;
+                    onTimeout();
+                    return;
+                }
+            }
+        } else {
+            // bank time stage
+            gBankTimeRemaining -= 0.1;
+            game.playerBankTimes[player] = Math.max(0, gBankTimeRemaining);
+            if (gBankTimeRemaining <= 0) {
+                gBankTimeRemaining = 0;
+                game.playerBankTimes[player] = 0;
+                clearTimers();
+                onTimeout();
+                return;
+            }
+        }
+        updateTimerDisplay();
+    }, 100);
+}
+
+/**
+ * Stop the current player move timer (player made their move in time).
+ * Saves remaining bank time back to game state.
+ * @param {number} player - player index
+ */
+function stopPlayerMoveTimer(player) {
+    if (gTimerInterval) {
+        // Save bank time
+        if (gTimerStage === 'bank') {
+            game.playerBankTimes[player] = Math.max(0, gBankTimeRemaining);
+        }
+        clearTimers();
+    }
+}
+
+/**
+ * Continue the current timing unit for FC (no new shot clock — note 24 §12).
+ * The forehand's move and FC decision are one continuous timing unit.
+ * If the timer was already stopped (controller already played), restart it
+ * using remaining bank time so the timer remains visible during FC selection.
+ */
+function continueFCTimingUnit(player, onTimeout) {
+    if (!isHumanControlled(player)) return;
+    gTimingPhase = 'fcContinuation';
+    gTimerExpireCallback = onTimeout;
+
+    if (!gTimerInterval) {
+        // Timer was stopped after controller's play — restart with bank time
+        gShotClockRemaining = 0;
+        gBankTimeRemaining = game.playerBankTimes[player];
+        gTimerStage = 'bank';
+
+        showTimerOverlay(player);
+
+        if (gBankTimeRemaining <= 0) {
+            // No bank time left — auto-commit immediately
+            clearTimers();
+            onTimeout();
+            return;
+        }
+
+        gTimerInterval = setInterval(() => {
+            gBankTimeRemaining -= 0.1;
+            game.playerBankTimes[player] = Math.max(0, gBankTimeRemaining);
+            if (gBankTimeRemaining <= 0) {
+                gBankTimeRemaining = 0;
+                game.playerBankTimes[player] = 0;
+                clearTimers();
+                onTimeout();
+                return;
+            }
+            updateTimerDisplay();
+        }, 100);
+    }
+}
+
+/**
+ * Start timer for block-type choice (uses play-card shot clock — note 24 §13).
+ */
+function startBlockChoiceTimer(player, onTimeout) {
+    startPlayerMoveTimer(player, 'play', onTimeout);
+    gTimingPhase = 'blockChoice';
+}
+
+/**
+ * Show "No declaration" button in center area for human player.
+ * @param {Function} onAllDeclined - called when all players have clicked
+ */
+function showNoDeclareButton(onAllDeclined) {
+    if (!gBtnNoDeclare) return;
+    gBtnNoDeclare.disabled = false;
+    gBtnNoDeclare.style.opacity = '';
+    gBtnNoDeclare.textContent = t('timing.noDeclaration');
+    gBtnNoDeclare.onclick = () => {
+        gNoDeclareClicked.add(HUMAN_PLAYER);
+        gBtnNoDeclare.disabled = true;
+        gBtnNoDeclare.style.opacity = '0.4';
+        // Bots auto-decline (they've already had their chance)
+        for (let i = 0; i < NUM_PLAYERS; i++) {
+            if (!isHumanControlled(i)) gNoDeclareClicked.add(i);
+        }
+        if (gNoDeclareClicked.size >= NUM_PLAYERS) {
+            onAllDeclined();
+        }
+    };
+}
+
+/**
+ * Remove "No declaration" button — disable it.
+ */
+function removeNoDeclareButton() {
+    if (!gBtnNoDeclare) return;
+    gBtnNoDeclare.disabled = true;
+    gBtnNoDeclare.onclick = null;
+}
+
+/**
+ * Auto-play as bot when human player's time runs out.
+ */
+function autoPlayAsBot(player) {
+    if (game.phase === GamePhase.BASING && player === game.pivot) {
+        // Auto-base
+        let baseCards = botMakeBase(player);
+        engineSetBase(baseCards);
+        clearSelection();
+        renderAllHands();
+        appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[player] }));
+        startPlayingPhase();
+    } else if (game.phase === GamePhase.PLAYING) {
+        // Auto-play card(s)
+        let cards = botPlay(player);
+        let result = enginePlayCards(player, cards);
+        if (!result.success) return;
+
+        clearSelection();
+        if (result.failedMultiplay) {
+            handleFailedMultiplay(player, result.failedMultiplay, cards, result, () => {
+                if (result.roundComplete) finishRound();
+                else promptCurrentPlayer();
+            });
+            return;
+        }
+        renderDeskCards(player, cards);
+        renderHand(player);
+        for (let p = 0; p < NUM_PLAYERS; p++) {
+            if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+        }
+        if (result.roundComplete) finishRound();
+        else promptCurrentPlayer();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Game flow
 // ---------------------------------------------------------------------------
 
@@ -556,6 +961,9 @@ function startNewGame() {
     // Clean up any in-progress dealing timer
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
     currentDeclaration = null;
+
+    // Clear all active timers (note 24)
+    clearTimers();
 
     // §3: Clear forehand-control and failed-multiplay aftermath UI state
     gFCInteraction = null;
@@ -586,16 +994,25 @@ function startNewGame() {
         playerLevels = pendingNextFrame.playerLevels;
         isQiangzhuang = false;
         pendingNextFrame = null;
+        // Increment frame number within game
+        frameNumber++;
+        // Reset within-frame attackers' streak
+        attackersStreak = 0;
     } else {
         // Fresh game
         level = 0;
         pivot = Math.floor(Math.random() * NUM_PLAYERS);
         playerLevels = null;
         isQiangzhuang = true;
+        // Reset frame number for new game
+        frameNumber = 1;
+        attackersStreak = 0;
     }
 
+    // Display frame number
+    document.getElementById('div-table-number').textContent = frameNumber;
+
     // Clear corner infos
-    document.getElementById('div-table-number').textContent = '';
     gDenomArea.removeAttribute('strain');
     gStrainDiv.innerHTML = '';
     gDeclareSp.textContent = '';
@@ -605,8 +1022,8 @@ function startNewGame() {
         gScoreCont.style.backgroundColor = 'transparent';
         gScoreCont.style.borderColor = '#f8f8f8';
     }
-    document.getElementById('div-mp-compensation').textContent = '';
-    if (gBaseScoreDiv) gBaseScoreDiv.textContent = '';
+    if (gHint1Div) gHint1Div.textContent = '';
+    if (gHint2Div) updateAttackersStreakDisplay();
 
     // Seat marks: frame 2+ shows pivot immediately; frame 1 starts undetermined
     if (!isQiangzhuang) {
@@ -626,13 +1043,40 @@ function startNewGame() {
     // Display level
     gLevelDiv.textContent = numberToLevel[game.level];
 
-    // Animate dealing, then resolve declaration
-    runDealingPhase();
+    // Frame-start 2s intermittent (note 24 §3)
+    runFrameIntermittent();
 }
 
 // ---------------------------------------------------------------------------
 // Dealing phase  (animated, 0.5s per round of 4 cards)
 // ---------------------------------------------------------------------------
+
+/**
+ * Frame-start 2s non-interactive intermittent (note 24 §3).
+ * Displays pivot/level info or qiangzhuang text, then starts dealing.
+ */
+function runFrameIntermittent() {
+    gTimingPhase = 'intermittent';
+    gBtnPlay.disabled = true;
+    gDeclareMatrix.style.display = 'none';
+
+    // Central display text
+    let displayText;
+    if (game.isQiangzhuang) {
+        displayText = t('timing.intermittentQiangzhuang');
+    } else {
+        let pivotPosition = POSITION_LABELS[game.pivot];
+        displayText = t('timing.intermittentNormal', { position: pivotPosition, level: numberToLevel[game.level] });
+    }
+
+    gDeskInfo.innerHTML = '<div class="timer-intermittent">' + displayText + '</div>';
+
+    setTimeout(() => {
+        gTimingPhase = null;
+        gDeskInfo.innerHTML = '';
+        runDealingPhase();
+    }, TIMING_CONFIG.frameIntermittent * 1000);
+}
 
 function clearBotDealCounts() {
     // Card counts removed per user request
@@ -673,7 +1117,8 @@ function updateDeclareMatrix() {
         if (suit === 4) {
             // NTS buttons: Top button is Double V (count=3 equivalent), Bottom is Double W (count=4 equivalent)
             if (btnS) {
-                btnS.innerHTML = 'vv';
+                btnS.innerHTML = 'VV';
+                btnS.style.fontFamily = '"Roboto Mono"';
                 let canDoubleV = (sj >= 2) && (currentCount < 3);
                 if (currentDeclaration && currentDeclaration.player === HUMAN_PLAYER && currentDeclaration.suit !== 4) {
                     canDoubleV = false; // cannot overcall own declaration with different suit
@@ -686,6 +1131,7 @@ function updateDeclareMatrix() {
             }
             if (btnD) {
                 btnD.innerHTML = 'WW';
+                btnD.style.fontFamily = '"Roboto Mono"';
                 let canDoubleW = (bj >= 2) && (currentCount < 4);
                 if (currentDeclaration && currentDeclaration.player === HUMAN_PLAYER && currentDeclaration.suit !== 4) {
                     canDoubleW = false; // cannot overcall own declaration with different suit
@@ -734,6 +1180,11 @@ function executeDeclaration(suit, count) {
 
     showDeclaredCardsOnDesk(HUMAN_PLAYER, suit, count);
     updateDeclareMatrix();
+
+    // If this is the highest possible declaration, break any active final-declaration window (note 24 §5.3)
+    if (gTimingPhase === 'finalDeclare' && engineIsHighestPossibleDeclaration(currentDeclaration)) {
+        breakCallingWindowTimer();
+    }
 }
 
 function runDealingPhase() {
@@ -742,8 +1193,20 @@ function runDealingPhase() {
     gBtnPlay.disabled = true;
     
     // Always show declaration UI during dealing (declaration is part of all frame-start flows)
-    gDeclareMatrix.style.display = 'flex';
+    gDeclareMatrix.style.display = 'grid';
     updateDeclareMatrix();
+
+    // No-declaration button disabled during dealing (§3.3)
+    if (gBtnNoDeclare) {
+        gBtnNoDeclare.textContent = t('timing.noDeclaration');
+        gBtnNoDeclare.disabled = true;
+        gBtnNoDeclare.onclick = null;
+    }
+
+    // Show dealt count in left box (§4.1)
+    let dealtPerPlayer = game.dealIndex ? Math.floor(game.dealIndex / NUM_PLAYERS) : 0;
+    gDeskInfo.innerHTML = '<div class="dealt-count">' + dealtPerPlayer + '</div>'
+        + '<div class="dealt-count-label">' + t('dealing.dealtCount', { count: dealtPerPlayer }) + '</div>';
 
     dealingTimer = setInterval(function () {
         let batch = engineDealNextBatch();
@@ -779,12 +1242,82 @@ function runDealingPhase() {
         updateBotDealCounts();
         updateDeclareMatrix();
 
+        // Update dealt count display (§4.1)
+        let dealtPerPlayer = Math.floor(game.dealIndex / NUM_PLAYERS);
+        gDeskInfo.innerHTML = '<div class="dealt-count">' + dealtPerPlayer + '</div>'
+            + '<div class="dealt-count-label">' + t('dealing.dealtCount', { count: dealtPerPlayer }) + '</div>';
+
         if (game.phase === GamePhase.DECLARING) {
             clearInterval(dealingTimer);
             dealingTimer = null;
-            setTimeout(resolveDeclaredPhase, 400);
+            // Clear dealt-count display (§4.1 — replaced by timer after dealing)
+            gDeskInfo.innerHTML = '';
+            // Note 24 §5: check if highest-possible declaration was already made
+            if (engineIsHighestPossibleDeclaration(currentDeclaration)) {
+                // §5.1: skip final declaration window, enter basing directly
+                setTimeout(resolveDeclaredPhase, 400);
+            } else {
+                // §5.2: start 5s final declaration window
+                setTimeout(runFinalDeclarationWindow, 400);
+            }
         }
     }, 500);
+}
+
+// ---------------------------------------------------------------------------
+// Final declaration window (note 24 §5–§6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a 5s final declaration window after all 25 cards are dealt.
+ * Players may still declare/overcall. Breaks on highest-possible or unanimous "No declaration".
+ */
+function runFinalDeclarationWindow() {
+    updatePhaseDisplay(t('phase.declaring'));
+    gDeclareMatrix.style.display = 'grid';
+    updateDeclareMatrix();
+    gNoDeclareClicked.clear();
+
+    startCallingWindowTimer('finalDeclare', TIMING_CONFIG.finalDeclareWindow, () => {
+        // Timer expired or broken — resolve
+        removeNoDeclareButton();
+        gDeclareMatrix.style.display = 'none';
+        resolveDeclaredPhase();
+    });
+
+    // Bots take their last chance to overcall during the window
+    for (let i = 0; i < NUM_PLAYERS; i++) {
+        let p = (game.pivot + i) % NUM_PLAYERS;
+        if (isHumanControlled(p)) continue;
+        let decl = botChooseDeclaration(p, currentDeclaration);
+        if (decl) {
+            let currentCount = currentDeclaration ? currentDeclaration.count : 0;
+            if (decl.count > currentCount) {
+                currentDeclaration = { player: p, suit: decl.suit, count: decl.count };
+                let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
+                gDenomArea.setAttribute('strain', suitName);
+                gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
+                gDeclareSp.textContent = POSITION_LABELS[p];
+                gDeclMethodSp.textContent = t('labels.declareMethod');
+                appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+                showDeclaredCardsOnDesk(p, decl.suit, decl.count);
+
+                // If bot made highest-possible, break immediately (§5.3)
+                if (engineIsHighestPossibleDeclaration(currentDeclaration)) {
+                    breakCallingWindowTimer();
+                    return;
+                }
+            }
+        }
+        // Bots auto-decline for "No declaration" purposes
+        gNoDeclareClicked.add(p);
+    }
+
+    // Show "No declaration" button for human (§6)
+    showNoDeclareButton(() => {
+        // All players declined — break immediately (§6.2)
+        breakCallingWindowTimer();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -797,19 +1330,6 @@ function resolveDeclaredPhase() {
     gDeclareMatrix.style.display = 'none';
 
     let bestDeclaration = currentDeclaration;
-
-    // Bots have one last chance to overcall once dealt (if rules allow doing it at the very end of deal)
-    for (let i = 0; i < NUM_PLAYERS; i++) {
-        let p = (game.pivot + i) % NUM_PLAYERS;
-        if (p === HUMAN_PLAYER) continue;
-        let decl = botChooseDeclaration(p, bestDeclaration);
-        if (decl) {
-            let candidate = { player: p, suit: decl.suit, count: decl.count };
-            if (!bestDeclaration || candidate.count > bestDeclaration.count) {
-                bestDeclaration = candidate;
-            }
-        }
-    }
 
     if (bestDeclaration) {
         let suitName = bestDeclaration.suit === 4 ? (bestDeclaration.count >= 4 ? 'w' : 'v') : numberToSuitName[bestDeclaration.suit];
@@ -870,14 +1390,68 @@ function runBasingPhase() {
         updateStatus(t('status.selectBase', { n: BASE_SIZE }));
         gBtnPlay.textContent = t('buttons.baseProgress', { current: 0, total: BASE_SIZE });
         gBtnPlay.disabled = true;
+
+        // Start base shot clock (note 24 §10.1)
+        startPlayerMoveTimer(game.pivot, 'base', () => {
+            autoPlayAsBot(game.pivot);
+        });
     } else {
         // Bot is pivot — auto-base
         let baseCards = botMakeBase(game.pivot);
         engineSetBase(baseCards);
         renderAllHands();
         appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[game.pivot] }));
+        afterBasingComplete();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Overbase calling window (note 24 §7)
+// ---------------------------------------------------------------------------
+
+/**
+ * After a set-base move, start a 10s overbase calling window if overbase is enabled.
+ * Otherwise, proceed directly to playing phase.
+ */
+function afterBasingComplete() {
+    if (game.gameConfig && game.gameConfig.allowOverbase) {
+        runOverbaseWindow();
+    } else {
         startPlayingPhase();
     }
+}
+
+/**
+ * 10s overbase calling window (note 24 §7).
+ * An overbase move breaks immediately → new set-base.
+ * Unanimous "No declaration" or timeout → proceed to playing.
+ */
+function runOverbaseWindow() {
+    gNoDeclareClicked.clear();
+
+    // Show declare-matrix so the no-declare button is visible (note 25 §3)
+    gDeclareMatrix.style.display = 'grid';
+    // Disable all declaration suit buttons during overbase
+    for (let btn of gDeclBtnsSingle) { if (btn) btn.disabled = true; }
+    for (let btn of gDeclBtnsDouble) { if (btn) btn.disabled = true; }
+
+    // Bots auto-decline for overbase
+    for (let i = 0; i < NUM_PLAYERS; i++) {
+        if (!isHumanControlled(i)) gNoDeclareClicked.add(i);
+    }
+
+    startCallingWindowTimer('overbaseWindow', TIMING_CONFIG.overbaseWindow, () => {
+        // Timer expired or broken — proceed to playing phase
+        removeNoDeclareButton();
+        gDeclareMatrix.style.display = 'none';
+        startPlayingPhase();
+    });
+
+    // Show "No declaration" button for human (§6)
+    showNoDeclareButton(() => {
+        gDeclareMatrix.style.display = 'none';
+        breakCallingWindowTimer();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -962,6 +1536,12 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
 
         // Enable main play button as FC commit fallback (must-play with current selection)
         updatePlayButton();
+
+        // FC is same timing unit as the controller's own move (note 24 §12)
+        continueFCTimingUnit(controller, () => {
+            // Time expired during FC — auto-commit must-play with empty selection
+            commitForehandControl('must-play');
+        });
     }
 }
 
@@ -1015,6 +1595,9 @@ function renderFCCorners(targetPlayer, preview) {
 function commitForehandControl(mode) {
     let fci = gFCInteraction;
     if (!fci) return;
+
+    // Stop the FC continuation timing unit (note 24 §12.2)
+    stopPlayerMoveTimer(fci.controller);
     let targetPlayer = fci.target;
 
     // Get selected cards from the corner selection
@@ -1075,7 +1658,12 @@ function promptCurrentPlayer() {
         activeHumanPlayer = cp;
         clearSelection();
 
-        updateStatus(isLeading ? t('status.yourLead') : t('status.follow'));
+        if (isLeading) {
+            updateStatus(t('status.yourLead'));
+        } else {
+            let li = describeLeadInfo(game.leadInfo);
+            updateStatus(t('status.follow', { division: t('division.' + li.divisionKey), leadType: t('leadType.' + li.leadTypeKey), volume: game.leadInfo.volume }));
+        }
         updatePhaseDisplay((TEST_MODE ? PLAYER_NAMES[cp] + ' — ' : '') + (isLeading ? t('phase.lead') : t('phase.follow', { volume: game.leadInfo.volume })));
         gBtnPlay.disabled = true;
         gBtnPlay.textContent = t('buttons.play');
@@ -1125,6 +1713,11 @@ function promptCurrentPlayer() {
         
         renderHand(cp);
         updatePlayButton();
+
+        // Start play-card shot clock (note 24 §10.2)
+        startPlayerMoveTimer(cp, 'play', () => {
+            autoPlayAsBot(cp);
+        });
     } else {
         updateStatus(t('status.botThinking', { playerName: PLAYER_NAMES[cp] }));
         updatePhaseDisplay(t('phase.botPlaying', { playerName: PLAYER_NAMES[cp] }));
@@ -1153,6 +1746,9 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
         allBlockerNames: allBlockerNames,
         actualVolume: fm.actualElement.cards.length
     }));
+
+    // Simplified status bar message (note 25 §9)
+    updateStatus(t('hints.multiplayFailedShort'));
 
     // 2) Show all intended cards on desk, with revoked cards highlighted
     let revokedIds = new Set(fm.revokedCards.map(c => c.cardId));
@@ -1247,10 +1843,11 @@ function humanPlayCards() {
             showError(t('errors.baseFailed'));
             return;
         }
+        stopPlayerMoveTimer(game.pivot);
         clearSelection();
         appendLog(t('log.humanBaseDone'));
         renderAllHands();
-        startPlayingPhase();
+        afterBasingComplete();
         return;
     }
 
@@ -1261,6 +1858,7 @@ function humanPlayCards() {
         return;
     }
 
+    stopPlayerMoveTimer(cp);
     clearSelection();
 
     if (result.failedMultiplay) {
@@ -1298,6 +1896,15 @@ function finishRound() {
     highlightActivePlayer(-1);
     gDeskSlots[result.winner].setAttribute('data-winner', 'true');
     updateScoreDisplay();
+
+    // Update attackers' streak (within-frame consecutive attacker round wins)
+    if (game.attackingTeam.includes(result.winner)) {
+        attackersStreak++;
+    } else {
+        // Its value resets to zero when attackers lose a round
+        attackersStreak = 0;
+    }
+    updateAttackersStreakDisplay();
 
     // Track counters won by attackers (§2)
     if (game.attackingTeam.includes(result.winner)) {
@@ -1354,9 +1961,7 @@ function finishGame() {
 
     gBtnPlay.disabled = true;
     gBtnPlay.textContent = t('buttons.play');
-    if (gBaseScoreDiv && result.baseScore > 0) {
-        gBaseScoreDiv.textContent = t('labels.endgameFactor', { endgameFactor: result.endgameFactor, baseScore: result.baseScore });
-    }
+    // Base-score no longer shown in right-top corner (note 25 §2.1)
 
     // Apply level update (§12)
     if (result.frameResult) {

@@ -80,7 +80,7 @@ const messages_zhCN = {
     declaring:    '亮牌中…',
     selectBase:   '选择 {n} 张牌埋底',
     yourLead:     '你的出牌',
-    follow:       '请跟牌',
+    follow:       '跟{division}{leadType} ({volume}张)',
     botThinking:  '{playerName} 思考中…',
     forehandControl: '选择 {targetName} 的标记牌（仅限当前门曝光牌，可不选）',
     gameOver:     '对局结束',
@@ -126,6 +126,23 @@ const messages_zhCN = {
   // ── Strain / suit ──
   strain: {
     noTrump: '无主',
+  },
+
+  // ── Division display names ──
+  division: {
+    d: '♦',
+    c: '♣',
+    h: '♥',
+    s: '♠',
+    t: '主',
+  },
+
+  // ── Lead type display names ──
+  leadType: {
+    single:   '单张',
+    pair:     '对子',
+    tractor:  '拖拉机',
+    multiplay:'甩牌',
   },
 
   // ── Player names ──
@@ -196,6 +213,26 @@ const messages_zhCN = {
   fc: {
     mustPlay: '必跟',
     mustHold: '禁跟',
+  },
+
+  // ── Timing (note 24) ──
+  timing: {
+    intermittentNormal: '{position}家打{level}',
+    intermittentQiangzhuang: '抢庄',
+    noDeclaration: '不亮',
+    bankTimeLabel: '局时',
+    shotClockLabel: '步时',
+  },
+
+  // ── Dealing phase (note 25) ──
+  dealing: {
+    dealtCount: '{count}张',
+  },
+
+  // ── Hints (note 25) ──
+  hints: {
+    attackersStreak: '连攻: {streak}',
+    multiplayFailedShort: '甩牌失败',
   },
 
   // ── Counting dialog ──

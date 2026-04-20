@@ -104,7 +104,7 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    font-family: "Noto Sans SC";
+    font-family: "Roboto", "suit", "Noto Sans SC";
     font-size: 2.5vh;
     color: #555;
     border: 1px solid #ddd;
@@ -113,9 +113,39 @@
     margin: 2vh;
 }
 
+#desk-center-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 10vh;
+    padding: 1vh;
+}
+#desk-center-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1vh;
+    margin-left: 2vh;
+}
+
 #desk-center-info {
     text-align: center;
     line-height: 3.5vh;
+}
+
+/* Dealt count display during dealing phase */
+.dealt-count {
+    font-family: "Roboto Mono";
+    font-size: 4vh;
+    font-weight: bold;
+    color: #333;
+    text-align: center;
+}
+.dealt-count-label {
+    font-family: "Roboto", "Noto Sans SC";
+    font-size: 2vh;
+    color: #777;
 }
 
 /* §4: desk-slot background no longer used as on-play signal */
@@ -191,7 +221,7 @@
 
 /* Game phase info */
 #game-phase-info {
-    font-family: "Noto Sans SC";
+    font-family: "Roboto", "suit", "Noto Sans SC";
     font-size: 2vh;
     padding: 0.2vh 1vh;
     color: #333;
@@ -216,7 +246,7 @@
     background: transparent;
     border: none;
     color: #eee;
-    font-family: "Noto Sans SC";
+    font-family: "Roboto", "suit", "Noto Sans SC";
     font-size: 2vh;
     cursor: pointer;
     padding: 0 2vh;
@@ -234,10 +264,6 @@
     left: 100%;
     max-width: 0;
     overflow: hidden;
-    background: rgba(255,255,255,0.96);
-    border: 1px solid #aaa;
-    border-radius: var(--radius);
-    box-sizing: border-box;
     z-index: 50;
     transition: max-width 0.15s ease-out 0.1s, max-height 0.15s ease-out;
     max-height: var(--card-height);
@@ -245,7 +271,14 @@
     opacity: 0;
     margin-left: 0.5vh;
 }
-#div-score-area:hover #counter-drawer {
+/* Zero-space when empty: no border/background unless has content */
+#counter-drawer[data-has-content="true"] {
+    background: rgba(255,255,255,0.96);
+    border: 1px solid #aaa;
+    border-radius: var(--radius);
+    box-sizing: border-box;
+}
+#div-score-area:hover #counter-drawer[data-has-content="true"] {
     max-width: 60vh;
     max-height: 80vh;
     opacity: 1;
@@ -258,6 +291,17 @@
     width: calc(5 * var(--card-width) / 3);
     padding: 0;
 }
+/* Multiplay compensation row inside counter drawer */
+.counter-mp-comp {
+    width: 100%;
+    text-align: center;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: 2vh;
+    padding: 0.3vh 0.5vh;
+    border-top: 1px solid #ddd;
+}
+.counter-mp-comp[data-sign="-"] { color: #ce0000; }
+.counter-mp-comp[data-sign="+"] { color: #00a000; }
 
 /* ── Persistent name bars (§3) ── */
 .desk-namebar {
@@ -353,13 +397,14 @@
     font-size: calc(var(--card-width) / 5);
     padding: 0.2vh 0.5vh;
     cursor: pointer;
-    border: 1px solid #888;
+    border: 1px solid #47a;
     border-radius: var(--radius);
-    background: #f0f0f0;
-    font-family: "Noto Sans SC";
+    background: #69c;
+    color: #fff;
+    font-family: "Roboto Mono", "suit", "Noto Sans SC";
 }
 .fc-action-btn:hover {
-    background: #ddd;
+    background: #47a;
 }
 
 /* ── Show-base hover button (§5) ── */
@@ -494,20 +539,27 @@
 }
 
 /* -----------------------------------------------------------
-   Declaration matrix (shown in #game-top-info during dealing)
+   Declaration matrix (shown in desk-center-right during dealing)
    ----------------------------------------------------------- */
 #declare-matrix {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-rows: auto auto;
     gap: 0.5vh;
+    align-items: stretch;
 }
 .declare-row {
     display: flex;
     gap: 1.2vh;
     align-items: center;
 }
+/* No-declaration merged column: spans both rows */
+#declare-matrix .btn-no-declare {
+    grid-column: 2;
+    grid-row: 1 / 3;
+}
 .declare-label {
-    font-family: "Noto Sans SC";
+    font-family: "Roboto", "Noto Sans SC";
     font-size: 1.8vh;
     color: #888;
     width: 6vh;
@@ -549,6 +601,87 @@
     font-size: 1.7vh;
     color: #aaa;
     display: inline-block;
+}
+
+/* ── Timer styles (note 24 §14–§16) ── */
+
+/* Frame intermittent overlay — centered text */
+.timer-intermittent {
+    font-family: "Roboto", "suit", "Noto Sans SC";
+    font-size: 4vh;
+    font-weight: bold;
+    color: #333;
+    text-align: center;
+    line-height: 5vh;
+    user-select: none;
+}
+
+/* Primary timer: big-joker color, slightly larger than card-index font */
+.timer-primary {
+    font-family: var(--font-timer), "Noto Sans SC";
+    font-style: italic;
+    font-size: calc(var(--card-width) / 3);
+    color: var(--w-color);
+    font-weight: bold;
+    min-width: 4vh;
+    text-align: center;
+    user-select: none;
+}
+
+/* Secondary timer: small-joker color, card-index font size */
+.timer-secondary {
+    font-family: var(--font-timer), "Noto Sans SC";
+    font-style: italic;
+    font-size: calc(var(--card-width) / 4);
+    color: var(--v-color);
+    font-weight: bold;
+    min-width: 4vh;
+    text-align: center;
+    user-select: none;
+}
+
+/* Central area timer (declaration calling windows) */
+.timer-center {
+    margin-top: 1vh;
+}
+
+/* Desk-slot timer overlay (shot clock + bank time) */
+.timer-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    gap: 2vh;
+    align-items: baseline;
+    z-index: 30;
+    padding: 0.5vh 1.5vh;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+/* No-declaration button — merged column inside declare-matrix */
+.btn-no-declare {
+    min-width: 5.5vh;
+    border-radius: var(--radius);
+    border: 1.5px solid #888;
+    background: white;
+    font-family: "Roboto", "Noto Sans SC";
+    font-size: 2vh;
+    cursor: pointer;
+    padding: 0 1vh;
+}
+.btn-no-declare:not(:disabled):hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+.btn-no-declare:disabled {
+    opacity: 0.3;
+    cursor: default;
+    border-color: #bbb;
+    color: #bbb;
+    background: white;
 }
 
 @keyframes flashError { 0%, 100% { opacity: 1; color: #ff4444; } 50% { opacity: 0.5; color: #ffffff; } }

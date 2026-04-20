@@ -203,12 +203,10 @@
     color: #d66;
 }
 
-/* FC marker icons in own hand view (under card rank) */
+/* FC marker icons in own hand view (under suit mark in top-left index) */
 .fc-marker {
-    position: absolute;
-    bottom: 2px;
-    left: 50%;
-    transform: translateX(-50%);
+    width: calc(var(--card-width) / 3);
+    text-align: center;
     font-size: calc(var(--card-width) / 4);
     line-height: 1;
     pointer-events: none;
@@ -218,8 +216,8 @@
     color: #c00;
 }
 .fc-marker-must-play::after {
-    content: '\25B2'; /* blue upward triangle ▲ */
-    color: #0066cc;
+    content: '\25B2'; /* cyan upward triangle ▲ */
+    color: #00bcd4;
 }
 
 .card-rank,

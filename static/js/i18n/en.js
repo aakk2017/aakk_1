@@ -80,7 +80,7 @@ const messages_en = {
     declaring:    'Declaring…',
     selectBase:   'Select {n} cards for the base',
     yourLead:     'Your lead',
-    follow:       'Follow the led division',
+    follow:       'Follow {division} {leadType} ({volume} cards)',
     botThinking:  '{playerName} thinking…',
     forehandControl: 'Mark exposed cards of {targetName} in led division (or skip)',
     gameOver:     'Game Over',
@@ -126,6 +126,23 @@ const messages_en = {
   // ── Strain / suit ──
   strain: {
     noTrump: 'No Trump',
+  },
+
+  // ── Division display names ──
+  division: {
+    d: '♦',
+    c: '♣',
+    h: '♥',
+    s: '♠',
+    t: 'Trump',
+  },
+
+  // ── Lead type display names ──
+  leadType: {
+    single:   'single',
+    pair:     'pair',
+    tractor:  'tractor',
+    multiplay:'multiplay',
   },
 
   // ── Player names ──
@@ -196,6 +213,26 @@ const messages_en = {
   fc: {
     mustPlay: 'Must Play',
     mustHold: 'Must Hold',
+  },
+
+  // ── Timing (note 24) ──
+  timing: {
+    intermittentNormal: '{position} to defend {level}',
+    intermittentQiangzhuang: 'Compete for pivot',
+    noDeclaration: 'No declaration',
+    bankTimeLabel: 'Bank',
+    shotClockLabel: 'Clock',
+  },
+
+  // ── Dealing phase (note 25) ──
+  dealing: {
+    dealtCount: '{count} dealt',
+  },
+
+  // ── Hints (note 25) ──
+  hints: {
+    attackersStreak: 'Atk. streak: {streak}',
+    multiplayFailedShort: 'Multiplay failed',
   },
 
   // ── Counting dialog ──

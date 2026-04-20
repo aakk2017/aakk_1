@@ -31,22 +31,6 @@
                 </div>
             </div>
             <div class="nshand" id="game-top-info">
-                <div id="declare-matrix" style="display:none">
-                    <div class="declare-row">
-                        <button class="declare-btn" id="declare-btn-s0" data-suit="0"></button>
-                        <button class="declare-btn" id="declare-btn-s1" data-suit="1"></button>
-                        <button class="declare-btn" id="declare-btn-s2" data-suit="2"></button>
-                        <button class="declare-btn" id="declare-btn-s3" data-suit="3"></button>
-                        <button class="declare-btn" id="declare-btn-s4" data-suit="4"></button>
-                    </div>
-                    <div class="declare-row">
-                        <button class="declare-btn" id="declare-btn-d0" data-suit="0"></button>
-                        <button class="declare-btn" id="declare-btn-d1" data-suit="1"></button>
-                        <button class="declare-btn" id="declare-btn-d2" data-suit="2"></button>
-                        <button class="declare-btn" id="declare-btn-d3" data-suit="3"></button>
-                        <button class="declare-btn" id="declare-btn-d4" data-suit="4"></button>
-                    </div>
-                </div>
             </div>
             <div class="corner" id="corner-rt">
                 <div id="div-score-area" class="blocks-rt">
@@ -54,9 +38,9 @@
                         <div id="div-score">0</div>
                         <div id="counter-drawer"><div id="counter-drawer-inner"></div></div>
                     </div>
-                    <div id="div-mp-compensation-and-base">
-                        <div id="div-mp-compensation"></div>
-                        <div id="div-base-score"></div>
+                    <div id="div-hints">
+                        <div id="div-hint-1"></div>
+                        <div id="div-hint-2"></div>
                     </div>
                 </div>
             </div>
@@ -64,7 +48,28 @@
         <div class="game-desk-container">
             <div id="desk-north"  class="desk-slot"></div>
             <div id="desk-west"   class="desk-slot"></div>
-            <div id="desk-center" class="desk-center"><div id="desk-center-info"></div></div>
+            <div id="desk-center" class="desk-center">
+                <div id="desk-center-left"><div id="desk-center-info"></div></div>
+                <div id="desk-center-right">
+                    <div id="declare-matrix" style="display:none">
+                        <div class="declare-row">
+                            <button class="declare-btn" id="declare-btn-s0" data-suit="0"></button>
+                            <button class="declare-btn" id="declare-btn-s1" data-suit="1"></button>
+                            <button class="declare-btn" id="declare-btn-s2" data-suit="2"></button>
+                            <button class="declare-btn" id="declare-btn-s3" data-suit="3"></button>
+                            <button class="declare-btn" id="declare-btn-s4" data-suit="4"></button>
+                        </div>
+                        <div class="declare-row">
+                            <button class="declare-btn" id="declare-btn-d0" data-suit="0"></button>
+                            <button class="declare-btn" id="declare-btn-d1" data-suit="1"></button>
+                            <button class="declare-btn" id="declare-btn-d2" data-suit="2"></button>
+                            <button class="declare-btn" id="declare-btn-d3" data-suit="3"></button>
+                            <button class="declare-btn" id="declare-btn-d4" data-suit="4"></button>
+                        </div>
+                        <button class="declare-btn btn-no-declare" id="btn-no-declare" disabled></button>
+                    </div>
+                </div>
+            </div>
             <div id="desk-east"   class="desk-slot"></div>
             <div id="desk-south"  class="desk-slot"></div>
         </div>

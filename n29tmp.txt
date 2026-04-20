@@ -1,0 +1,7 @@
+{
+  "ph": "declaring",
+  "di": 100,
+  "dc": 1,
+  "d": "东",
+  "s": "<div class=\"suit-denomination\">♦</div>"
+}

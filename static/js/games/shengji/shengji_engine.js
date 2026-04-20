@@ -87,6 +87,18 @@ function engineBuildConfig(presetName, customOverrides) {
     return base;
 }
 
+// ---------------------------------------------------------------------------
+// Centralized timing configuration (note 24 §1)
+// ---------------------------------------------------------------------------
+const TIMING_CONFIG = {
+    baseShotClock:       45,   // seconds — shot clock for set-base moves
+    playShotClock:        5,   // seconds — shot clock for play-card moves
+    bankTime:            60,   // seconds — bank time per frame per human player
+    frameIntermittent:    2,   // seconds — non-interactive intermittent before dealing
+    finalDeclareWindow:   5,   // seconds — final declaration window after dealing
+    overbaseWindow:      10,   // seconds — overbase calling window after set-base
+};
+
 // Player labels (indexed by position)
 const PLAYER_NAMES = [t('players.south'), t('players.east'), t('players.north'), t('players.west')];
 
@@ -149,6 +161,9 @@ let game = {
 
     // Per-player levels (§12)
     playerLevels: [0, 0, 0, 0],  // each player's current level (0→'2' … 12→'A')
+
+    // Per-player bank time remaining in seconds (note 24 §9)
+    playerBankTimes: [0, 0, 0, 0],
 };
 
 // ---------------------------------------------------------------------------
@@ -1588,6 +1603,9 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang) {
 
     game.hands = [[], [], [], []];
     game.base  = [];
+
+    // Reset bank times for all human players at frame start (note 24 §9)
+    game.playerBankTimes = new Array(NUM_PLAYERS).fill(TIMING_CONFIG.bankTime);
 }
 
 /**
@@ -1627,6 +1645,21 @@ function engineSetStrain(strain) {
     game.strain = strain;
     engineReassignAll(game.level, strain);
     for (let h of game.hands) engineSortHand(h);
+}
+
+/**
+ * Check whether a declaration is the highest possible for the current deck count.
+ * 2-deck: double W (count=4) is highest.  3-deck: triple W, etc.
+ * Returns true if no higher declaration can exist.
+ */
+function engineIsHighestPossibleDeclaration(declaration) {
+    if (!declaration) return false;
+    let deckCount = (game.gameConfig && game.gameConfig.deckCount) || 2;
+    // Highest possible = deckCount copies of big joker (suit=4, count=deckCount*2 for pairs? no)
+    // In 2-deck: double W = count 4 (two big jokers). That's the max.
+    // The count field: 1=single, 2=double suited, 3=double small joker, 4=double big joker
+    // Highest possible is always count=4 (double W / big joker pair) regardless of deck count for now.
+    return declaration.count >= 4;
 }
 
 /** Pivot picks up base */
@@ -1877,6 +1910,7 @@ function engineComputeFrameResult(finalScore) {
 /**
  * Advance player levels after a frame and return the updated levels array.
  * Applies must-stop level clamping from game config.
+ * Levels cycle endlessly: 0-12 (2 through A), wrapping past A back to 2.
  */
 function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
     let mustStopLevels = (game.gameConfig && game.gameConfig.mustStopLevels) || [];
@@ -1887,7 +1921,7 @@ function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
         let current = newLevels[p];
         let target = current + delta;
 
-        // Must-stop: can't skip past a must-stop level not yet reached
+        // Must-stop: can't skip past a must-stop level not yet reached (within one cycle)
         for (let ms of sorted) {
             if (ms > current && ms < target) {
                 target = ms;
@@ -1895,7 +1929,8 @@ function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
             }
         }
 
-        newLevels[p] = Math.min(target, 13); // 13 = past A, meaning game won
+        // Cyclic wrap: levels cycle endlessly through 0-12
+        newLevels[p] = ((target % 13) + 13) % 13;
     }
 
     return newLevels;
@@ -1903,7 +1938,8 @@ function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
 
 /**
  * Apply frame result: advance levels, determine next frame parameters.
- * Returns { newLevels, nextPivot, nextLevel, gameWon, winners }.
+ * Returns { newLevels, nextPivot, nextLevel, gameWon: false, winners: [] }.
+ * Levels cycle endlessly — there is no forced game-end condition.
  */
 function engineApplyFrameResult(frameResult) {
     let newLevels = engineAdvanceLevels(
@@ -1912,15 +1948,8 @@ function engineApplyFrameResult(frameResult) {
         frameResult.levelDelta
     );
 
-    // Check if any player has won (level >= 13, past A)
-    let winners = [];
-    for (let i = 0; i < NUM_PLAYERS; i++) {
-        if (newLevels[i] >= 13) winners.push(i);
-    }
-
     // Next frame level = next pivot's new level
     let nextLevel = newLevels[frameResult.nextPivot];
-    if (nextLevel >= 13) nextLevel = 12; // clamp for display
 
     game.playerLevels = newLevels;
 
@@ -1928,8 +1957,8 @@ function engineApplyFrameResult(frameResult) {
         newLevels: newLevels,
         nextPivot: frameResult.nextPivot,
         nextLevel: nextLevel,
-        gameWon: winners.length > 0,
-        winners: winners
+        gameWon: false,
+        winners: []
     };
 }
 
