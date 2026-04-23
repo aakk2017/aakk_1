@@ -58,6 +58,19 @@ const gCountingDialog  = document.getElementById('counting-dialog');
 const gCountingOverlay = document.getElementById('counting-overlay');
 const gDeskCenterLeft  = document.getElementById('desk-center-left');
 const gBtnNoDeclare    = document.getElementById('btn-no-declare');
+const gBtnGameSettings = document.getElementById('btn-game-settings');
+const gSettingsOverlay = document.getElementById('settings-overlay');
+const gSettingsDialog  = document.getElementById('settings-dialog');
+const gSettingsTitle   = document.getElementById('settings-title');
+const gSettingsSubtitle= document.getElementById('settings-subtitle');
+const gSettingsBody    = document.getElementById('settings-body');
+const gSettingsDisplayPlaceholder = document.getElementById('settings-display-placeholder');
+const gSettingsPlaceholderPanel = document.getElementById('settings-placeholder-panel');
+const gSettingsTabRow  = document.getElementById('settings-tab-row');
+const gBtnSettingsCancel = document.getElementById('btn-settings-cancel');
+const gBtnSettingsConfirm = document.getElementById('btn-settings-confirm');
+const gSettingsTabs = Array.from(document.querySelectorAll('#settings-tab-row .settings-tab'));
+const gSettingsTopLevelTabs = Array.from(document.querySelectorAll('#settings-toplevel-tabs .settings-toplevel-tab'));
 
 // ---------------------------------------------------------------------------
 // Test mode: human controls both South (0) and East (1)
@@ -80,6 +93,15 @@ let activeHumanPlayer = HUMAN_PLAYER;
 // When active: { target, controller, exposedDivisionCards, exposedCardIds: Set,
 //   selectedCornerIds: Set, mode: string|null, selectionMounted: bool, commitButtonsMounted: bool }
 let gFCInteraction = null;
+
+// Settings dialog state (note 34 / 35c)
+let gSettingsMode = 'create'; // 'create' | 'inspect'
+let gSettingsActiveTab = 'presets';
+let gSettingsTopLevelTab = 'game'; // 'game' | 'display' | 'file' | 'accounts'
+let gSettingsDraftRuleConfig = null;
+let gSettingsDraftDisplaySettings = { placeholder: true };
+let gResolvedGameSettings = null;
+let gLevelsMatrixDraftState = null;
 
 // ---------------------------------------------------------------------------
 // Card selection state
@@ -782,7 +804,8 @@ function startPlayerMoveTimer(player, moveType, onTimeout) {
     if (!isHumanControlled(player)) return; // bots are untimed (note 24 §2)
     clearTimers();
     gTimingPhase = moveType === 'base' ? 'playerMove' : 'playerMove';
-    let shotDuration = (moveType === 'base') ? TIMING_CONFIG.baseShotClock : TIMING_CONFIG.playShotClock;
+    let timingCfg = getTimingConfigForPage();
+    let shotDuration = (moveType === 'base') ? timingCfg.baseShotClock : timingCfg.playShotClock;
     gShotClockRemaining = shotDuration;
     gBankTimeRemaining = game.playerBankTimes[player];
     gTimerStage = 'shot';
@@ -958,6 +981,8 @@ function autoPlayAsBot(player) {
 // ---------------------------------------------------------------------------
 
 function startNewGame() {
+    ensureResolvedSettings();
+
     // Clean up any in-progress dealing timer
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
     currentDeclaration = null;
@@ -999,8 +1024,10 @@ function startNewGame() {
         // Reset within-frame attackers' streak
         attackersStreak = 0;
     } else {
-        // Fresh game
-        level = 0;
+        // Fresh game: use configured starting level
+        level = (gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.startLevel !== undefined)
+            ? gResolvedGameSettings.ruleConfig.startLevel
+            : 0;
         pivot = Math.floor(Math.random() * NUM_PLAYERS);
         playerLevels = null;
         isQiangzhuang = true;
@@ -1035,7 +1062,8 @@ function startNewGame() {
     }
 
     gBtnNewGame.textContent = t('buttons.newGame');
-    engineStartGame(level, pivot, playerLevels, isQiangzhuang);
+    engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig);
+    game.displaySettings = { ...(gResolvedGameSettings.displaySettings || { placeholder: true }) };
 
     // Initialize persistent name bars (§3)
     initPersistentNamebars();
@@ -1075,7 +1103,7 @@ function runFrameIntermittent() {
         gTimingPhase = null;
         gDeskInfo.innerHTML = '';
         runDealingPhase();
-    }, TIMING_CONFIG.frameIntermittent * 1000);
+    }, getTimingConfigForPage().frameIntermittent * 1000);
 }
 
 function clearBotDealCounts() {
@@ -1278,7 +1306,7 @@ function runFinalDeclarationWindow() {
     updateDeclareMatrix();
     gNoDeclareClicked.clear();
 
-    startCallingWindowTimer('finalDeclare', TIMING_CONFIG.finalDeclareWindow, () => {
+    startCallingWindowTimer('finalDeclare', getTimingConfigForPage().finalDeclareWindow, () => {
         // Timer expired or broken — resolve
         removeNoDeclareButton();
         gDeclareMatrix.style.display = 'none';
@@ -1440,7 +1468,7 @@ function runOverbaseWindow() {
         if (!isHumanControlled(i)) gNoDeclareClicked.add(i);
     }
 
-    startCallingWindowTimer('overbaseWindow', TIMING_CONFIG.overbaseWindow, () => {
+    startCallingWindowTimer('overbaseWindow', getTimingConfigForPage().overbaseWindow, () => {
         // Timer expired or broken — proceed to playing phase
         removeNoDeclareButton();
         gDeclareMatrix.style.display = 'none';
@@ -1829,6 +1857,1083 @@ function humanPlayCards() {
     }
 
     let cp = (game.phase === GamePhase.BASING) ? game.pivot : engineGetCurrentPlayer();
+    humanPlayCardsCore(cp);
+}
+
+// ---------------------------------------------------------------------------
+// Settings dialog (note 34)
+// ---------------------------------------------------------------------------
+
+const SETTINGS_FIELDS_BY_TAB = {
+    presets: ['presetName'],
+    general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings'],
+    scoring: ['scoringPreset', 'endingCompensation', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme', 'attackersSelfBaseHalfMultiplier'],
+    levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'gameMode'],
+    timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
+};
+
+const SETTINGS_SELECT_OPTIONS = {
+    presetName: () => Object.keys(window.shengjiSettingsPresets || { 'default': {} }),
+    autoStrain: ['false', 'true'],
+    allowOverbase: ['false', 'true'],
+    overbaseRestrictions: ['none', 'default'],
+    failedMultiplayHandling: ['default'],
+    allowCrossings: ['false', 'true'],
+    scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
+    baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
+    levelsPreset: ['', 'default', 'high-school', 'slow', 'plain', 'short'],
+    gameMode: ['endless', 'pass-A'],
+    timingPreset: ['default', 'fast', 'slow'],
+    timingMode: ['human-only'],
+};
+
+function cloneRuleConfig(cfg) {
+    if (!cfg) return null;
+    return {
+        ...cfg,
+        mustDefendLevels: Array.isArray(cfg.mustDefendLevels) ? [...cfg.mustDefendLevels] : [],
+        mustStopLevels: Array.isArray(cfg.mustStopLevels) ? [...cfg.mustStopLevels] : [],
+        knockBackLevels: Array.isArray(cfg.knockBackLevels) ? [...cfg.knockBackLevels] : [],
+        timing: { ...(cfg.timing || {}) },
+    };
+}
+
+function getDefaultResolvedSettings() {
+    if (typeof shengjiResolveGameSettings === 'function') {
+        return shengjiResolveGameSettings({ presetName: 'default' });
+    }
+    return {
+        presetName: 'default',
+        ruleConfig: engineBuildConfig('default'),
+        displaySettings: { placeholder: true },
+    };
+}
+
+function ensureResolvedSettings() {
+    if (!gResolvedGameSettings) {
+        gResolvedGameSettings = getDefaultResolvedSettings();
+    }
+}
+
+function getTimingConfigForPage() {
+    let fromRule = game && game.gameConfig && game.gameConfig.timing ? game.gameConfig.timing : null;
+    return {
+        ...TIMING_CONFIG,
+        ...(fromRule || {})
+    };
+}
+
+const LEVEL_VALUE_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const LEVEL_MATRIX_COUNTER_LEVELS = new Set([3, 8, 11]);
+const LEVEL_MATRIX_KEY_SPACER = '__SPACER__';
+const LEVEL_MATRIX_KEY_START_MARKER = '__START_MARKER__';
+
+function levelDisplayLabel(level) {
+    if (Array.isArray(numberToLevel) && numberToLevel[level] !== undefined) {
+        return numberToLevel[level];
+    }
+    return String(level);
+}
+
+function settingsOptionLabel(value) {
+    const map = {
+        'true': 'yes',
+        'false': 'no',
+        'Infinity': 'unlimited',
+        'none': 'none',
+        '': 'noPreset',
+        'default': 'default',
+        'experimental': 'experimental',
+        'plain': 'plain',
+        'high-school': 'highSchool',
+        'Berkeley': 'berkeley',
+        'endless': 'endless',
+        'pass-A': 'passA',
+        'human-only': 'humanOnly',
+        // scoring preset values
+        'traditional': 'traditional',
+        'traditional-power': 'traditionalPower',
+        '7-3-5': 'sevenThreeFive',
+        '8-4-4': 'eightFourFour',
+        // levels preset values
+        'slow': 'slow',
+        'short': 'short',
+        // base multiplier schemes
+        'limited': 'limited',
+        'single-or-not': 'singleOrNot',
+        'exponential': 'exponential',
+        'power': 'power',
+    };
+    let key = map[String(value)] || String(value);
+    return t('settingsDialog.options.' + key);
+}
+
+function getRuleConfigFieldValue(field) {
+    if (field in (gSettingsDraftRuleConfig.timing || {})) {
+        return gSettingsDraftRuleConfig.timing[field];
+    }
+    return gSettingsDraftRuleConfig[field];
+}
+
+// Check whether the current scoring fields match a known scoring preset; update scoringPreset label.
+function syncScoringPresetLabel() {
+    let scoringPresets = window.shengjiScoringPresets;
+    if (!scoringPresets) return;
+    let cfg = gSettingsDraftRuleConfig;
+    let matched = '';
+    for (let key of Object.keys(scoringPresets)) {
+        let sp = scoringPresets[key];
+        let ok = true;
+        if (sp.endingCompensation !== undefined && !!cfg.endingCompensation !== sp.endingCompensation) ok = false;
+        if (sp.stageThreshold !== undefined && cfg.stageThreshold !== sp.stageThreshold) ok = false;
+        if (sp.levelThreshold !== undefined && cfg.levelThreshold !== sp.levelThreshold) ok = false;
+        if (sp.levelUpLimitPerFrame !== undefined && cfg.levelUpLimitPerFrame !== sp.levelUpLimitPerFrame) ok = false;
+        if (sp.baseMultiplierScheme !== undefined && cfg.baseMultiplierScheme !== sp.baseMultiplierScheme) ok = false;
+        if (sp.attackersSelfBaseHalfMultiplier !== undefined && !!cfg.attackersSelfBaseHalfMultiplier !== sp.attackersSelfBaseHalfMultiplier) ok = false;
+        if (ok) { matched = key; break; }
+    }
+    gSettingsDraftRuleConfig.scoringPreset = matched;
+}
+
+function syncLevelsPresetLabel() {
+    let levelsPresets = window.shengjiLevelsPresets;
+    if (!levelsPresets) return;
+    let detected = window.shengjiDetectLevelsPreset(gSettingsDraftRuleConfig);
+    gSettingsDraftRuleConfig.levelsPreset = detected || '';
+}
+
+function createEmptyLevelsMatrixState() {
+    return {
+        mustDefendStartMarker: false,
+        mustDefendLiteralLevels: [],
+        mustStopStartMarker: false,
+        mustStopLiteralLevels: [],
+        knockBackLiteralLevels: [],
+    };
+}
+
+function normalizeLevelArrayForMatrix(arr) {
+    let list = Array.isArray(arr) ? [...arr] : [];
+    return [...new Set(list.map(x => Number(x)).filter(x => Number.isInteger(x) && x >= 0 && x <= 12))].sort((a, b) => a - b);
+}
+
+function buildLevelsMatrixStateFromRuleConfig(cfg) {
+    let defend = normalizeLevelArrayForMatrix(cfg && cfg.mustDefendLevels);
+    let stop = normalizeLevelArrayForMatrix(cfg && cfg.mustStopLevels);
+    let knock = normalizeLevelArrayForMatrix(cfg && cfg.knockBackLevels);
+    return {
+        mustDefendStartMarker: !!(cfg && cfg.mustDefendStartMarker),
+        mustDefendLiteralLevels: defend,
+        mustStopStartMarker: !!(cfg && cfg.mustStopStartMarker),
+        mustStopLiteralLevels: stop,
+        knockBackLiteralLevels: knock,
+    };
+}
+
+function ensureLevelsMatrixDraftState() {
+    if (!gLevelsMatrixDraftState) {
+        gLevelsMatrixDraftState = buildLevelsMatrixStateFromRuleConfig(gSettingsDraftRuleConfig || {});
+    }
+}
+
+function levelsMatrixStateToRuleArrays() {
+    ensureLevelsMatrixDraftState();
+
+    let defend = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels);
+    let stop = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustStopLiteralLevels);
+
+    // Conflict on literal ranks
+    let defendLiteralSet = new Set(normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels));
+    stop = stop.filter(x => !defendLiteralSet.has(x));
+
+    return {
+        mustDefendLevels: [...new Set(defend)].sort((a, b) => a - b),
+        mustStopLevels: [...new Set(stop)].sort((a, b) => a - b),
+        knockBackLevels: normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.knockBackLiteralLevels),
+        mustDefendStartMarker: !!gLevelsMatrixDraftState.mustDefendStartMarker,
+        mustStopStartMarker: !!gLevelsMatrixDraftState.mustStopStartMarker,
+    };
+}
+
+function applyLevelsMatrixStateToRuleConfig() {
+    if (!gSettingsDraftRuleConfig) return;
+    let mapped = levelsMatrixStateToRuleArrays();
+    gSettingsDraftRuleConfig.mustDefendLevels = mapped.mustDefendLevels;
+    gSettingsDraftRuleConfig.mustStopLevels = mapped.mustStopLevels;
+    gSettingsDraftRuleConfig.knockBackLevels = mapped.knockBackLevels;
+    gSettingsDraftRuleConfig.mustDefendStartMarker = mapped.mustDefendStartMarker;
+    gSettingsDraftRuleConfig.mustStopStartMarker = mapped.mustStopStartMarker;
+}
+
+function resetLevelsMatrixStateFromRuleConfig() {
+    gLevelsMatrixDraftState = buildLevelsMatrixStateFromRuleConfig(gSettingsDraftRuleConfig || {});
+}
+
+function setRuleConfigFieldValue(field, rawValue) {
+    if (field === 'presetName') {
+        if (typeof shengjiResolveGameRuleConfig === 'function') {
+            gSettingsDraftRuleConfig = cloneRuleConfig(shengjiResolveGameRuleConfig({ presetName: rawValue }));
+        }
+        return;
+    }
+
+    if (field === 'scoringPreset') {
+        gSettingsDraftRuleConfig[field] = rawValue;
+        let scoringPresets = window.shengjiScoringPresets;
+        if (scoringPresets && scoringPresets[rawValue]) {
+            let sp = scoringPresets[rawValue];
+            // Apply all authoritative preset fields
+            if (sp.endingCompensation !== undefined) gSettingsDraftRuleConfig.endingCompensation = sp.endingCompensation;
+            if (sp.stageThreshold !== undefined) gSettingsDraftRuleConfig.stageThreshold = sp.stageThreshold;
+            if (sp.levelThreshold !== undefined) gSettingsDraftRuleConfig.levelThreshold = sp.levelThreshold;
+            if (sp.levelUpLimitPerFrame !== undefined) gSettingsDraftRuleConfig.levelUpLimitPerFrame = sp.levelUpLimitPerFrame;
+            if (sp.baseMultiplierScheme !== undefined) gSettingsDraftRuleConfig.baseMultiplierScheme = sp.baseMultiplierScheme;
+            if (sp.attackersSelfBaseHalfMultiplier !== undefined) {
+                gSettingsDraftRuleConfig.attackersSelfBaseHalfMultiplier = sp.attackersSelfBaseHalfMultiplier;
+                // Presets that require attackersSelfBaseHalfMultiplier must also enable allowOverbase
+                // so normalizeRuleConfig does not force the value back to false.
+                if (sp.attackersSelfBaseHalfMultiplier) gSettingsDraftRuleConfig.allowOverbase = true;
+            }
+        }
+        // If '' was chosen, keep the current individual fields unchanged (intentional custom state).
+        return;
+    }
+
+    if (field === 'levelsPreset') {
+        gSettingsDraftRuleConfig[field] = rawValue;
+        let levelsPresets = window.shengjiLevelsPresets;
+        if (levelsPresets && levelsPresets[rawValue]) {
+            let lp = levelsPresets[rawValue];
+            // Apply all authoritative preset fields
+            if (lp.startLevel !== undefined) gSettingsDraftRuleConfig.startLevel = lp.startLevel;
+            if (lp.mustDefendStartMarker !== undefined) gSettingsDraftRuleConfig.mustDefendStartMarker = !!lp.mustDefendStartMarker;
+            if (lp.mustStopStartMarker !== undefined) gSettingsDraftRuleConfig.mustStopStartMarker = !!lp.mustStopStartMarker;
+            if (lp.mustDefendLevels !== undefined) gSettingsDraftRuleConfig.mustDefendLevels = Array.isArray(lp.mustDefendLevels) ? [...lp.mustDefendLevels] : [];
+            if (lp.mustStopLevels !== undefined) gSettingsDraftRuleConfig.mustStopLevels = Array.isArray(lp.mustStopLevels) ? [...lp.mustStopLevels] : [];
+            if (lp.knockBackLevels !== undefined) gSettingsDraftRuleConfig.knockBackLevels = Array.isArray(lp.knockBackLevels) ? [...lp.knockBackLevels] : [];
+            if (lp.knockBackConditionMode !== undefined) gSettingsDraftRuleConfig.knockBackConditionMode = lp.knockBackConditionMode;
+            if (lp.knockBackTakeStageRequired !== undefined) gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!lp.knockBackTakeStageRequired;
+            if (lp.gameMode !== undefined) gSettingsDraftRuleConfig.gameMode = lp.gameMode;
+            resetLevelsMatrixStateFromRuleConfig();
+        }
+        // If '' was chosen, keep the current individual fields unchanged (intentional custom state).
+        return;
+    }
+
+    let value = rawValue;
+    if (rawValue === 'true') value = true;
+    if (rawValue === 'false') value = false;
+    if (rawValue === true || rawValue === false) value = rawValue;
+
+    if (field in (gSettingsDraftRuleConfig.timing || {})) {
+        gSettingsDraftRuleConfig.timing[field] = Number(rawValue);
+        return;
+    }
+
+    if (['deckCount', 'multiplayCompensationAmount', 'stageThreshold', 'levelThreshold', 'startLevel'].includes(field)) {
+        let numeric = Number(rawValue);
+        if (!Number.isFinite(numeric)) {
+            numeric = Number(gSettingsDraftRuleConfig[field]);
+        }
+        numeric = Math.floor(numeric);
+
+        if (field === 'stageThreshold' || field === 'levelThreshold') {
+            let deckCount = Number(gSettingsDraftRuleConfig.deckCount) || 2;
+            let dcMax = deckCount * 100;
+            let min = (field === 'stageThreshold') ? 1 : 2;
+            if (!Number.isFinite(numeric)) numeric = min;
+            if (numeric < min) numeric = min;
+            if (numeric > dcMax) numeric = dcMax;
+        }
+
+        gSettingsDraftRuleConfig[field] = numeric;
+        if (['stageThreshold', 'levelThreshold'].includes(field)) syncScoringPresetLabel();
+        if (['startLevel'].includes(field)) {
+            applyLevelsMatrixStateToRuleConfig();
+            syncLevelsPresetLabel();
+        }
+        return;
+    }
+
+    if (field === 'levelUpLimitPerFrame') {
+        gSettingsDraftRuleConfig[field] = (rawValue === '' || rawValue === null) ? null : Number(rawValue);
+        syncScoringPresetLabel();
+        return;
+    }
+
+    if (field === 'mustDefendLevels' || field === 'mustStopLevels' || field === 'knockBackLevels') {
+        gSettingsDraftRuleConfig[field] = Array.isArray(rawValue) ? [...rawValue].sort((a, b) => a - b) : [];
+        // Mutual exclusion with repeated bidirectional switching support.
+        if (field === 'mustDefendLevels') {
+            let defend = new Set(gSettingsDraftRuleConfig.mustDefendLevels || []);
+            gSettingsDraftRuleConfig.mustStopLevels = (gSettingsDraftRuleConfig.mustStopLevels || []).filter(x => !defend.has(x));
+        } else if (field === 'mustStopLevels') {
+            let stop = new Set(gSettingsDraftRuleConfig.mustStopLevels || []);
+            gSettingsDraftRuleConfig.mustDefendLevels = (gSettingsDraftRuleConfig.mustDefendLevels || []).filter(x => !stop.has(x));
+        }
+        resetLevelsMatrixStateFromRuleConfig();
+        syncLevelsPresetLabel();
+        return;
+    }
+
+    if (field === 'mustDefendStartMarker' || field === 'mustStopStartMarker') {
+        gSettingsDraftRuleConfig[field] = !!rawValue;
+        if (gSettingsDraftRuleConfig.mustDefendStartMarker && gSettingsDraftRuleConfig.mustStopStartMarker) {
+            gSettingsDraftRuleConfig.mustStopStartMarker = false;
+        }
+        resetLevelsMatrixStateFromRuleConfig();
+        syncLevelsPresetLabel();
+        return;
+    }
+
+    if (field === 'gameMode') {
+        gSettingsDraftRuleConfig.gameMode = rawValue;
+        syncLevelsPresetLabel();
+        return;
+    }
+
+    if (field === 'knockBackConditionMode') {
+        gSettingsDraftRuleConfig.knockBackConditionMode = rawValue;
+        syncLevelsPresetLabel();
+        return;
+    }
+
+    if (field === 'knockBackTakeStageRequired') {
+        gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!rawValue;
+        syncLevelsPresetLabel();
+        return;
+    }
+
+    gSettingsDraftRuleConfig[field] = value;
+    if (['endingCompensation', 'baseMultiplierScheme', 'attackersSelfBaseHalfMultiplier'].includes(field)) {
+        syncScoringPresetLabel();
+    }
+}
+
+function createLevelSingleSelector(field, currentValue, readOnly) {
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group settings-level-selector';
+    let current = Number(currentValue);
+    for (let lv of LEVEL_VALUE_OPTIONS) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = field;
+        radio.value = String(lv);
+        radio.checked = (lv === current);
+        radio.disabled = !!readOnly;
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue(field, lv);
+                    renderSettingsDialog();
+                }
+            });
+        }
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(levelDisplayLabel(lv)));
+        radioGroup.appendChild(radioLabel);
+    }
+    return radioGroup;
+}
+
+function levelMatrixSpecialLabel() {
+    return getLocale && getLocale() === 'zh-CN' ? '初' : 'SL';
+}
+
+function createLevelsMatrixCell(opts) {
+    let {
+        rowField,
+        rowType,
+        levelKey,
+        displayLabel,
+        interactive,
+        counterLevel,
+        selected,
+        readOnly,
+        onClick,
+    } = opts;
+
+    let cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'levels-matrix-cell levels-matrix-cell-' + rowType;
+    if (!interactive) cell.classList.add('is-spacer-cell');
+    if (selected) cell.classList.add('is-selected');
+    if (counterLevel) {
+        cell.classList.add('is-counter-level');
+    }
+    cell.setAttribute('data-row-field', rowField);
+    cell.setAttribute('data-level', String(levelKey));
+    cell.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    cell.disabled = !!readOnly || !interactive;
+    cell.textContent = displayLabel;
+
+    if (!readOnly && interactive) {
+        cell.addEventListener('click', () => {
+            onClick(levelKey);
+        });
+    }
+
+    return cell;
+}
+
+function levelsMatrixToggleSemantic(rowName) {
+    ensureLevelsMatrixDraftState();
+    if (rowName === 'mustDefendLevels') {
+        gLevelsMatrixDraftState.mustDefendStartMarker = !gLevelsMatrixDraftState.mustDefendStartMarker;
+        if (gLevelsMatrixDraftState.mustDefendStartMarker) {
+            gLevelsMatrixDraftState.mustStopStartMarker = false;
+        }
+    } else if (rowName === 'mustStopLevels') {
+        gLevelsMatrixDraftState.mustStopStartMarker = !gLevelsMatrixDraftState.mustStopStartMarker;
+        if (gLevelsMatrixDraftState.mustStopStartMarker) {
+            gLevelsMatrixDraftState.mustDefendStartMarker = false;
+        }
+    }
+}
+
+function levelsMatrixToggleLiteral(rowName, level) {
+    ensureLevelsMatrixDraftState();
+    let n = Number(level);
+    if (!Number.isInteger(n) || n < 0 || n > 12) return;
+
+    let rowKey = rowName === 'mustDefendLevels'
+        ? 'mustDefendLiteralLevels'
+        : rowName === 'mustStopLevels'
+            ? 'mustStopLiteralLevels'
+            : 'knockBackLiteralLevels';
+
+    let current = new Set(normalizeLevelArrayForMatrix(gLevelsMatrixDraftState[rowKey]));
+    if (current.has(n)) current.delete(n);
+    else current.add(n);
+    gLevelsMatrixDraftState[rowKey] = [...current].sort((a, b) => a - b);
+
+    if (rowName === 'mustDefendLevels' && current.has(n)) {
+        gLevelsMatrixDraftState.mustStopLiteralLevels = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustStopLiteralLevels).filter(x => x !== n);
+    }
+    if (rowName === 'mustStopLevels' && current.has(n)) {
+        gLevelsMatrixDraftState.mustDefendLiteralLevels = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels).filter(x => x !== n);
+    }
+}
+
+function createLevelsSpecialMatrix(readOnly) {
+    let matrix = document.createElement('div');
+    matrix.className = 'levels-special-matrix';
+
+    ensureLevelsMatrixDraftState();
+    let startLevel = Number(getRuleConfigFieldValue('startLevel'));
+
+    const rows = [
+        {
+            field: 'startLevel',
+            type: 'start',
+            cells: [
+                { key: LEVEL_MATRIX_KEY_SPACER, label: '', interactive: false, counterLevel: false },
+                ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
+            ],
+            onClick: (levelKey) => {
+                setRuleConfigFieldValue('startLevel', Number(levelKey));
+                renderSettingsDialog();
+            },
+            isSelected: (levelKey) => Number(levelKey) === startLevel,
+        },
+        {
+            field: 'mustDefendLevels',
+            type: 'must-defend',
+            cells: [
+                { key: LEVEL_MATRIX_KEY_START_MARKER, label: levelMatrixSpecialLabel(), interactive: true, counterLevel: false },
+                ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
+            ],
+            onClick: (levelKey) => {
+                if (levelKey === LEVEL_MATRIX_KEY_START_MARKER) {
+                    levelsMatrixToggleSemantic('mustDefendLevels');
+                } else {
+                    levelsMatrixToggleLiteral('mustDefendLevels', levelKey);
+                }
+                applyLevelsMatrixStateToRuleConfig();
+                syncLevelsPresetLabel();
+                renderSettingsDialog();
+            },
+            isSelected: (levelKey) => {
+                if (levelKey === LEVEL_MATRIX_KEY_START_MARKER) return !!gLevelsMatrixDraftState.mustDefendStartMarker;
+                return normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels).includes(Number(levelKey));
+            },
+        },
+        {
+            field: 'mustStopLevels',
+            type: 'must-stop',
+            cells: [
+                { key: LEVEL_MATRIX_KEY_START_MARKER, label: levelMatrixSpecialLabel(), interactive: true, counterLevel: false },
+                ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
+            ],
+            onClick: (levelKey) => {
+                if (levelKey === LEVEL_MATRIX_KEY_START_MARKER) {
+                    levelsMatrixToggleSemantic('mustStopLevels');
+                } else {
+                    levelsMatrixToggleLiteral('mustStopLevels', levelKey);
+                }
+                applyLevelsMatrixStateToRuleConfig();
+                syncLevelsPresetLabel();
+                renderSettingsDialog();
+            },
+            isSelected: (levelKey) => {
+                if (levelKey === LEVEL_MATRIX_KEY_START_MARKER) return !!gLevelsMatrixDraftState.mustStopStartMarker;
+                return normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustStopLiteralLevels).includes(Number(levelKey));
+            },
+        },
+        {
+            field: 'knockBackLevels',
+            type: 'knock-back',
+            cells: [
+                { key: LEVEL_MATRIX_KEY_SPACER, label: '', interactive: false, counterLevel: false },
+                ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
+            ],
+            onClick: (levelKey) => {
+                levelsMatrixToggleLiteral('knockBackLevels', levelKey);
+                applyLevelsMatrixStateToRuleConfig();
+                syncLevelsPresetLabel();
+                renderSettingsDialog();
+            },
+            isSelected: (levelKey) => {
+                if (levelKey === LEVEL_MATRIX_KEY_SPACER) return false;
+                return normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.knockBackLiteralLevels).includes(Number(levelKey));
+            },
+        },
+    ];
+
+    for (let row of rows) {
+        let rowEl = document.createElement('div');
+        rowEl.className = 'levels-matrix-row levels-matrix-row-' + row.type;
+        rowEl.setAttribute('data-matrix-row', row.field);
+
+        let rowLabel = document.createElement('div');
+        rowLabel.className = 'levels-matrix-row-label';
+        rowLabel.textContent = t('settingsDialog.fields.' + row.field);
+        rowEl.appendChild(rowLabel);
+
+        let rowCells = document.createElement('div');
+        rowCells.className = 'levels-matrix-row-cells';
+        for (let cellDef of row.cells) {
+            rowCells.appendChild(createLevelsMatrixCell({
+                rowField: row.field,
+                rowType: row.type,
+                levelKey: cellDef.key,
+                displayLabel: cellDef.label,
+                interactive: !!cellDef.interactive,
+                counterLevel: !!cellDef.counterLevel,
+                selected: row.isSelected(cellDef.key),
+                readOnly,
+                onClick: row.onClick,
+            }));
+        }
+        rowEl.appendChild(rowCells);
+        matrix.appendChild(rowEl);
+    }
+
+    return matrix;
+}
+
+function createLevelMultiSelector(field, currentValues, readOnly) {
+    let wrap = document.createElement('div');
+    wrap.className = 'settings-checkbox-group settings-level-selector';
+    let selected = new Set(Array.isArray(currentValues) ? currentValues : []);
+    for (let lv of LEVEL_VALUE_OPTIONS) {
+        let optLabel = document.createElement('label');
+        optLabel.className = 'settings-checkbox-option';
+        let checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = selected.has(lv);
+        checkbox.disabled = !!readOnly;
+        if (!readOnly) {
+            checkbox.addEventListener('change', () => {
+                let next = new Set(Array.isArray(getRuleConfigFieldValue(field)) ? getRuleConfigFieldValue(field) : []);
+                if (checkbox.checked) next.add(lv);
+                else next.delete(lv);
+                setRuleConfigFieldValue(field, [...next]);
+                renderSettingsDialog();
+            });
+        }
+        optLabel.appendChild(checkbox);
+        optLabel.appendChild(document.createTextNode(levelDisplayLabel(lv)));
+        wrap.appendChild(optLabel);
+    }
+    return wrap;
+}
+
+function createGameModeRadioSelector(currentValue, readOnly) {
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    const opts = [
+        { value: 'endless', label: t('settingsDialog.options.endless') },
+        { value: 'pass-A', label: t('settingsDialog.options.passA') }
+    ];
+    for (let opt of opts) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'gameMode';
+        radio.value = opt.value;
+        radio.checked = (opt.value === String(currentValue));
+        radio.disabled = !!readOnly;
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue('gameMode', opt.value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(opt.label));
+        radioGroup.appendChild(radioLabel);
+    }
+    return radioGroup;
+}
+
+function createKnockBackConditionRow(readOnly) {
+    let row = document.createElement('div');
+    row.className = 'levels-row levels-row-knock-back-condition';
+    row.setAttribute('data-settings-field-group', 'knockBackCondition');
+
+    let hasKnockBackLevels = Array.isArray(gSettingsDraftRuleConfig.knockBackLevels)
+        && gSettingsDraftRuleConfig.knockBackLevels.length > 0;
+    if (!hasKnockBackLevels) return row;
+
+    let label = document.createElement('div');
+    label.className = 'levels-row-inline-label';
+    label.textContent = t('settingsDialog.fields.knockBackCondition');
+    row.appendChild(label);
+
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group levels-row-inline-group';
+
+    let mode = gSettingsDraftRuleConfig.knockBackConditionMode || 'unlimited';
+    const radioOptions = [
+        { value: 'unlimited', text: t('settingsDialog.options.unlimited') },
+        { value: 'singleT', text: t('settingsDialog.options.singleT') },
+    ];
+
+    for (let opt of radioOptions) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'knockBackConditionMode';
+        radio.value = opt.value;
+        radio.checked = mode === opt.value;
+        radio.disabled = !!readOnly;
+        radio.setAttribute('data-settings-field', 'knockBackConditionMode');
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue('knockBackConditionMode', opt.value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(opt.text));
+        radioGroup.appendChild(radioLabel);
+    }
+    row.appendChild(radioGroup);
+
+    let checkboxWrap = document.createElement('div');
+    checkboxWrap.className = 'settings-checkbox-group levels-row-inline-group';
+    let checkboxLabel = document.createElement('label');
+    checkboxLabel.className = 'settings-checkbox-option';
+    let checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!gSettingsDraftRuleConfig.knockBackTakeStageRequired;
+    checkbox.disabled = !!readOnly;
+    checkbox.setAttribute('data-settings-field', 'knockBackTakeStageRequired');
+    if (!readOnly) {
+        checkbox.addEventListener('change', () => {
+            setRuleConfigFieldValue('knockBackTakeStageRequired', checkbox.checked);
+            renderSettingsDialog();
+        });
+    }
+    checkboxLabel.appendChild(checkbox);
+    checkboxLabel.appendChild(document.createTextNode(t('settingsDialog.options.takeStageRequired')));
+    checkboxWrap.appendChild(checkboxLabel);
+    row.appendChild(checkboxWrap);
+
+    return row;
+}
+
+function createSettingsFieldEl(field, readOnly) {
+    let wrapper = document.createElement('div');
+    wrapper.className = 'settings-field';
+
+    let label = document.createElement('label');
+    label.textContent = t('settingsDialog.fields.' + field);
+    wrapper.appendChild(label);
+
+    let el;
+    let currentValue = getRuleConfigFieldValue(field);
+
+    // Checkbox fields
+    if (field === 'endingCompensation' || field === 'attackersSelfBaseHalfMultiplier') {
+        el = document.createElement('input');
+        el.type = 'checkbox';
+        el.checked = !!currentValue;
+        let isDisabled = readOnly;
+        if (field === 'attackersSelfBaseHalfMultiplier' && !gSettingsDraftRuleConfig.allowOverbase) {
+            isDisabled = true;
+        }
+        el.setAttribute('data-settings-field', field);
+        el.disabled = isDisabled;
+        if (!readOnly && !isDisabled) {
+            el.addEventListener('change', () => {
+                setRuleConfigFieldValue(field, el.checked);
+                renderSettingsDialog();
+            });
+        }
+        wrapper.appendChild(el);
+        return wrapper;
+    }
+
+    // Radio group for levelUpLimitPerFrame
+    if (field === 'levelUpLimitPerFrame') {
+        let radioGroup = document.createElement('div');
+        radioGroup.className = 'settings-radio-group';
+        const opts = [{ value: '', label: t('settingsDialog.options.unlimited') }, { value: '3', label: '3' }, { value: '4', label: '4' }, { value: '5', label: '5' }, { value: '6', label: '6' }];
+        let currentStr = (currentValue === null || currentValue === undefined) ? '' : String(currentValue);
+        for (let opt of opts) {
+            let radioLabel = document.createElement('label');
+            radioLabel.className = 'settings-radio-option';
+            let radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'levelUpLimitPerFrame';
+            radio.value = opt.value;
+            radio.checked = (opt.value === currentStr);
+            radio.disabled = !!readOnly;
+            if (!readOnly) {
+                radio.addEventListener('change', () => {
+                    if (radio.checked) {
+                        setRuleConfigFieldValue('levelUpLimitPerFrame', opt.value);
+                        renderSettingsDialog();
+                    }
+                });
+            }
+            radioLabel.appendChild(radio);
+            radioLabel.appendChild(document.createTextNode(opt.label));
+            radioGroup.appendChild(radioLabel);
+        }
+        wrapper.appendChild(radioGroup);
+        wrapper.setAttribute('data-settings-field', field);
+        return wrapper;
+    }
+
+    if (field === 'startLevel') {
+        wrapper.appendChild(createLevelSingleSelector(field, currentValue, readOnly));
+        wrapper.setAttribute('data-settings-field', field);
+        return wrapper;
+    }
+
+    if (field === 'mustDefendLevels' || field === 'mustStopLevels' || field === 'knockBackLevels') {
+        wrapper.appendChild(createLevelMultiSelector(field, currentValue, readOnly));
+        wrapper.setAttribute('data-settings-field', field);
+        return wrapper;
+    }
+
+    if (field === 'gameMode') {
+        wrapper.appendChild(createGameModeRadioSelector(currentValue, readOnly));
+        wrapper.setAttribute('data-settings-field', field);
+        return wrapper;
+    }
+
+    let optionsProvider = SETTINGS_SELECT_OPTIONS[field];
+
+    if (optionsProvider) {
+        el = document.createElement('select');
+        let options = (typeof optionsProvider === 'function') ? optionsProvider() : optionsProvider;
+        for (let opt of options) {
+            let op = document.createElement('option');
+            op.value = String(opt);
+            op.textContent = settingsOptionLabel(opt);
+            el.appendChild(op);
+        }
+        let target = (currentValue === Infinity) ? 'Infinity' : String(currentValue);
+        el.value = target;
+    } else {
+        el = document.createElement('input');
+        el.type = 'number';
+        if (field === 'stageThreshold') {
+            el.min = '1';
+            el.step = '1';
+        }
+        if (field === 'levelThreshold') {
+            el.min = '2';
+            el.step = '1';
+        }
+        if (currentValue !== null && currentValue !== undefined && currentValue !== Infinity) {
+            el.value = String(currentValue);
+        }
+    }
+
+    el.setAttribute('data-settings-field', field);
+    wrapper.setAttribute('data-settings-field', field);
+    el.disabled = !!readOnly;
+    if (!readOnly) {
+        el.addEventListener('change', () => {
+            setRuleConfigFieldValue(field, el.value);
+            renderSettingsDialog();
+        });
+    }
+
+    wrapper.appendChild(el);
+    return wrapper;
+}
+
+function createScoringPresetHint() {
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    let st = gSettingsDraftRuleConfig.stageThreshold;
+    let lt = gSettingsDraftRuleConfig.levelThreshold;
+    let lim = gSettingsDraftRuleConfig.levelUpLimitPerFrame;
+    let limText = (lim === null || lim === undefined) ? t('settingsDialog.options.unlimited') : String(lim);
+    hint.textContent = t('settingsDialog.scoringPresetHint', { stage: st, level: lt, limit: limText });
+    return hint;
+}
+
+function createBaseMultiplierSchemeHint() {
+    let scheme = gSettingsDraftRuleConfig.baseMultiplierScheme || 'limited';
+    // Map scheme value to the i18n key used in baseMultiplierSchemeHints
+    const schemeKeyMap = { 'limited': 'limited', 'single-or-not': 'singleOrNot', 'exponential': 'exponential', 'power': 'power' };
+    let hintKey = schemeKeyMap[scheme] || 'limited';
+    let hintText = t('settingsDialog.baseMultiplierSchemeHints.' + hintKey);
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    hint.textContent = hintText;
+    return hint;
+}
+
+function createLevelsPresetHint() {
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    let cfg = gSettingsDraftRuleConfig || {};
+    let toLabels = function(arr) {
+        if (!Array.isArray(arr) || arr.length === 0) return t('settingsDialog.options.none');
+        return arr.map(levelDisplayLabel).join(', ');
+    };
+    hint.textContent = t('settingsDialog.levelsPresetHint', {
+        start: levelDisplayLabel(cfg.startLevel),
+        defend: toLabels(cfg.mustDefendLevels),
+        stop: toLabels(cfg.mustStopLevels),
+        knockBack: toLabels(cfg.knockBackLevels)
+    });
+    return hint;
+}
+
+function createGameModeHint() {
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    let mode = gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.gameMode ? gSettingsDraftRuleConfig.gameMode : 'endless';
+    let key = (mode === 'pass-A') ? 'passA' : 'endless';
+    hint.textContent = t('settingsDialog.gameModeHints.' + key);
+    return hint;
+}
+
+function renderScoringTabBody(container, readOnly) {
+    let rows = document.createElement('div');
+    rows.className = 'scoring-tab-rows';
+
+    // Row 1: scoring preset + hint (right neighbor)
+    let row1 = document.createElement('div');
+    row1.className = 'scoring-row';
+    row1.appendChild(createSettingsFieldEl('scoringPreset', readOnly));
+    row1.appendChild(createScoringPresetHint());
+    rows.appendChild(row1);
+
+    // Row 2: ending compensation
+    let row2 = document.createElement('div');
+    row2.className = 'scoring-row';
+    row2.appendChild(createSettingsFieldEl('endingCompensation', readOnly));
+    rows.appendChild(row2);
+
+    // Row 3: stage threshold + level threshold + level-up limit (all in one row)
+    let row3 = document.createElement('div');
+    row3.className = 'scoring-row';
+    row3.appendChild(createSettingsFieldEl('stageThreshold', readOnly));
+    row3.appendChild(createSettingsFieldEl('levelThreshold', readOnly));
+    row3.appendChild(createSettingsFieldEl('levelUpLimitPerFrame', readOnly));
+    rows.appendChild(row3);
+
+    // Row 4: base multiplier scheme + hint (right neighbor)
+    let row4 = document.createElement('div');
+    row4.className = 'scoring-row';
+    row4.appendChild(createSettingsFieldEl('baseMultiplierScheme', readOnly));
+    row4.appendChild(createBaseMultiplierSchemeHint());
+    rows.appendChild(row4);
+
+    // Row 5: attackers' self-base half multiplier
+    let row5 = document.createElement('div');
+    row5.className = 'scoring-row';
+    row5.appendChild(createSettingsFieldEl('attackersSelfBaseHalfMultiplier', readOnly));
+    rows.appendChild(row5);
+
+    container.appendChild(rows);
+}
+
+function renderLevelsTabBody(container, readOnly) {
+    let rows = document.createElement('div');
+    rows.className = 'levels-tab-rows';
+
+    // Row 1: levels preset
+    let row1 = document.createElement('div');
+    row1.className = 'levels-row';
+    row1.appendChild(createSettingsFieldEl('levelsPreset', readOnly));
+    row1.appendChild(createLevelsPresetHint());
+    rows.appendChild(row1);
+
+    // Row 2: special matrix for start / must-defend / must-stop / knock-back
+    let row2 = document.createElement('div');
+    row2.className = 'levels-row levels-row-matrix';
+    row2.appendChild(createLevelsSpecialMatrix(readOnly));
+    rows.appendChild(row2);
+
+    // Row 3: knock-back condition (visible only when knock-back levels is non-empty)
+    let row3 = createKnockBackConditionRow(readOnly);
+    if (row3.childElementCount > 0) rows.appendChild(row3);
+
+    // Row 4: game mode + hint
+    let row4 = document.createElement('div');
+    row4.className = 'levels-row';
+    row4.appendChild(createSettingsFieldEl('gameMode', readOnly));
+    row4.appendChild(createGameModeHint());
+    rows.appendChild(row4);
+
+    container.appendChild(rows);
+}
+
+function renderSettingsDialog() {
+    if (!gSettingsDialog || !gSettingsBody) return;
+
+    let readOnly = (gSettingsMode === 'inspect');
+    gSettingsTitle.textContent = readOnly ? t('settingsDialog.inspectTitle') : t('settingsDialog.createTitle');
+    gSettingsSubtitle.textContent = readOnly ? t('settingsDialog.readOnlySubtitle') : t('settingsDialog.editableSubtitle');
+    gSettingsDisplayPlaceholder.textContent = t('settingsDialog.displayPlaceholder');
+
+    gBtnSettingsCancel.textContent = readOnly ? t('settingsDialog.close') : t('settingsDialog.cancel');
+    gBtnSettingsConfirm.textContent = t('settingsDialog.confirm');
+    gBtnSettingsConfirm.style.display = readOnly ? 'none' : '';
+
+    // Update top-level tab active states
+    for (let tlTab of gSettingsTopLevelTabs) {
+        tlTab.setAttribute('data-active', tlTab.getAttribute('data-toplevel') === gSettingsTopLevelTab ? 'true' : 'false');
+    }
+
+    // Non-game top-level tabs: show placeholder, hide game-settings panels
+    let isGameTab = (gSettingsTopLevelTab === 'game');
+    if (gSettingsTabRow)   gSettingsTabRow.style.display   = isGameTab ? '' : 'none';
+    if (gSettingsBody)     gSettingsBody.style.display     = isGameTab ? '' : 'none';
+    if (gSettingsDisplayPlaceholder) gSettingsDisplayPlaceholder.style.display = isGameTab ? '' : 'none';
+    if (gSettingsPlaceholderPanel) {
+        gSettingsPlaceholderPanel.style.display = isGameTab ? 'none' : 'block';
+        if (!isGameTab) {
+            gSettingsPlaceholderPanel.textContent = t('settingsDialog.placeholders.' + gSettingsTopLevelTab);
+            return;
+        }
+    }
+
+    // Second-level tab active states
+    for (let tab of gSettingsTabs) {
+        let tabName = tab.getAttribute('data-tab');
+        tab.setAttribute('data-active', tabName === gSettingsActiveTab ? 'true' : 'false');
+    }
+
+    gSettingsBody.className = readOnly ? 'settings-readonly' : '';
+    gSettingsBody.innerHTML = '';
+
+    if (gSettingsActiveTab === 'scoring') {
+        renderScoringTabBody(gSettingsBody, readOnly);
+    } else if (gSettingsActiveTab === 'levels') {
+        renderLevelsTabBody(gSettingsBody, readOnly);
+    } else {
+        let grid = document.createElement('div');
+        grid.className = 'settings-grid';
+        let fields = SETTINGS_FIELDS_BY_TAB[gSettingsActiveTab] || [];
+        for (let field of fields) {
+            grid.appendChild(createSettingsFieldEl(field, readOnly));
+        }
+        gSettingsBody.appendChild(grid);
+    }
+}
+
+function openSettingsDialog(mode) {
+    ensureResolvedSettings();
+    gSettingsMode = mode;
+    gSettingsActiveTab = 'presets';
+    gSettingsTopLevelTab = 'game';
+
+    if (mode === 'inspect') {
+        let sourceRule = (game && game.gameConfig) ? game.gameConfig : gResolvedGameSettings.ruleConfig;
+        gSettingsDraftRuleConfig = cloneRuleConfig(sourceRule);
+        gSettingsDraftDisplaySettings = { ...(game && game.displaySettings ? game.displaySettings : gResolvedGameSettings.displaySettings) };
+    } else {
+        gSettingsDraftRuleConfig = cloneRuleConfig(gResolvedGameSettings.ruleConfig);
+        gSettingsDraftDisplaySettings = { ...gResolvedGameSettings.displaySettings };
+    }
+
+    // Sync preset labels to current config state
+    syncScoringPresetLabel();
+    syncLevelsPresetLabel();
+    resetLevelsMatrixStateFromRuleConfig();
+
+    renderSettingsDialog();
+    gSettingsOverlay.style.display = 'block';
+    gSettingsDialog.style.display = 'flex';
+}
+
+function closeSettingsDialog() {
+    if (gSettingsOverlay) gSettingsOverlay.style.display = 'none';
+    if (gSettingsDialog) gSettingsDialog.style.display = 'none';
+}
+
+function confirmCreateGameFromSettings() {
+    if (gSettingsMode !== 'create') {
+        closeSettingsDialog();
+        return;
+    }
+
+    let presetName = gSettingsDraftRuleConfig.presetName || 'default';
+    let overrides = cloneRuleConfig(gSettingsDraftRuleConfig);
+    delete overrides.presetName;
+
+    if (typeof shengjiResolveGameSettings === 'function') {
+        gResolvedGameSettings = shengjiResolveGameSettings({
+            presetName,
+            overrides,
+            displayOverrides: gSettingsDraftDisplaySettings,
+        });
+    } else {
+        gResolvedGameSettings = {
+            presetName,
+            ruleConfig: engineBuildConfig(presetName, overrides),
+            displaySettings: { ...gSettingsDraftDisplaySettings },
+        };
+    }
+
+    pendingNextFrame = null;
+    closeSettingsDialog();
+    startNewGame();
+}
+
+function onFooterSettingsClick() {
+    if (game && game.phase && game.phase !== GamePhase.IDLE) {
+        openSettingsDialog('inspect');
+    } else {
+        openSettingsDialog('create');
+    }
+}
+
+function onNewGameButtonClick() {
+    openSettingsDialog('create');
+}
+
+function humanPlayCardsCore(cp) {
     if (!isHumanControlled(cp)) return;
     let cards = getSelectedCards(cp);
 
@@ -1997,6 +3102,16 @@ function finishGame() {
 function showCountingDialog(result, frameResult, applied) {
     if (!gCountingDialog) return;
 
+    // Canonical settlement source of truth (note 35e): all displayed rows and total
+    // must come from the same finalized score-breakdown object.
+    let breakdown = result.scoreBreakdown || {
+        counterScore: result.counterScore,
+        baseScore: result.baseScore,
+        endingCompensation: result.endingCompensation,
+        multiplayCompensation: result.multiplayCompensation,
+        totalScore: result.totalScore,
+    };
+
     // Size: match #desk-south width × 2× height
     let deskSouth = document.getElementById('desk-south');
     if (deskSouth) {
@@ -2020,20 +3135,20 @@ function showCountingDialog(result, frameResult, applied) {
     // Row 1 right: score breakdown
     let cdScore = document.getElementById('cd-score');
     cdScore.innerHTML = '<div style="font-weight:bold;margin-bottom:0.5vh;">' + t('counting.scoreLabel') + '</div>';
-    let deskScore = result.totalScore - result.baseScore;
+    let deskScore = breakdown.counterScore;
     addScoreRow(cdScore, t('counting.deskScore'), deskScore);
-    if (result.baseScore > 0) {
-        addScoreRow(cdScore, t('counting.baseScore'), result.baseScore);
+    if (breakdown.baseScore > 0) {
+        addScoreRow(cdScore, t('counting.baseScore'), breakdown.baseScore);
     }
     if (result.endingCompensationActive) {
-        addScoreRow(cdScore, t('counting.endingCompensation'), result.endingCompensation);
+        addScoreRow(cdScore, t('counting.endingCompensation'), breakdown.endingCompensation);
     }
     if (result.multiplayCompensationActive) {
-        addScoreRow(cdScore, t('counting.multiplayCompensation'), result.multiplayCompensation);
+        addScoreRow(cdScore, t('counting.multiplayCompensation'), breakdown.multiplayCompensation);
     }
     let totalDiv = document.createElement('div');
     totalDiv.className = 'cd-score-row cd-score-total';
-    totalDiv.innerHTML = '<span>' + t('counting.totalScore') + '</span><span>' + result.totalScore + '</span>';
+    totalDiv.innerHTML = '<span>' + t('counting.totalScore') + '</span><span>' + breakdown.totalScore + '</span>';
     cdScore.appendChild(totalDiv);
 
     // Row 2 left: result summary
@@ -2054,6 +3169,8 @@ function showCountingDialog(result, frameResult, applied) {
             let nsLevel = applied.newLevels[0]; // South/North team
             let ewLevel = applied.newLevels[1]; // East/West team
             let teamLine = document.createElement('div');
+            teamLine.setAttribute('data-result-ns-level', String(nsLevel));
+            teamLine.setAttribute('data-result-ew-level', String(ewLevel));
             teamLine.textContent = t('counting.teamLevels', {
                 nsLevel: numberToLevel[nsLevel] || nsLevel,
                 ewLevel: numberToLevel[ewLevel] || ewLevel
@@ -2104,8 +3221,38 @@ let pendingNextFrame = null;
 // Event listeners
 // ---------------------------------------------------------------------------
 
-gBtnNewGame.addEventListener('click', startNewGame);
+gBtnNewGame.addEventListener('click', onNewGameButtonClick);
 gBtnPlay.addEventListener('click', humanPlayCards);
+
+if (gBtnGameSettings) {
+    gBtnGameSettings.addEventListener('click', onFooterSettingsClick);
+}
+
+if (gBtnSettingsCancel) {
+    gBtnSettingsCancel.addEventListener('click', closeSettingsDialog);
+}
+
+if (gBtnSettingsConfirm) {
+    gBtnSettingsConfirm.addEventListener('click', confirmCreateGameFromSettings);
+}
+
+if (gSettingsOverlay) {
+    gSettingsOverlay.addEventListener('click', closeSettingsDialog);
+}
+
+for (let tabBtn of gSettingsTabs) {
+    tabBtn.addEventListener('click', () => {
+        gSettingsActiveTab = tabBtn.getAttribute('data-tab');
+        renderSettingsDialog();
+    });
+}
+
+for (let tlTabBtn of gSettingsTopLevelTabs) {
+    tlTabBtn.addEventListener('click', () => {
+        gSettingsTopLevelTab = tlTabBtn.getAttribute('data-toplevel');
+        renderSettingsDialog();
+    });
+}
 
 const gBtnGotoRecap = document.getElementById('btn-goto-recap');
 if (gBtnGotoRecap) {
@@ -2137,5 +3284,6 @@ window.addEventListener('dblclick', function(e) {
 // ---------------------------------------------------------------------------
 // Initial state
 // ---------------------------------------------------------------------------
+ensureResolvedSettings();
 updatePhaseDisplay(t('phase.initial'));
 updateStatus(t('status.ready'));

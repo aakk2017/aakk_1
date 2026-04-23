@@ -33,14 +33,15 @@ const TOTAL_ROUNDS   = 25;
 const PRESET_CONFIGS = {
     'default': {
         deckCount: 2,
-        mustStopLevels: [0, 3, 8, 11, 12], // 2, 5, X, K, A (indices)
+        mustDefendLevels: [],
+        mustStopLevels: [3, 8, 11], // 5, X, K (indices)
         allowOverbase: false,
         overbaseRestrictions: null,
         doubleDeclarationOrdering: null,
         levelConfiguration: 'default',
         allowCrossings: false,
-        knockBackLimit: 0,
-        endgameFactorLimit: 4,
+        knockBackLevels: [],
+        baseMultiplierLimit: 4,   // cap: baseMultiplier <= 2^baseMultiplierLimit
         countingSystem: 'default',
         endingCompensation: false,
     },
@@ -54,8 +55,8 @@ const PRESET_CONFIGS = {
         overbaseRestrictions: null,
         doubleDeclarationOrdering: 's-h-c-d',
         levelConfiguration: 'high-school',
-        knockBackLimit: Infinity,
-        endgameFactorLimit: Infinity,
+        knockBackLevels: [9, 12],
+        baseMultiplierLimit: Infinity,
     },
     'Berkeley': {
         deckCount: 2,
@@ -63,7 +64,7 @@ const PRESET_CONFIGS = {
         overbaseRestrictions: null,
         doubleDeclarationOrdering: 's-h-c-d',
         allowCrossings: true,
-        endgameFactorLimit: Infinity,
+        baseMultiplierLimit: Infinity,
     },
     'experimental': {
         deckCount: 2,
@@ -77,14 +78,33 @@ const PRESET_CONFIGS = {
  * §12A.7: load default first → apply preset overrides → apply custom overrides.
  */
 function engineBuildConfig(presetName, customOverrides) {
-    let base = { ...PRESET_CONFIGS['default'] };
+    // Prefer the centralized settings resolver when available.
+    if (typeof shengjiResolveGameRuleConfig === 'function') {
+        return shengjiResolveGameRuleConfig({
+            presetName: presetName || 'default',
+            overrides: customOverrides || {}
+        });
+    }
+
+    let fallback = { ...PRESET_CONFIGS['default'] };
     if (presetName && presetName !== 'default' && PRESET_CONFIGS[presetName]) {
-        Object.assign(base, PRESET_CONFIGS[presetName]);
+        Object.assign(fallback, PRESET_CONFIGS[presetName]);
     }
     if (customOverrides) {
-        Object.assign(base, customOverrides);
+        Object.assign(fallback, customOverrides);
     }
-    return base;
+    return fallback;
+}
+
+function engineGetTimingConfigValue(key, fallback) {
+    let timing = game && game.gameConfig && game.gameConfig.timing;
+    if (timing && timing[key] !== undefined && timing[key] !== null) {
+        return timing[key];
+    }
+    if (TIMING_CONFIG[key] !== undefined && TIMING_CONFIG[key] !== null) {
+        return TIMING_CONFIG[key];
+    }
+    return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +181,17 @@ let game = {
 
     // Per-player levels (§12)
     playerLevels: [0, 0, 0, 0],  // each player's current level (0→'2' … 12→'A')
+
+    // Persistent level-rule clear-state across frames in a session.
+    // Cycle-relative semantics are tracked per side (NS / EW) so special marks
+    // are independent between sides and consumable once per cycle per side.
+    levelRuleState: {
+        cycleIndexBySide: [0, 0],
+        mustDefendConsumedCycleBySide: [{}, {}],
+        mustStopConsumedCycleBySide: [{}, {}],
+        mustDefendStartMarkerConsumedBySide: [false, false],
+        mustStopStartMarkerConsumedBySide: [false, false],
+    },
 
     // Per-player bank time remaining in seconds (note 24 §9)
     playerBankTimes: [0, 0, 0, 0],
@@ -1561,6 +1592,18 @@ function engineSetTeams() {
     }
 }
 
+/**
+ * Apply attacker-self-base half-multiplier rule.
+ * Rule gate: only applies when attackers set the final base and config enables it.
+ * Numeric semantics: preserve float (no integer forcing), lower bounded by 1.
+ */
+function engineApplyAttackersSelfBaseHalfMultiplier(baseMultiplier, cfg, attackersSetFinalBase) {
+    if (cfg && cfg.attackersSelfBaseHalfMultiplier && attackersSetFinalBase) {
+        return Math.max(1, baseMultiplier / 2);
+    }
+    return baseMultiplier;
+}
+
 // ---------------------------------------------------------------------------
 // Game flow
 // ---------------------------------------------------------------------------
@@ -1568,7 +1611,7 @@ function engineSetTeams() {
 /** Start a new game — shuffles deck but does NOT deal.
  *  The page calls engineDealNextBatch() to animate dealing one round at a time.
  */
-function engineStartGame(level, pivot, playerLevels, isQiangzhuang) {
+function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRuleConfig) {
     game.phase          = GamePhase.DEALING;
     game.level          = level;
     game.strain         = -1;
@@ -1590,11 +1633,24 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang) {
     if (playerLevels) {
         game.playerLevels = [...playerLevels];
     } else {
-        game.playerLevels = new Array(NUM_PLAYERS).fill(0);
+        game.playerLevels = new Array(NUM_PLAYERS).fill(level);
     }
 
-    // Apply game configuration (default preset unless overridden)
-    if (!game.gameConfig) {
+    // Keep level-rule clear-state across frames; reset only on a fresh game.
+    if (!playerLevels || !game.levelRuleState) {
+        game.levelRuleState = {
+            cycleIndexBySide: [0, 0],
+            mustDefendConsumedCycleBySide: [{}, {}],
+            mustStopConsumedCycleBySide: [{}, {}],
+            mustDefendStartMarkerConsumedBySide: [false, false],
+            mustStopStartMarkerConsumedBySide: [false, false],
+        };
+    }
+
+    // Apply authoritative resolved game-rule config (created before game start).
+    if (resolvedRuleConfig) {
+        game.gameConfig = { ...resolvedRuleConfig };
+    } else if (!game.gameConfig) {
         game.gameConfig = engineBuildConfig('default');
     }
 
@@ -1604,8 +1660,9 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang) {
     game.hands = [[], [], [], []];
     game.base  = [];
 
-    // Reset bank times for all human players at frame start (note 24 §9)
-    game.playerBankTimes = new Array(NUM_PLAYERS).fill(TIMING_CONFIG.bankTime);
+    // Reset bank times from resolved timing config (note 34).
+    let bank = engineGetTimingConfigValue('bankTime', TIMING_CONFIG.bankTime);
+    game.playerBankTimes = new Array(NUM_PLAYERS).fill(bank);
 }
 
 /**
@@ -1811,36 +1868,103 @@ function engineEndRound() {
 /** Counting phase — finalize score. */
 function engineFinalize() {
     let lastRound = game.roundHistory[game.roundHistory.length - 1];
+    let attackersWonBase = !!(lastRound && game.attackingTeam.includes(lastRound.winner));
+    let attackersSetFinalBase = !!(game.attackingTeam && game.attackingTeam.includes(game.pivot));
+    let counterScore = game.frameScore;
     let baseScore = 0;
-    let endgameFactor = 1;
+    let baseMultiplier = 1;
+    let endingCompensation = 0;
+    let multiplayCompensation = 0;
+    let finalScore = counterScore;
 
-    if (game.attackingTeam.includes(lastRound.winner)) {
-        // Attackers win last round: calculate endgame factor
-        // A single = x2, pair = x4, etc (2 ^ max_element_volume_in_winning_trick)
+    if (attackersWonBase) {
+        // Attackers win last round: calculate base multiplier per §11.3
         let lastPlayed = lastRound.played[lastRound.winner];
         let decomp = engineResolveLead(lastPlayed);
-        let maxCopySpan = (decomp && decomp.elements.length > 0) ? Math.max(...decomp.elements.map(e => e.copy * e.span)) : 1;
-        endgameFactor = Math.pow(2, maxCopySpan);
+        let coreEl = (decomp && decomp.elements && decomp.elements.length > 0) ? decomp.elements[0] : null;
 
-        // Clamp endgame factor by config limit
-        let limit = (game.gameConfig && game.gameConfig.endgameFactorLimit) || 4;
-        if (endgameFactor > Math.pow(2, limit)) endgameFactor = Math.pow(2, limit);
+        let scheme = (game.gameConfig && game.gameConfig.baseMultiplierScheme) || 'limited';
+        let copy = (coreEl && coreEl.copy) ? coreEl.copy : 1;
+        let span = (coreEl && coreEl.span) ? coreEl.span : 1;
 
-        baseScore = engineCountScore(game.base) * endgameFactor;
-        game.frameScore += baseScore;
+        if (scheme === 'limited') {
+            // single→2, pair→4, any higher type→8
+            if (!coreEl || copy === 1) {
+                baseMultiplier = 2;
+            } else if (copy === 2 && span === 1) {
+                baseMultiplier = 4;
+            } else {
+                baseMultiplier = 8;
+            }
+        } else if (scheme === 'single-or-not') {
+            // single→2, any non-single structure→4
+            baseMultiplier = (coreEl && copy >= 2) ? 4 : 2;
+        } else if (scheme === 'exponential') {
+            // 2^(copy + span - 1)
+            baseMultiplier = Math.pow(2, copy + span - 1);
+        } else if (scheme === 'power') {
+            // 2 * copy^span
+            baseMultiplier = 2 * Math.pow(copy, span);
+        } else {
+            // Fallback: same as limited
+            baseMultiplier = (!coreEl || copy === 1) ? 2 : (copy === 2 && span === 1) ? 4 : 8;
+        }
+
+        // Apply optional limit cap
+        let multiplierLimit = (game.gameConfig && game.gameConfig.baseMultiplierLimit);
+        if (multiplierLimit !== undefined && multiplierLimit !== null && multiplierLimit !== Infinity) {
+            let cap = Math.pow(2, multiplierLimit);
+            if (baseMultiplier > cap) baseMultiplier = cap;
+        }
+
+        // Attackers' self-base half multiplier (gated + float-preserving)
+        baseMultiplier = engineApplyAttackersSelfBaseHalfMultiplier(baseMultiplier, game.gameConfig, attackersSetFinalBase);
+
+        baseScore = engineCountScore(game.base) * baseMultiplier;
+        finalScore += baseScore;
     }
 
     game.phase = GamePhase.GAME_OVER;
 
-    // Compute frame result (§12)
-    let frameResult = engineComputeFrameResult(game.frameScore);
+    // Compute ending compensation in canonical frame-score unit.
+    // Note 36c: ending compensation = ending length * authoritative base multiplier / 2.
+    if (game.gameConfig && game.gameConfig.endingCompensation) {
+        let endingLength = 0;
+        for (let i = game.roundHistory.length - 1; i >= 0; i--) {
+            if (game.attackingTeam.includes(game.roundHistory[i].winner)) {
+                endingLength++;
+            } else {
+                break;
+            }
+        }
+        if (endingLength > 0) {
+            endingCompensation = endingLength * (baseMultiplier / 2);
+            finalScore += endingCompensation;
+        }
+    }
+
+    // Keep authoritative total on game state in sync with finalized settlement.
+    game.frameScore = finalScore;
+
+    // Compute frame result (§12) — after all score components including ending compensation
+    let frameResult = engineComputeFrameResult(finalScore);
+
+    let scoreBreakdown = {
+        counterScore,
+        baseScore,
+        endingCompensation,
+        multiplayCompensation,
+        totalScore: finalScore,
+    };
 
     return {
-        totalScore: game.frameScore,
+        totalScore: finalScore,
+        counterScore,
         baseScore,
-        endgameFactor,
-        endingCompensation: 0,
-        multiplayCompensation: 0,
+        baseMultiplier,
+        endingCompensation,
+        multiplayCompensation,
+        scoreBreakdown,
         endingCompensationActive: !!(game.gameConfig && game.gameConfig.endingCompensation),
         multiplayCompensationActive: !!(game.gameConfig && game.gameConfig.multiplayCompensation),
         result: t('results.' + frameResult.resultKey, { n: frameResult.levelDelta }),
@@ -1849,42 +1973,275 @@ function engineFinalize() {
 }
 
 /**
+ * Detect if knock-back was triggered: attackers won the last round AND all cards in that round are levelers.
+ * Levelers are cards with rank === game.level.
+ * Returns true if knock-back condition is met, false otherwise.
+ */
+function engineIsKnockbackTriggered(frameResult) {
+    if (!game.roundHistory || game.roundHistory.length === 0) return false;
+    let kbLevels = (game.gameConfig && Array.isArray(game.gameConfig.knockBackLevels)) ? game.gameConfig.knockBackLevels : [];
+    if (!kbLevels.includes(game.level)) return false;
+    let lastRound = game.roundHistory[game.roundHistory.length - 1];
+    
+    // Knock-back triggered only if attackers won the last round
+    if (!game.attackingTeam.includes(lastRound.winner)) return false;
+    
+    // Optional gate: when enabled, knock-back only applies if attackers took stage.
+    if (game.gameConfig && game.gameConfig.knockBackTakeStageRequired) {
+        let projected = frameResult || engineComputeFrameResult(game.frameScore);
+        if (projected.defenseHolds) return false;
+    }
+
+    let winningCards = lastRound.played[lastRound.winner] || [];
+    let mode = (game.gameConfig && game.gameConfig.knockBackConditionMode) ? game.gameConfig.knockBackConditionMode : 'unlimited';
+    return engineDoesWinningHandCoreMatchKnockBackCondition(winningCards, mode);
+}
+
+function engineGetConfiguredStartLevel() {
+    return (game.gameConfig && game.gameConfig.startLevel !== undefined && game.gameConfig.startLevel !== null)
+        ? game.gameConfig.startLevel
+        : 0;
+}
+
+function engineLevelToCycleOffset(level, startLevel) {
+    return ((level - startLevel) % 13 + 13) % 13;
+}
+
+function engineCycleOffsetToLevel(offset, startLevel) {
+    return ((startLevel + offset) % 13 + 13) % 13;
+}
+
+function engineGetSideIndexForPlayer(player) {
+    // South/North -> 0 (even seats), East/West -> 1 (odd seats)
+    return ((player % 2) + 2) % 2;
+}
+
+function engineGetPlayersForSide(sideIndex) {
+    return sideIndex === 0 ? [0, 2] : [1, 3];
+}
+
+function engineCanonicalizeSideLevels(levels) {
+    let out = [...levels];
+    let ns = out[0];
+    let ew = out[1];
+    out[2] = ns;
+    out[3] = ew;
+    return out;
+}
+
+function engineGetPlayerCycleIndex(player) {
+    let side = engineGetSideIndexForPlayer(player);
+    let state = game.levelRuleState || {};
+    let arr = state.cycleIndexBySide || [];
+    return Number.isInteger(arr[side]) ? arr[side] : 0;
+}
+
+function engineSetPlayerCycleIndex(player, cycleIndex) {
+    let side = engineGetSideIndexForPlayer(player);
+    if (!game.levelRuleState) return;
+    if (!Array.isArray(game.levelRuleState.cycleIndexBySide)) {
+        game.levelRuleState.cycleIndexBySide = [0, 0];
+    }
+    game.levelRuleState.cycleIndexBySide[side] = cycleIndex;
+}
+
+function engineMarkMustDefendConsumed(player, level, cycleIndex) {
+    let side = engineGetSideIndexForPlayer(player);
+    if (!game.levelRuleState.mustDefendConsumedCycleBySide) {
+        game.levelRuleState.mustDefendConsumedCycleBySide = [{}, {}];
+    }
+    let store = game.levelRuleState.mustDefendConsumedCycleBySide[side] || {};
+    store[level] = cycleIndex;
+    game.levelRuleState.mustDefendConsumedCycleBySide[side] = store;
+}
+
+function engineMarkMustStopConsumed(player, level, cycleIndex) {
+    let side = engineGetSideIndexForPlayer(player);
+    if (!game.levelRuleState.mustStopConsumedCycleBySide) {
+        game.levelRuleState.mustStopConsumedCycleBySide = [{}, {}];
+    }
+    let store = game.levelRuleState.mustStopConsumedCycleBySide[side] || {};
+    store[level] = cycleIndex;
+    game.levelRuleState.mustStopConsumedCycleBySide[side] = store;
+}
+
+function engineHasConsumedMustDefend(player, level, cycleIndex) {
+    let side = engineGetSideIndexForPlayer(player);
+    let store = (game.levelRuleState.mustDefendConsumedCycleBySide || [])[side] || {};
+    return store[level] === cycleIndex;
+}
+
+function engineHasConsumedMustStop(player, level, cycleIndex) {
+    let side = engineGetSideIndexForPlayer(player);
+    let store = (game.levelRuleState.mustStopConsumedCycleBySide || [])[side] || {};
+    return store[level] === cycleIndex;
+}
+
+function engineHasConsumedMustDefendStartMarker(player) {
+    let side = engineGetSideIndexForPlayer(player);
+    let arr = game.levelRuleState.mustDefendStartMarkerConsumedBySide || [];
+    return !!arr[side];
+}
+
+function engineHasConsumedMustStopStartMarker(player) {
+    let side = engineGetSideIndexForPlayer(player);
+    let arr = game.levelRuleState.mustStopStartMarkerConsumedBySide || [];
+    return !!arr[side];
+}
+
+function engineMarkMustDefendStartMarkerConsumed(player) {
+    let side = engineGetSideIndexForPlayer(player);
+    if (!game.levelRuleState) return;
+    if (!Array.isArray(game.levelRuleState.mustDefendStartMarkerConsumedBySide)) {
+        game.levelRuleState.mustDefendStartMarkerConsumedBySide = [false, false];
+    }
+    game.levelRuleState.mustDefendStartMarkerConsumedBySide[side] = true;
+}
+
+function engineMarkMustStopStartMarkerConsumed(player) {
+    let side = engineGetSideIndexForPlayer(player);
+    if (!game.levelRuleState) return;
+    if (!Array.isArray(game.levelRuleState.mustStopStartMarkerConsumedBySide)) {
+        game.levelRuleState.mustStopStartMarkerConsumedBySide = [false, false];
+    }
+    game.levelRuleState.mustStopStartMarkerConsumedBySide[side] = true;
+}
+
+function engineGetCycleAwareAbsoluteLevel(player, level) {
+    let startLevel = engineGetConfiguredStartLevel();
+    let cycleIndex = engineGetPlayerCycleIndex(player);
+    return cycleIndex * 13 + engineLevelToCycleOffset(level, startLevel);
+}
+
+function engineGetBlockingOccurrenceForPlayerInCycle(player, level, cycleIndex) {
+    let cfg = game.gameConfig || {};
+    let startLevel = engineGetConfiguredStartLevel();
+    let mustStopLevels = Array.isArray(cfg.mustStopLevels) ? cfg.mustStopLevels : [];
+    let mustDefendLevels = Array.isArray(cfg.mustDefendLevels) ? cfg.mustDefendLevels : [];
+    let mustStopStartMarker = !!cfg.mustStopStartMarker;
+    let mustDefendStartMarker = !!cfg.mustDefendStartMarker;
+
+    let stopStartBlocked = mustStopStartMarker
+        && cycleIndex === 0
+        && level === startLevel
+        && !engineHasConsumedMustStopStartMarker(player);
+    if (stopStartBlocked) {
+        return { markType: 'must-stop-start-marker', level, cycleIndex, semanticStart: true };
+    }
+
+    let defendStartBlocked = mustDefendStartMarker
+        && cycleIndex === 0
+        && level === startLevel
+        && !engineHasConsumedMustDefendStartMarker(player);
+    if (defendStartBlocked) {
+        return { markType: 'must-defend-start-marker', level, cycleIndex, semanticStart: true };
+    }
+
+    let stopBlocked = mustStopLevels.includes(level) && !engineHasConsumedMustStop(player, level, cycleIndex);
+    if (stopBlocked) {
+        return { markType: 'must-stop-level', level, cycleIndex, semanticStart: false };
+    }
+
+    let defendBlocked = mustDefendLevels.includes(level) && !engineHasConsumedMustDefend(player, level, cycleIndex);
+    if (defendBlocked) {
+        return { markType: 'must-defend-level', level, cycleIndex, semanticStart: false };
+    }
+
+    return null;
+}
+
+function engineConsumeBlockingOccurrenceForPlayer(player, occurrence) {
+    if (!occurrence) return;
+    if (occurrence.markType === 'must-stop-start-marker') {
+        engineMarkMustStopStartMarkerConsumed(player);
+    } else if (occurrence.markType === 'must-defend-start-marker') {
+        engineMarkMustDefendStartMarkerConsumed(player);
+    } else if (occurrence.markType === 'must-stop-level') {
+        engineMarkMustStopConsumed(player, occurrence.level, occurrence.cycleIndex);
+    } else if (occurrence.markType === 'must-defend-level') {
+        engineMarkMustDefendConsumed(player, occurrence.level, occurrence.cycleIndex);
+    }
+}
+
+function engineDoesWinningHandCoreContainOnlyLevelers(cards) {
+    let decomp = engineResolveLead(cards || []);
+    let coreElement = decomp && decomp.coreElement ? decomp.coreElement : null;
+    if (!coreElement || !Array.isArray(coreElement.cards) || coreElement.cards.length === 0) {
+        return false;
+    }
+    return coreElement.cards.every(card => card.rank === game.level);
+}
+
+function engineDoesWinningHandCoreMatchKnockBackCondition(cards, mode) {
+    let decomp = engineResolveLead(cards || []);
+    let coreElement = decomp && decomp.coreElement ? decomp.coreElement : null;
+    if (!coreElement || !Array.isArray(coreElement.cards) || coreElement.cards.length === 0) {
+        return false;
+    }
+
+    if (mode === 'singleT') {
+        if (coreElement.cards.length !== 1) return false;
+        let c = coreElement.cards[0];
+        return c.rank === game.level && c.division === 4;
+    }
+
+    // Default / unlimited: core element cards are all levelers.
+    return coreElement.cards.every(card => card.rank === game.level);
+}
+
+function engineGetKnockBackDestinationAbsolute(player, currentAbs) {
+    let cfg = game.gameConfig || {};
+    let startLevel = engineGetConfiguredStartLevel();
+    let currentCycle = Math.floor(currentAbs / 13);
+    let currentOffset = currentAbs % 13;
+    let kbLevels = Array.isArray(cfg.knockBackLevels) ? cfg.knockBackLevels : [];
+
+    let candidates = [currentCycle * 13];
+    for (let level of kbLevels) {
+        let abs = currentCycle * 13 + engineLevelToCycleOffset(level, startLevel);
+        if (abs < currentAbs) candidates.push(abs);
+    }
+
+    // If we are already at the cycle start, fall back to the same start marker.
+    if (candidates.length === 0) return currentCycle * 13 + currentOffset;
+    return Math.max(...candidates);
+}
+
+/**
  * Compute frame result from final score (§12 + terminology §15).
- * stageThreshold = 80, levelThreshold = 40.
- * Results: grandSlam (=0, def+3), smallSlam (1-39, def+2), retainStage (40-79, def+1),
- *   takeStage (80-119, atk+0), upOne (120-159, atk+1), upTwo (160-199, atk+2), upN (200+).
+ * Authoritative delta model is fully config-driven for both branches:
+ *   defenders delta = ceil((stageThreshold - score) / levelThreshold) when score < stageThreshold
+ *   attackers delta = floor((score - stageThreshold) / levelThreshold) when score >= stageThreshold
+ * with levelUpLimitPerFrame cap applied to both branches when configured.
  * Returns { defenseHolds, levelDelta, resultKey, nextPivot, advancingPlayers }.
  */
 function engineComputeFrameResult(finalScore) {
-    const stageThreshold = 80;
-    const levelThreshold = 40;
+    const stageThreshold = (game.gameConfig && game.gameConfig.stageThreshold != null) ? game.gameConfig.stageThreshold : 80;
+    const rawLevelThreshold = (game.gameConfig && game.gameConfig.levelThreshold != null) ? game.gameConfig.levelThreshold : 40;
+    const levelThreshold = Math.max(1, Number(rawLevelThreshold) || 1);
+    const levelCap = (game.gameConfig && game.gameConfig.levelUpLimitPerFrame != null) ? game.gameConfig.levelUpLimitPerFrame : null;
 
     let defenseHolds;
     let levelDelta;
     let resultKey;
 
-    if (finalScore === 0) {
+    if (finalScore < stageThreshold) {
         defenseHolds = true;
-        levelDelta = 3;
-        resultKey = 'grandSlam';
-    } else if (finalScore < stageThreshold - levelThreshold) {
-        defenseHolds = true;
-        levelDelta = 2;
-        resultKey = 'smallSlam';
-    } else if (finalScore < stageThreshold) {
-        defenseHolds = true;
-        levelDelta = 1;
-        resultKey = 'retainStage';
-    } else if (finalScore < stageThreshold + levelThreshold) {
-        defenseHolds = false;
-        levelDelta = 0;
-        resultKey = 'takeStage';
+        levelDelta = Math.ceil((stageThreshold - finalScore) / levelThreshold);
+        // Special boundary rule (note 36i): score 0 belongs to the lower section.
+        if (finalScore === 0) levelDelta += 1;
+        if (levelCap !== null && levelDelta > levelCap) levelDelta = levelCap;
+        if (levelDelta <= 1) resultKey = 'retainStage';
+        else if (levelDelta === 2) resultKey = 'smallSlam';
+        else if (levelDelta === 3) resultKey = 'grandSlam';
+        else resultKey = 'defendUpN';
     } else {
         defenseHolds = false;
-        let n = Math.floor((finalScore - stageThreshold) / levelThreshold);
-        levelDelta = n;
-        if (n === 1) resultKey = 'upOne';
-        else if (n === 2) resultKey = 'upTwo';
+        levelDelta = Math.floor((finalScore - stageThreshold) / levelThreshold);
+        if (levelCap !== null && levelDelta > levelCap) levelDelta = levelCap;
+        if (levelDelta === 0) resultKey = 'takeStage';
+        else if (levelDelta === 1) resultKey = 'upOne';
+        else if (levelDelta === 2) resultKey = 'upTwo';
         else resultKey = 'upN';
     }
 
@@ -1913,24 +2270,45 @@ function engineComputeFrameResult(finalScore) {
  * Levels cycle endlessly: 0-12 (2 through A), wrapping past A back to 2.
  */
 function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
-    let mustStopLevels = (game.gameConfig && game.gameConfig.mustStopLevels) || [];
-    let sorted = [...mustStopLevels].sort((a, b) => a - b);
-    let newLevels = [...playerLevels];
+    let newLevels = engineCanonicalizeSideLevels(playerLevels);
+    let startLevel = engineGetConfiguredStartLevel();
+    let processedSides = {};
 
     for (let p of advancingPlayers) {
-        let current = newLevels[p];
-        let target = current + delta;
+        let sideIndex = engineGetSideIndexForPlayer(p);
+        if (processedSides[sideIndex]) continue;
+        processedSides[sideIndex] = true;
 
-        // Must-stop: can't skip past a must-stop level not yet reached (within one cycle)
-        for (let ms of sorted) {
-            if (ms > current && ms < target) {
-                target = ms;
+        let sidePlayers = engineGetPlayersForSide(sideIndex);
+        let sideAnchor = sidePlayers[0];
+        let current = newLevels[sideAnchor];
+        let currentAbs = engineGetCycleAwareAbsoluteLevel(sideAnchor, current);
+        let targetAbs = currentAbs + delta;
+
+        // If currently at an uncleared blocker, cannot advance past it.
+        let startOccurrence = targetAbs > currentAbs
+            ? engineGetBlockingOccurrenceForPlayerInCycle(sideAnchor, current, engineGetPlayerCycleIndex(sideAnchor))
+            : null;
+        if (startOccurrence) {
+            targetAbs = currentAbs;
+        }
+
+        for (let abs = currentAbs + 1; abs <= targetAbs; abs++) {
+            let cycleIndex = Math.floor(abs / 13);
+            let level = engineCycleOffsetToLevel(abs % 13, startLevel);
+            let occurrence = engineGetBlockingOccurrenceForPlayerInCycle(sideAnchor, level, cycleIndex);
+            if (occurrence) {
+                targetAbs = abs;
                 break;
             }
         }
 
-        // Cyclic wrap: levels cycle endlessly through 0-12
-        newLevels[p] = ((target % 13) + 13) % 13;
+        let nextCycleIndex = Math.floor(targetAbs / 13);
+        let nextLevel = engineCycleOffsetToLevel(targetAbs % 13, startLevel);
+        for (let sidePlayer of sidePlayers) {
+            newLevels[sidePlayer] = nextLevel;
+        }
+        engineSetPlayerCycleIndex(sideAnchor, nextCycleIndex);
     }
 
     return newLevels;
@@ -1942,8 +2320,61 @@ function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
  * Levels cycle endlessly — there is no forced game-end condition.
  */
 function engineApplyFrameResult(frameResult) {
+    let cfg = game.gameConfig || {};
+    let startLevel = engineGetConfiguredStartLevel();
+
+    // Update must-stop / must-defend clear-state based on this frame.
+    let pivotTeam = [game.pivot, (game.pivot + 2) % NUM_PLAYERS];
+    let mustStopLevels = Array.isArray(cfg.mustStopLevels) ? cfg.mustStopLevels : [];
+    let mustDefendLevels = Array.isArray(cfg.mustDefendLevels) ? cfg.mustDefendLevels : [];
+    let mustStopStartMarker = !!cfg.mustStopStartMarker;
+    let mustDefendStartMarker = !!cfg.mustDefendStartMarker;
+    let currentPivotCycle = engineGetPlayerCycleIndex(game.pivot);
+    let isFirstCycleStartOccurrence = (currentPivotCycle === 0 && game.level === startLevel);
+    if (mustStopLevels.includes(game.level)) {
+        for (let p of pivotTeam) engineMarkMustStopConsumed(p, game.level, engineGetPlayerCycleIndex(p));
+    }
+    if (mustStopStartMarker && isFirstCycleStartOccurrence) {
+        for (let p of pivotTeam) engineMarkMustStopStartMarkerConsumed(p);
+    }
+    if (frameResult.defenseHolds && mustDefendLevels.includes(game.level)) {
+        for (let p of pivotTeam) engineMarkMustDefendConsumed(p, game.level, engineGetPlayerCycleIndex(p));
+    }
+    if (frameResult.defenseHolds && mustDefendStartMarker && isFirstCycleStartOccurrence) {
+        for (let p of pivotTeam) engineMarkMustDefendStartMarkerConsumed(p);
+    }
+
+    let baseLevels = engineCanonicalizeSideLevels(game.playerLevels);
+    let knockBackTriggered = engineIsKnockbackTriggered(frameResult);
+    let knockBackAppliedPlayers = [];
+    if (knockBackTriggered) {
+        // Attackers trigger knock-back on defenders.
+        let processedDefendingSides = {};
+        for (let p of game.defendingTeam) {
+            let sideIndex = engineGetSideIndexForPlayer(p);
+            if (processedDefendingSides[sideIndex]) continue;
+            processedDefendingSides[sideIndex] = true;
+
+            let sidePlayers = engineGetPlayersForSide(sideIndex);
+            let sideAnchor = sidePlayers[0];
+            let currentAbs = engineGetCycleAwareAbsoluteLevel(sideAnchor, baseLevels[sideAnchor]);
+            let destinationAbs = engineGetKnockBackDestinationAbsolute(sideAnchor, currentAbs);
+            let destinationCycle = Math.floor(destinationAbs / 13);
+            let destinationLevel = engineCycleOffsetToLevel(destinationAbs % 13, engineGetConfiguredStartLevel());
+            for (let sidePlayer of sidePlayers) {
+                baseLevels[sidePlayer] = destinationLevel;
+            }
+            engineSetPlayerCycleIndex(sideAnchor, destinationCycle);
+            for (let sidePlayer of sidePlayers) {
+                if (!knockBackAppliedPlayers.includes(sidePlayer)) {
+                    knockBackAppliedPlayers.push(sidePlayer);
+                }
+            }
+        }
+    }
+
     let newLevels = engineAdvanceLevels(
-        game.playerLevels,
+        baseLevels,
         frameResult.advancingPlayers,
         frameResult.levelDelta
     );
@@ -1953,12 +2384,21 @@ function engineApplyFrameResult(frameResult) {
 
     game.playerLevels = newLevels;
 
+    let gameWon = false;
+    let winners = [];
+    if (cfg.gameMode === 'pass-A') {
+        winners = frameResult.advancingPlayers.filter(p => newLevels[p] === 12);
+        gameWon = winners.length > 0;
+    }
+
     return {
         newLevels: newLevels,
         nextPivot: frameResult.nextPivot,
         nextLevel: nextLevel,
-        gameWon: false,
-        winners: []
+        knockBackTriggered,
+        knockBackAppliedPlayers,
+        gameWon,
+        winners,
     };
 }
 

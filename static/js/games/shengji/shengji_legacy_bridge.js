@@ -7,7 +7,7 @@ let level = 5;
 let strain = 2;
 let baseScore = 0;
 let baseRawScore = 0;
-let baseEndgameFactor = 0;
+let baseMultiplier = 0; // formerly baseEndgameFactor
 
 let isQiangzhuang = true;
 let declarations = [];

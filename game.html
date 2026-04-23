@@ -95,6 +95,7 @@
         <div class="footer">
             <menu class="menubar">
                 <li><button class="footer-link-btn" id="btn-goto-recap" data-i18n="buttons.gotoRecap">&#8617; 牌谱</button></li>
+                <li><button class="footer-link-btn" id="btn-game-settings" data-i18n="buttons.gameSettings">设置</button></li>
                 <li><button class="footer-link-btn" id="btn-toggle-test" data-i18n="buttons.testModeOff" onclick="toggleTestMode()">测试模式: 关</button></li>
             </menu>
             <div id="statusbar">
@@ -118,6 +119,39 @@
         </div>
     </div>
 
+    <!-- Game settings dialog (note 34 / 35c) -->
+    <div id="settings-overlay"></div>
+    <div id="settings-dialog">
+        <div id="settings-header">
+            <div id="settings-title" data-i18n="settingsDialog.createTitle">新对局设置</div>
+            <div id="settings-subtitle"></div>
+        </div>
+        <div id="settings-dialog-body">
+            <div id="settings-toplevel-tabs">
+                <button class="settings-toplevel-tab" data-toplevel="game" data-i18n="settingsDialog.topLevelTabs.game">游戏设置</button>
+                <button class="settings-toplevel-tab" data-toplevel="display" data-i18n="settingsDialog.topLevelTabs.display">显示</button>
+                <button class="settings-toplevel-tab" data-toplevel="file" data-i18n="settingsDialog.topLevelTabs.file">文件</button>
+                <button class="settings-toplevel-tab" data-toplevel="accounts" data-i18n="settingsDialog.topLevelTabs.accounts">账号</button>
+            </div>
+            <div id="settings-right">
+                <div id="settings-tab-row">
+                    <button class="settings-tab" data-tab="presets" data-i18n="settingsDialog.tabs.presets">预设</button>
+                    <button class="settings-tab" data-tab="general" data-i18n="settingsDialog.tabs.general">通用</button>
+                    <button class="settings-tab" data-tab="scoring" data-i18n="settingsDialog.tabs.scoring">计分</button>
+                    <button class="settings-tab" data-tab="levels" data-i18n="settingsDialog.tabs.levels">级别</button>
+                    <button class="settings-tab" data-tab="timing" data-i18n="settingsDialog.tabs.timing">时间</button>
+                </div>
+                <div id="settings-body"></div>
+                <div id="settings-display-placeholder"></div>
+                <div id="settings-placeholder-panel"></div>
+            </div>
+        </div>
+        <div id="settings-actions">
+            <button class="button" id="btn-settings-cancel" data-i18n="settingsDialog.cancel">取消</button>
+            <button class="button" id="btn-settings-confirm" data-i18n="settingsDialog.confirm">开始对局</button>
+        </div>
+    </div>
+
     <!-- i18n -->
     <script src="static/js/i18n/zh-CN.js"></script>
     <script src="static/js/i18n/en.js"></script>
@@ -127,6 +161,7 @@
     <script src="static/js/core/cards.js"></script>
     <script src="static/js/games/shengji/shengji_types.js"></script>
     <script src="static/js/games/shengji/shengji_cards.js"></script>
+    <script src="static/js/games/shengji/shengji_settings.js"></script>
 
     <!-- Game engine & bot -->
     <script src="static/js/games/shengji/shengji_engine.js"></script>

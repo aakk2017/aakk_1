@@ -685,3 +685,444 @@
 }
 
 @keyframes flashError { 0%, 100% { opacity: 1; color: #ff4444; } 50% { opacity: 0.5; color: #ffffff; } }
+
+/* ── Settings dialog (note 34 / 35c) ── */
+#settings-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.25);
+    z-index: 109;
+}
+
+#settings-dialog {
+    display: none;
+    flex-direction: column;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 110;
+    width: min(95vw, 110vh);
+    max-height: 88vh;
+    overflow: hidden;
+    background: #f8f8f8;
+    border: 2px solid #666;
+    border-radius: var(--radius);
+    box-shadow: 0 0 4vh rgba(0, 0, 0, 0.3);
+    font-family: "Roboto Mono", "Noto Sans SC";
+}
+
+#settings-header {
+    padding: 1.4vh 1.8vh 1vh;
+    border-bottom: 1px solid #ccc;
+    flex-shrink: 0;
+}
+
+#settings-title {
+    font-size: 2.5vh;
+    font-weight: bold;
+    color: #333;
+}
+
+#settings-subtitle {
+    margin-top: 0.4vh;
+    font-size: 1.7vh;
+    color: #666;
+}
+
+/* ── Two-pane dialog body (note 35c) ── */
+#settings-dialog-body {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#settings-toplevel-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4vh;
+    padding: 1.2vh 0.8vh;
+    border-right: 1px solid #ddd;
+    min-width: 9.5vh;
+    background: #f0f0f0;
+    flex-shrink: 0;
+}
+
+.settings-toplevel-tab {
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: var(--radius);
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.6vh;
+    padding: 0.6vh 1vh;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    color: #333;
+}
+
+.settings-toplevel-tab:hover {
+    background: #e0e0e0;
+}
+
+.settings-toplevel-tab[data-active="true"] {
+    border-color: #3a6;
+    background: #dff6e8;
+    color: #154;
+    font-weight: 600;
+}
+
+#settings-right {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: auto;
+    min-width: 0;
+}
+
+#settings-placeholder-panel {
+    display: none;
+    padding: 2.5vh 1.8vh;
+    font-family: "Noto Sans SC", "Roboto";
+    color: #888;
+    font-size: 1.7vh;
+}
+
+#settings-tab-row {
+    display: flex;
+    gap: 0.6vh;
+    padding: 1vh 1.4vh;
+    border-bottom: 1px solid #ddd;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.settings-tab {
+    border: 1px solid #999;
+    background: #fff;
+    border-radius: var(--radius);
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.7vh;
+    padding: 0.45vh 1.2vh;
+    cursor: pointer;
+}
+
+.settings-tab[data-active="true"] {
+    border-color: #3a6;
+    background: #dff6e8;
+    color: #154;
+}
+
+#settings-body {
+    padding: 1.2vh 1.8vh;
+    flex: 1;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(24vh, 1fr));
+    gap: 1vh 1.4vh;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3vh;
+}
+
+.settings-field label {
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.6vh;
+    color: #444;
+}
+
+.settings-field input,
+.settings-field select {
+    height: 3.5vh;
+    font-size: 1.6vh;
+    border: 1px solid #aaa;
+    border-radius: var(--radius);
+    padding: 0 0.6vh;
+    background: #fff;
+}
+
+.settings-field input[type="checkbox"] {
+    height: auto;
+    transform: scale(1.1);
+    align-self: flex-start;
+    margin-top: 0.6vh;
+}
+
+.settings-readonly .settings-field input,
+.settings-readonly .settings-field select {
+    background: #f1f1f1;
+    color: #777;
+}
+
+#settings-display-placeholder {
+    margin: 0.4vh 1.8vh 0;
+    border-top: 1px dashed #bbb;
+    padding: 1vh 0;
+    font-family: "Noto Sans SC", "Roboto";
+    color: #666;
+    font-size: 1.5vh;
+    flex-shrink: 0;
+}
+
+#settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1vh;
+    padding: 1.2vh 1.8vh 1.6vh;
+    border-top: 1px solid #ddd;
+    flex-shrink: 0;
+}
+
+/* ── Scoring tab row-based layout (note 35c) ── */
+.scoring-tab-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2vh;
+}
+
+.scoring-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1.4vh;
+    flex-wrap: wrap;
+}
+
+/* Hint as right neighbor in a scoring-row */
+.scoring-row .settings-field-hint {
+    flex: 1;
+    min-width: 14vh;
+    max-width: 44vh;
+    align-self: flex-end;
+    margin-top: 0;
+}
+
+/* ── Levels tab row-based layout (note 36a) ── */
+.levels-tab-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2vh;
+}
+
+.levels-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1.4vh;
+    flex-wrap: wrap;
+}
+
+.levels-row .settings-field-hint {
+    flex: 1;
+    min-width: 14vh;
+    max-width: 52vh;
+    align-self: flex-end;
+    margin-top: 0;
+}
+
+.levels-row-matrix {
+    width: 100%;
+}
+
+.levels-row-knock-back-condition {
+    align-items: center;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+.levels-row-inline-label {
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.6vh;
+    color: #444;
+    white-space: nowrap;
+    min-width: 12vh;
+}
+
+.levels-row-inline-group {
+    margin-top: 0;
+    white-space: nowrap;
+}
+
+.levels-special-matrix {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7vh;
+}
+
+.levels-matrix-row {
+    display: flex;
+    align-items: center;
+    gap: 1vh;
+    flex-wrap: nowrap;
+}
+
+.levels-matrix-row-label {
+    width: 8.8vh;
+    flex-shrink: 0;
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.55vh;
+    color: #333;
+}
+
+.levels-matrix-row-cells {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(3.2vh, 3.8vh);
+    gap: 0.45vh;
+    align-items: center;
+    overflow-x: auto;
+    padding-bottom: 0.15vh;
+}
+
+.levels-matrix-cell {
+    height: 3.2vh;
+    min-width: 3.2vh;
+    padding: 0;
+    border: 1px solid #c7cbd1;
+    border-radius: 0.6vh;
+    background: #eef1f4;
+    color: #6a727a;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: 1.45vh;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.levels-matrix-cell:hover:not(:disabled) {
+    border-color: #8e98a3;
+}
+
+.levels-matrix-cell:focus-visible {
+    outline: 2px solid #3f79d6;
+    outline-offset: 1px;
+}
+
+.levels-matrix-cell:disabled {
+    opacity: 0.72;
+    cursor: default;
+}
+
+.levels-matrix-cell.is-spacer-cell {
+    border-color: #d9dde2;
+    background: #f3f5f7;
+    color: transparent;
+}
+
+.levels-matrix-cell.is-counter-level {
+    border-color: #6b7480;
+    border-width: 2px;
+}
+
+.levels-matrix-cell-start.is-selected {
+    background: #f2c94c;
+    border-color: #d4a723;
+    color: #1f1f1f;
+}
+
+.levels-matrix-cell-must-defend.is-selected {
+    background: #2e9f62;
+    border-color: #267e4f;
+    color: #fff;
+}
+
+.levels-matrix-cell-must-stop.is-selected {
+    background: #2d75c9;
+    border-color: #245ea1;
+    color: #fff;
+}
+
+.levels-matrix-cell-knock-back.is-selected {
+    background: #d94a4a;
+    border-color: #b63939;
+    color: #fff;
+}
+
+/* ── Scoring tab controls (note 35 / 35c) ── */
+.settings-field-row {
+    display: contents; /* legacy: lets children join parent grid */
+}
+
+.settings-radio-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6vh 1.4vh;
+    margin-top: 0.2vh;
+}
+
+.settings-radio-option {
+    display: flex;
+    align-items: center;
+    gap: 0.35vh;
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.6vh;
+    color: #333;
+    cursor: pointer;
+}
+
+.settings-checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6vh 1.4vh;
+    margin-top: 0.2vh;
+}
+
+.settings-checkbox-option {
+    display: flex;
+    align-items: center;
+    gap: 0.35vh;
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.6vh;
+    color: #333;
+    cursor: pointer;
+}
+
+.settings-checkbox-option input[type="checkbox"] {
+    accent-color: #3a6;
+    cursor: pointer;
+}
+
+.settings-readonly .settings-checkbox-option input[type="checkbox"] {
+    cursor: default;
+}
+
+.settings-level-selector {
+    max-width: 58vh;
+}
+
+.settings-radio-option input[type="radio"] {
+    accent-color: #3a6;
+    cursor: pointer;
+}
+
+.settings-readonly .settings-radio-option input[type="radio"] {
+    cursor: default;
+}
+
+.settings-field-hint {
+    grid-column: 1 / -1;
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.5vh;
+    color: #669;
+    background: #f0f0fa;
+    border: 1px solid #ccd;
+    border-radius: var(--radius);
+    padding: 0.5vh 0.8vh;
+    margin-top: -0.2vh;
+}

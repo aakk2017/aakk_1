@@ -47,7 +47,18 @@ function botChooseDeclaration(player, currentDeclaration = null) {
         }
 
         let trumpCount = engineCountTrumpIfStrain(hand, suit, level);
-        if (3 * trumpCount >= handSize) {
+        // Overcall policy: if table already has a declaration, choose any stronger legal declaration.
+        // Opening policy (no table declaration): require baseline trump density threshold.
+        if (currentDeclaration) {
+            if (count > currentDeclaration.count) {
+                let weight = (suit === 4) ? trumpCount + 2 : trumpCount;
+                candidates.push({
+                    suit: suit,
+                    count: count,
+                    trumpCount: weight
+                });
+            }
+        } else if (3 * trumpCount >= handSize) {
             // Favor NTS heavily if we meet criteria
             let weight = (suit === 4) ? trumpCount + 2 : trumpCount;
             candidates.push({
@@ -60,10 +71,13 @@ function botChooseDeclaration(player, currentDeclaration = null) {
 
     if (candidates.length === 0) return null;
 
-    // Pick suit with highest trump count
-    candidates.sort((a, b) => b.trumpCount - a.trumpCount);
+    // Pick strongest declaration: higher count first, then higher trump strength.
+    candidates.sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return b.trumpCount - a.trumpCount;
+    });
     let best = candidates[0];
-    return { suit: best.suit, count: Math.min(best.count, 2) };
+    return { suit: best.suit, count: best.count };
 }
 
 // ---------------------------------------------------------------------------
@@ -71,15 +85,79 @@ function botChooseDeclaration(player, currentDeclaration = null) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Check if current frame is a knock-back frame:
+ * knock-back is enabled in config AND the configuration allows it
+ */
+function botIsKnockbackFrame() {
+    if (!game.gameConfig || !Array.isArray(game.gameConfig.knockBackLevels)) return false;
+    return game.gameConfig.knockBackLevels.includes(game.level);
+}
+
+/**
+ * Check if a card is a leveler at the current game level
+ */
+function botIsLeveler(card) {
+    return card && card.rank === game.level;
+}
+
+/**
  * Choose 8 cards for the base.
  * Strategy: fold shortest plain division entirely, fill remaining with random.
+ * Knock-back override (note 36, §9.1): when bot is attacker in knock-back frame,
+ *   always hold all levelers
  */
 function botMakeBase(player) {
     let hand = game.hands[player];
     let strain = game.strain;
     let base = [];
+    
+    // Knock-back special handling: if bot is attacker in knock-back frame, hold all levelers
+    let isAttacker = game.attackingTeam && game.attackingTeam.includes(player);
+    let isKnockbackFrame = botIsKnockbackFrame();
+    if (isAttacker && isKnockbackFrame) {
+        // Hold all levelers - never discard them
+        let levelers = hand.filter(c => botIsLeveler(c));
+        let nonLevelers = hand.filter(c => !botIsLeveler(c));
+        
+        // Take shortest plain division from non-levelers
+        let plainDivisions = [];
+        for (let d = 0; d <= 3; d++) {
+            if (d === strain) continue;
+            let cards = nonLevelers.filter(c => c.division === d);
+            if (cards.length > 0 && cards.length <= BASE_SIZE) {
+                plainDivisions.push({ division: d, cards: cards });
+            }
+        }
+        
+        if (plainDivisions.length > 0) {
+            plainDivisions.sort((a, b) => a.cards.length - b.cards.length);
+            base = [...plainDivisions[0].cards];
+        }
+        
+        // Fill remaining slots from non-levelers (trump first, then low cards)
+        if (base.length < BASE_SIZE) {
+            let baseIds = new Set(base.map(c => c.cardId));
+            let remaining = nonLevelers.filter(c => !baseIds.has(c.cardId));
+            remaining.sort((a, b) => {
+                if (a.division === 4 && b.division !== 4) return 1;
+                if (a.division !== 4 && b.division === 4) return -1;
+                return a.order - b.order;
+            });
+            
+            while (base.length < BASE_SIZE && remaining.length > 0) {
+                base.push(remaining.shift());
+            }
+        }
+        
+        // Fallback: should rarely reach here since levelers are protected
+        if (base.length > BASE_SIZE) {
+            base = base.slice(0, BASE_SIZE);
+        }
+        
+        return base;
+    }
 
-    // Find plain divisions and their sizes
+    // Standard logic (non-knock-back or not attacker)
     let plainDivisions = [];
     for (let d = 0; d <= 3; d++) {
         if (d === strain) continue; // skip strain suit (it's trump)
@@ -484,8 +562,107 @@ function botMultiplayTieBreak(a, b) {
 function botChooseLead(player) {
     let hand = game.hands[player];
     if (hand.length === 0) return [];
+    
+    // Knock-back special handling (note 36, §9.2): attacker in knock-back frame
+    // Priority: if holding non-levelers, MUST lead from them (never lead levelers)
+    let isAttacker = game.attackingTeam && game.attackingTeam.includes(player);
+    let isKnockbackFrame = botIsKnockbackFrame();
+    if (isAttacker && isKnockbackFrame) {
+        let nonLevelers = hand.filter(c => !botIsLeveler(c));
+        if (nonLevelers.length > 0) {
+            // Build lead choice from non-levelers only
+            let divGroups = {};
+            for (let c of nonLevelers) {
+                let d = c.division;
+                if (!divGroups[d]) divGroups[d] = [];
+                divGroups[d].push(c);
+            }
+            
+            // Apply standard lead logic to non-levers only
+            let voidInfo = botGetVoidInfo();
+            
+            // --- Case 1: Others-showed-out full division WITH structure (non-levelers only) ---
+            let case1Candidates = [];
+            for (let d in divGroups) {
+                let div = parseInt(d);
+                if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
+                let divCards = divGroups[d];
+                if (divCards.length < 2) continue;
+                let elements = botFindAllStructuredElements(divCards, div);
+                if (elements.length === 0) continue;
+                let coreOrder = Math.max(...elements.map(el => el.order));
+                case1Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
+            }
+            if (case1Candidates.length > 0) {
+                case1Candidates.sort(botMultiplayTieBreak);
+                return case1Candidates[0].cards;
+            }
+            
+            // --- Case 2: Good-structure core from non-levelers ---
+            let case2Candidates = [];
+            for (let d in divGroups) {
+                let div = parseInt(d);
+                let divCards = divGroups[d];
+                let unseenMap = botGetUnseenByOrder(player, div);
+                let allElements = botFindAllStructuredElements(divCards, div);
+                let goodStructures = allElements.filter(el => botComputeGrade(el, unseenMap) <= 4);
+                if (goodStructures.length === 0) continue;
+                let structuredIds = new Set(goodStructures.flatMap(el => el.cards.map(c => c.cardId)));
+                let remainingDivCards = divCards.filter(c => !structuredIds.has(c.cardId));
+                let goodSingles = botFindTopEstablishedSingles(remainingDivCards, unseenMap);
+                let multiplayCards = [];
+                for (let el of goodStructures) multiplayCards.push(...el.cards);
+                multiplayCards.push(...goodSingles);
+                let elementCount = goodStructures.length + goodSingles.length;
+                if (elementCount <= 1) continue;
+                let coreOrder = Math.max(...goodStructures.map(el => el.order));
+                case2Candidates.push({ cards: multiplayCards, division: div, coreOrder: coreOrder });
+            }
+            if (case2Candidates.length > 0) {
+                case2Candidates.sort(botMultiplayTieBreak);
+                return case2Candidates[0].cards;
+            }
+            
+            // --- Case 3: Others-showed-out full division (non-levelers only) ---
+            let case3Candidates = [];
+            for (let d in divGroups) {
+                let div = parseInt(d);
+                if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
+                let divCards = divGroups[d];
+                if (divCards.length < 2) continue;
+                let elements = botFindAllStructuredElements(divCards, div);
+                if (elements.length > 0) continue;
+                let coreOrder = Math.max(...divCards.map(c => c.order));
+                case3Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
+            }
+            if (case3Candidates.length > 0) {
+                case3Candidates.sort(botMultiplayTieBreak);
+                return case3Candidates[0].cards;
+            }
+            
+            // --- Case 4: Good singles from non-levelers ---
+            let case4Candidates = [];
+            for (let d in divGroups) {
+                let div = parseInt(d);
+                let divCards = divGroups[d];
+                let unseenMap = botGetUnseenByOrder(player, div);
+                let goodSingles = botFindTopEstablishedSingles(divCards, unseenMap);
+                if (goodSingles.length < 2) continue;
+                let coreOrder = Math.max(...goodSingles.map(c => c.order));
+                case4Candidates.push({ cards: goodSingles, division: div, coreOrder: coreOrder });
+            }
+            if (case4Candidates.length > 0) {
+                case4Candidates.sort(botMultiplayTieBreak);
+                return case4Candidates[0].cards;
+            }
+            
+            // Fallback: lead any single non-leveler (worst case, holding only levelers was false)
+            return [nonLevelers[0]];
+        }
+        // If holding only levelers, fall through to standard logic
+    }
 
-    // Group hand by division
+    // Standard lead logic (non-knock-back or defender or all levelers in knock-back frame)
     let divGroups = {};
     for (let c of hand) {
         let d = c.division;
@@ -829,6 +1006,10 @@ function botChooseFollow(player) {
     let leadInfo = game.leadInfo;
     let volume = leadInfo.volume;
     let leadDiv = leadInfo.division;
+    
+    // Knock-back special handling (note 36, §9.3): hold as many levelers as possible
+    let isAttacker = game.attackingTeam && game.attackingTeam.includes(player);
+    let isKnockbackFrame = botIsKnockbackFrame();
 
     // Build forehand control if applicable
     let fc = null;
@@ -859,26 +1040,53 @@ function botChooseFollow(player) {
     // Enumerate all legal follows
     let legalFollows = botEnumerateLegalFollows(hand, leadInfo, fc);
 
+    // Knock-back attacker invariant (note 37b):
+    // across ALL legal follows, first keep moves that preserve the maximum
+    // number of levelers remaining in hand; only then apply normal policy.
+    if (isAttacker && isKnockbackFrame && legalFollows.length > 1) {
+        let bestRemainingLevelers = -1;
+        let preserved = [];
+
+        for (let move of legalFollows) {
+            let moveIds = new Set(move.map(c => c.cardId));
+            let remainingLevelers = hand.filter(c => botIsLeveler(c) && !moveIds.has(c.cardId)).length;
+
+            if (remainingLevelers > bestRemainingLevelers) {
+                bestRemainingLevelers = remainingLevelers;
+                preserved = [move];
+            } else if (remainingLevelers === bestRemainingLevelers) {
+                preserved.push(move);
+            }
+        }
+
+        legalFollows = preserved;
+    }
+
     // Classify each legal follow
     let coveringRuffs = [];
     let coveringDivFollows = [];
-    let lowFollows = [];
+    let lowDivisionFollows = [];
+    let nonCoveringRuffs = [];
     let discards = [];
 
     for (let move of legalFollows) {
         let cls = botClassifyFollow(leadInfo, move);
 
-        if (cls.kind === 'POTENTIAL_RUFF' && botIsCover(leadInfo, move, ruffed, highestOrder)) {
-            coveringRuffs.push(move);
-        } else if (cls.kind === 'DIVISION_FOLLOW' && botIsCover(leadInfo, move, ruffed, highestOrder)) {
-            coveringDivFollows.push(move);
-        } else if (cls.kind === 'DIVISION_FOLLOW' || cls.kind === 'POTENTIAL_RUFF') {
-            lowFollows.push(move);
-        } else {
-            discards.push(move);
+        if (cls.kind === 'POTENTIAL_RUFF') {
+            if (botIsCover(leadInfo, move, ruffed, highestOrder)) coveringRuffs.push(move);
+            else nonCoveringRuffs.push(move);
+            continue;
         }
-    }
 
+        if (cls.kind === 'DIVISION_FOLLOW') {
+            if (botIsCover(leadInfo, move, ruffed, highestOrder)) coveringDivFollows.push(move);
+            else lowDivisionFollows.push(move);
+            continue;
+        }
+
+        discards.push(move);
+    }
+    
     // Priority: covering ruff > covering div-follow > play low > discard
     if (coveringRuffs.length > 0) {
         return coveringRuffs[Math.floor(Math.random() * coveringRuffs.length)];
@@ -889,13 +1097,20 @@ function botChooseFollow(player) {
         return best[Math.floor(Math.random() * best.length)];
     }
 
-    if (lowFollows.length > 0) {
-        let best = botChooseStructurePreserving(player, hand, lowFollows);
+    if (lowDivisionFollows.length > 0) {
+        let best = botChooseStructurePreserving(player, hand, lowDivisionFollows);
         return best[Math.floor(Math.random() * best.length)];
     }
 
     if (discards.length > 0) {
-        let best = botChooseStructurePreserving(player, hand, discards);
+        // When discarding is available, prefer true discard over a non-covering ruff.
+        // Discard policy is intentionally random among allowed choices.
+        return discards[Math.floor(Math.random() * discards.length)];
+    }
+
+    if (nonCoveringRuffs.length > 0) {
+        // Only ruff if no discard/division follow path exists.
+        let best = botChooseStructurePreserving(player, hand, nonCoveringRuffs);
         return best[Math.floor(Math.random() * best.length)];
     }
 
