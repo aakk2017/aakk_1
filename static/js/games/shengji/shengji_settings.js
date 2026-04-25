@@ -11,7 +11,22 @@
         playShotClock: 5,
         baseShotClock: 45,
         bankTime: 60,
-        baseTimeIncrement: 0,
+        baseTimeIncrement: 30,
+    };
+
+    // Timing sub-presets: select within Timing tab to bulk-update timing fields.
+    const TIMING_PRESETS = {
+        'normal': {
+            timingMode: 'shot + bank',
+            playShotClock: 5,
+            baseShotClock: 45,
+            bankTime: 60,
+        },
+        '180+30': {
+            timingMode: 'bank-time-only',
+            bankTime: 180,
+            baseTimeIncrement: 30,
+        },
     };
 
     // Scoring sub-presets: select within Scoring tab to bulk-update all related scoring fields.
@@ -118,7 +133,7 @@
             allowOverbase: false,
             overbaseRestrictions: 'none',
             failedMultiplayHandling: 'default',
-            multiplayCompensationAmount: 0,
+            multiplayCompensationAmount: 5,
             multiplayCompensation: false,
             allowCrossings: false,
 
@@ -144,8 +159,8 @@
             gameMode: 'endless',
             levelConfiguration: 'default',
 
-            timingPreset: 'default',
-            timingMode: 'human-only',
+            timingPreset: 'normal',
+            timingMode: 'shot + bank',
             timing: { ...DEFAULT_TIMING },
 
             doubleDeclarationOrdering: null,
@@ -213,12 +228,15 @@
         out.deckCount = clampInt(out.deckCount, 2, 1, 4);
         out.autoStrain = !!out.autoStrain;
         out.allowOverbase = !!out.allowOverbase;
+        out.doubleDeclarationOrdering = out.allowOverbase ? 's-h-c-d' : 'all-suits-equal';
         out.allowCrossings = !!out.allowCrossings;
         out.endingCompensation = !!out.endingCompensation;
         out.attackersSelfBaseHalfMultiplier = !!out.attackersSelfBaseHalfMultiplier;
 
-        out.multiplayCompensationAmount = clampInt(out.multiplayCompensationAmount, 0, 0, 200);
-        out.multiplayCompensation = !!out.multiplayCompensation || out.multiplayCompensationAmount > 0;
+        out.multiplayCompensationAmount = clampInt(out.multiplayCompensationAmount, 5, 1, 10);
+        // General-tab skeleton policy: compensation mode is config-selectable,
+        // but deep runtime semantics are implemented in later dedicated notes.
+        out.multiplayCompensation = (out.failedMultiplayHandling === 'compensation');
         let dcMax = 100 * (out.deckCount || 2);
         out.stageThreshold = clampInt(out.stageThreshold, 80, 1, dcMax);
         out.levelThreshold = clampInt(out.levelThreshold, 40, 2, dcMax);
@@ -273,27 +291,35 @@
         }
 
         let timingIn = out.timing || {};
+        let timingPresetCfg = TIMING_PRESETS[out.timingPreset] || null;
+        if (timingPresetCfg) {
+            if (timingPresetCfg.timingMode !== undefined) out.timingMode = timingPresetCfg.timingMode;
+            if (timingPresetCfg.playShotClock !== undefined) timingIn.playShotClock = timingPresetCfg.playShotClock;
+            if (timingPresetCfg.baseShotClock !== undefined) timingIn.baseShotClock = timingPresetCfg.baseShotClock;
+            if (timingPresetCfg.bankTime !== undefined) timingIn.bankTime = timingPresetCfg.bankTime;
+            if (timingPresetCfg.baseTimeIncrement !== undefined) timingIn.baseTimeIncrement = timingPresetCfg.baseTimeIncrement;
+        }
         out.timing = {
             frameIntermittent: clampInt(timingIn.frameIntermittent, DEFAULT_TIMING.frameIntermittent, 1, 10),
             finalDeclareWindow: clampInt(timingIn.finalDeclareWindow, DEFAULT_TIMING.finalDeclareWindow, 1, 30),
             overbaseWindow: clampInt(timingIn.overbaseWindow, DEFAULT_TIMING.overbaseWindow, 1, 30),
-            playShotClock: clampInt(timingIn.playShotClock, DEFAULT_TIMING.playShotClock, 1, 120),
-            baseShotClock: clampInt(timingIn.baseShotClock, DEFAULT_TIMING.baseShotClock, 1, 300),
-            bankTime: clampInt(timingIn.bankTime, DEFAULT_TIMING.bankTime, 0, 3600),
-            baseTimeIncrement: clampInt(timingIn.baseTimeIncrement, DEFAULT_TIMING.baseTimeIncrement, 0, 60),
+            playShotClock: clampInt(timingIn.playShotClock, DEFAULT_TIMING.playShotClock, 1, 10),
+            baseShotClock: clampInt(timingIn.baseShotClock, DEFAULT_TIMING.baseShotClock, 1, 60),
+            bankTime: clampInt(timingIn.bankTime, DEFAULT_TIMING.bankTime, 10, 300),
+            baseTimeIncrement: clampInt(timingIn.baseTimeIncrement, DEFAULT_TIMING.baseTimeIncrement, 1, 60),
         };
 
         const enumFields = {
             overbaseRestrictions: ['none', 'default'],
-            failedMultiplayHandling: ['default'],
+            failedMultiplayHandling: ['default', 'compensation'],
             scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
             countingSystem: ['default', '7-3-5'],
             baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
             levelsPreset: ['', 'default', 'high-school', 'slow', 'plain', 'short'],
             knockBackConditionMode: ['unlimited', 'singleT'],
             gameMode: ['endless', 'pass-A'],
-            timingPreset: ['default', 'fast', 'slow'],
-            timingMode: ['human-only'],
+            timingPreset: ['', 'normal', '180+30'],
+            timingMode: ['shot + bank', 'bank-time-only'],
             levelConfiguration: ['default', 'plain', 'high-school'],
         };
         for (let key in enumFields) {
@@ -343,6 +369,7 @@
     window.shengjiSettingsPresets = PRESETS;
     window.shengjiScoringPresets = SCORING_PRESETS;
     window.shengjiLevelsPresets = LEVELS_PRESETS;
+    window.shengjiTimingPresets = TIMING_PRESETS;
     
     // Helper: determine which levels preset (if any) matches the current config
     window.shengjiDetectLevelsPreset = function(cfg) {
@@ -372,6 +399,36 @@
             if (matches) return presetName;
         }
         return '';  // (none) - custom/no preset
+    };
+
+    // Helper: determine which timing preset (if any) matches the current config.
+    // Matching is mode-aware: hidden fields do not affect equality for a preset.
+    window.shengjiDetectTimingPreset = function(cfg) {
+        if (!cfg || !cfg.timing) return '';
+        let timing = cfg.timing;
+
+        // normal: shot+bank mode, compare visible shot/base/bank fields.
+        if ((cfg.timingMode || '') === 'shot + bank') {
+            if (
+                timing.playShotClock === 5
+                && timing.baseShotClock === 45
+                && timing.bankTime === 60
+            ) {
+                return 'normal';
+            }
+        }
+
+        // 180+30: bank-time-only mode, compare visible bank/increment fields.
+        if ((cfg.timingMode || '') === 'bank-time-only') {
+            if (
+                timing.bankTime === 180
+                && timing.baseTimeIncrement === 30
+            ) {
+                return '180+30';
+            }
+        }
+
+        return '';
     };
     
     window.shengjiResolveGameRuleConfig = resolveRuleConfig;

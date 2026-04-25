@@ -17,13 +17,145 @@
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve effective declaration-ordering mode from current config.
+ */
+function botGetEffectiveDeclarationOrdering() {
+    if (game && game.gameConfig && game.gameConfig.allowOverbase) return 's-h-c-d';
+    return 'all-suits-equal';
+}
+
+/**
+ * Comparator key for suited declarations under a mode.
+ * Higher key = stronger declaration.
+ */
+function botGetSuitStrengthForOrdering(suit, orderingMode) {
+    if (suit < 0 || suit > 3) return 0;
+    if (orderingMode === 's-h-c-d') {
+        // numberToSuitName map in this project: 0=d,1=c,2=h,3=s
+        const rankMap = { 0: 0, 1: 1, 2: 2, 3: 3 };
+        return rankMap[suit] || 0;
+    }
+    return 0;
+}
+
+/**
+ * Compare declaration strength. Returns positive if a > b.
+ * Primary key: count. Tie-break: suited ordering mode for count<=2.
+ */
+function botCompareDeclarations(a, b, orderingMode) {
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    if (a.count !== b.count) return a.count - b.count;
+    if (a.count <= 2 && a.suit <= 3 && b.suit <= 3) {
+        return botGetSuitStrengthForOrdering(a.suit, orderingMode) - botGetSuitStrengthForOrdering(b.suit, orderingMode);
+    }
+    return 0;
+}
+
+/**
+ * Collect legal overcall options for player against current declaration.
+ * 
+ * phase parameter (optional, default 'dealing'):
+ *   - 'dealing': Allow all valid overcalls including singles
+ *   - 'basing-overcall': Exclude singles; only double+ declarations are legal
+ */
+function botGetLegalOvercallDeclarations(player, currentDeclaration, phase = 'dealing') {
+    if (!currentDeclaration) return [];
+    let hand = game.hands[player];
+    let level = game.level;
+    let orderingMode = botGetEffectiveDeclarationOrdering();
+
+    let options = [];
+    for (let suit = 0; suit <= 4; suit++) {
+        if (suit === 4) {
+            // note 41ha: emit VV (count=3) and WW (count=4) as separate legal options
+            // so the player may choose either independently when both are possible.
+            let sj = hand.filter(c => c.rank === 14).length;
+            let bj = hand.filter(c => c.rank === 15).length;
+            let samePlayerDiffSuit = !!(currentDeclaration && currentDeclaration.player === player && currentDeclaration.suit !== 4);
+            if (!samePlayerDiffSuit) {
+                if (bj >= 2) {
+                    let cand = { suit: 4, count: 4 };
+                    if (botCompareDeclarations(cand, currentDeclaration, orderingMode) > 0) {
+                        options.push(cand);
+                    }
+                }
+                if (sj >= 2) {
+                    let cand = { suit: 4, count: 3 };
+                    if (botCompareDeclarations(cand, currentDeclaration, orderingMode) > 0) {
+                        options.push(cand);
+                    }
+                }
+            }
+            continue; // suit=4 handled above; skip generic path
+        }
+        let count = hand.filter(c => c.rank === level && c.suit === suit).length;
+        if (count >= 2) count = 2;
+        else if (count >= 1) count = 1;
+        else count = 0;
+        if (count === 0) continue;
+
+        // Overbase legality correction (note 41b): in basing-overcall phase, singles are illegal
+        if (phase === 'basing-overcall' && count === 1) {
+            continue;
+        }
+
+        if (currentDeclaration && currentDeclaration.player === player && currentDeclaration.suit !== suit) {
+            continue;
+        }
+
+        let cand = { suit: suit, count: count };
+        if (botCompareDeclarations(cand, currentDeclaration, orderingMode) > 0) {
+            options.push(cand);
+        }
+    }
+
+    options.sort((a, b) => botCompareDeclarations(a, b, orderingMode));
+    return options;
+}
+
+/**
  * Choose a declaration for a bot player.
  * Returns { suit, count } or null if no declaration.
  */
-function botChooseDeclaration(player, currentDeclaration = null) {
+function botChooseDeclaration(player, currentDeclaration = null, phase = 'dealing') {
     let hand = game.hands[player];
     let level = game.level;
     let handSize = hand.length;
+    let orderingMode = botGetEffectiveDeclarationOrdering();
+
+    // Overbase core policy (note 41): no bot overcall during dealing when overbase is enabled.
+    if (phase === 'dealing' && game && game.gameConfig && game.gameConfig.allowOverbase && currentDeclaration) {
+        return null;
+    }
+
+    // Overbase dealing policy: initial declaration remains single-only.
+    if (phase === 'dealing' && game && game.gameConfig && game.gameConfig.allowOverbase && !currentDeclaration) {
+        let singles = [];
+        for (let suit = 0; suit <= 3; suit++) {
+            let hasLevel = hand.some(c => c.rank === level && c.suit === suit);
+            if (!hasLevel) continue;
+            let trumpCount = engineCountTrumpIfStrain(hand, suit, level);
+            if (3 * trumpCount >= handSize) {
+                singles.push({ suit: suit, count: 1, trumpCount: trumpCount });
+            }
+        }
+        if (singles.length === 0) return null;
+        singles.sort((a, b) => {
+            let byDecl = botCompareDeclarations(b, a, orderingMode);
+            if (byDecl !== 0) return byDecl;
+            return b.trumpCount - a.trumpCount;
+        });
+        return { suit: singles[0].suit, count: 1 };
+    }
+
+    // Basing overcall policy: choose the lowest legal overcall (singles excluded by note 41b).
+    if (phase === 'basing-overcall' && currentDeclaration) {
+        let legal = botGetLegalOvercallDeclarations(player, currentDeclaration, 'basing-overcall');
+        if (!legal.length) return null;
+        return { suit: legal[0].suit, count: legal[0].count };
+    }
 
     let candidates = [];
     for (let suit = 0; suit <= 4; suit++) {
@@ -38,19 +170,19 @@ function botChooseDeclaration(player, currentDeclaration = null) {
             let levelCardsOfSuit = hand.filter(c => c.rank === level && c.suit === suit);
             count = levelCardsOfSuit.length;
         }
-        
+
         if (count === 0) continue;
-        
+
         // Disallow self-overcalling with a different suit
         if (currentDeclaration && currentDeclaration.player === player && currentDeclaration.suit !== suit) {
             continue;
         }
 
         let trumpCount = engineCountTrumpIfStrain(hand, suit, level);
-        // Overcall policy: if table already has a declaration, choose any stronger legal declaration.
+        // Overcall policy: if table already has a declaration, choose a stronger legal declaration.
         // Opening policy (no table declaration): require baseline trump density threshold.
         if (currentDeclaration) {
-            if (count > currentDeclaration.count) {
+            if (botCompareDeclarations({ suit, count }, currentDeclaration, orderingMode) > 0) {
                 let weight = (suit === 4) ? trumpCount + 2 : trumpCount;
                 candidates.push({
                     suit: suit,
@@ -71,9 +203,10 @@ function botChooseDeclaration(player, currentDeclaration = null) {
 
     if (candidates.length === 0) return null;
 
-    // Pick strongest declaration: higher count first, then higher trump strength.
+    // Pick strongest declaration in non-overbase-decision contexts.
     candidates.sort((a, b) => {
-        if (b.count !== a.count) return b.count - a.count;
+        let byDecl = botCompareDeclarations(b, a, orderingMode);
+        if (byDecl !== 0) return byDecl;
         return b.trumpCount - a.trumpCount;
     });
     let best = candidates[0];

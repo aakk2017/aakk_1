@@ -152,10 +152,25 @@ let game = {
 
     declarations:   [],      // { player, suit, count }
 
+    // Overbase baser tracking (note 41a / 41g):
+    // currentBaser = actor currently responsible for setting base in basing flow.
+    // finalBaserSeat = seat that last accepted set-base move committed before playing.
+    // finalBaser is kept as a compatibility alias for older consumers.
+    currentBaser: null,
+    finalBaserSeat: null,
+    finalBaser: null,
+
     // FailedMultiplayState — aftermath of the most recent failed multiplay
     // { failer, intendedLead, actualElement, blockers, actualBlocker,
     //   revokedCards, exposedCards:{[div]:Card[]}, holdInProgress, revocationApplied }
     failedMultiplay: null,
+
+    // Running compensation total from failed-multiplay revocations in this frame.
+    multiplayCompensation: 0,
+
+    // Per-event signed compensation entries for this frame (note 39d).
+    // Each entry: { signed: number }
+    multiplayCompensationEvents: [],
 
     // ExposedCardState — all remaining exposed cards
     // { [failer]: { [division]: Card[] } }
@@ -884,6 +899,27 @@ function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allB
     let forehand = (failer + NUM_PLAYERS - 1) % NUM_PLAYERS;
     if (!game.fcChances[failer]) game.fcChances[failer] = { forehand: forehand, count: 0 };
     game.fcChances[failer].count++;
+
+    // Failed-multiplay compensation runtime semantics (note 39c/39d):
+    // compensation applies only in compensation mode and equals revokedCardCount * amount.
+    // Sign: negative when the failing side is the attackers; positive when the failing side is the defenders.
+    let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
+    let compensationEnabled = (handling === 'compensation') || !!(game.gameConfig && game.gameConfig.multiplayCompensation);
+    if (compensationEnabled) {
+        let revokedCount = Array.isArray(revokedCards) ? revokedCards.length : 0;
+        let amount = Number(game.gameConfig && game.gameConfig.multiplayCompensationAmount);
+        if (!Number.isFinite(amount)) amount = 0;
+        amount = Math.max(0, Math.floor(amount));
+        let magnitude = revokedCount * amount;
+        if (magnitude !== 0) {
+            // Determine sign: attacker failure reduces frame score; defender failure increases it.
+            let failerIsAttacker = Array.isArray(game.attackingTeam) && game.attackingTeam.includes(failer);
+            let signedDelta = failerIsAttacker ? -magnitude : magnitude;
+            game.multiplayCompensationEvents.push({ signed: signedDelta });
+            game.multiplayCompensation += signedDelta;
+            game.frameScore += signedDelta;
+        }
+    }
 }
 
 /**
@@ -1604,6 +1640,12 @@ function engineApplyAttackersSelfBaseHalfMultiplier(baseMultiplier, cfg, attacke
     return baseMultiplier;
 }
 
+function engineResetFailedMultiplayCompensationState() {
+    game.failedMultiplay = null;
+    game.multiplayCompensation = 0;
+    game.multiplayCompensationEvents = [];
+}
+
 // ---------------------------------------------------------------------------
 // Game flow
 // ---------------------------------------------------------------------------
@@ -1620,9 +1662,12 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     game.currentRound   = 0;
     game.roundHistory   = [];
     game.declarations   = [];
+    game.currentBaser   = null;
+    game.finalBaserSeat = null;
+    game.finalBaser     = null;
     game.dealIndex      = 0;
     game.roundState     = null;
-    game.failedMultiplay = null;
+    engineResetFailedMultiplayCompensationState();
     game.exposedCards   = {};
     game.fcChances      = {};
     game.fcPending      = null;
@@ -1724,20 +1769,11 @@ function enginePickUpBase() {
     game.hands[game.pivot] = game.hands[game.pivot].concat(game.base);
     game.base = [];
     engineSortHand(game.hands[game.pivot]);
+    game.currentBaser = game.pivot;
     game.phase = GamePhase.BASING;
 }
 
-/** Pivot sets base (discards BASE_SIZE cards). Returns true on success. */
-function engineSetBase(selectedCards) {
-    if (selectedCards.length !== BASE_SIZE) return false;
-    let hand = game.hands[game.pivot];
-    if (!selectedCards.every(c => hand.some(h => h.cardId === c.cardId))) return false;
-
-    let ids = new Set(selectedCards.map(c => c.cardId));
-    game.base = selectedCards;
-    game.hands[game.pivot] = hand.filter(c => !ids.has(c.cardId));
-    engineSortHand(game.hands[game.pivot]);
-
+function engineInitPlayingStateFromCommittedBase() {
     engineSetTeams();
     game.currentLeader    = game.pivot;
     game.currentRound     = 1;
@@ -1745,6 +1781,86 @@ function engineSetBase(selectedCards) {
     game.roundPlayed      = [null, null, null, null];
     game.leadInfo         = null;
     game.phase            = GamePhase.PLAYING;
+}
+
+function engineGetPlayingEntryCardinalityState() {
+    let handSizes = game.hands.map(hand => hand.length);
+    let baseSize = game.base.length;
+    let totalCards = handSizes.reduce((sum, size) => sum + size, 0) + baseSize;
+    let handsOk = handSizes.every(size => size === CARDS_PER_HAND);
+    let baseOk = baseSize === BASE_SIZE;
+    let totalOk = totalCards === TOTAL_CARDS;
+
+    return {
+        handSizes,
+        baseSize,
+        totalCards,
+        handsOk,
+        baseOk,
+        totalOk,
+        isValid: handsOk && baseOk && totalOk,
+    };
+}
+
+/** Current baser (pivot or overbaser) sets base (discards BASE_SIZE cards). Returns true on success. */
+function engineSetBase(selectedCards, options) {
+    if (selectedCards.length !== BASE_SIZE) return false;
+    // Use currentBaser if set (overbase case), else fall back to game.pivot (normal case).
+    let activeBaser = (game.currentBaser !== null && game.currentBaser !== undefined) ? game.currentBaser : game.pivot;
+    let hand = game.hands[activeBaser];
+    if (!selectedCards.every(c => hand.some(h => h.cardId === c.cardId))) return false;
+
+    let ids = new Set(selectedCards.map(c => c.cardId));
+    game.base = selectedCards;
+    game.hands[activeBaser] = hand.filter(c => !ids.has(c.cardId));
+    engineSortHand(game.hands[activeBaser]);
+    // finalBaserSeat tracks who set the accepted base — updated here, not at overbase-declaration time.
+    game.finalBaserSeat = activeBaser;
+    game.finalBaser = activeBaser;
+
+    let deferPlaying = !!(options && options.deferPlaying);
+    if (deferPlaying) {
+        game.phase = GamePhase.BASING;
+        return true;
+    }
+
+    engineInitPlayingStateFromCommittedBase();
+    return true;
+}
+
+function engineCommitBasingToPlaying() {
+    if (game.phase === GamePhase.PLAYING) return true;
+    if (game.phase !== GamePhase.BASING) return false;
+    let cardinality = engineGetPlayingEntryCardinalityState();
+    if (!cardinality.isValid) return false;
+    engineInitPlayingStateFromCommittedBase();
+    return true;
+}
+
+function engineApplyOverbaseDeclaration(player, declaration) {
+    if (!declaration) return false;
+    // Do NOT rewrite game.pivot — the frame pivot is fixed for the whole frame.
+    // Only update currentBaser to track the active base-setter.
+    game.currentBaser = player;
+    engineSetStrain(declaration.suit);
+    game.declarations.push({ player: player, suit: declaration.suit, count: declaration.count });
+    game.hands[player] = game.hands[player].concat(game.base);
+    game.base = [];
+    engineSortHand(game.hands[player]);
+    game.phase = GamePhase.BASING;
+    return true;
+}
+
+/**
+ * Non-overbase declaration (note 41h): restricted partner of latest baser may change
+ * the strain/declaration state but does NOT pick up the base and does NOT become
+ * the new latest baser. currentBaser and finalBaserSeat are left unchanged.
+ */
+function engineApplyNonOverbaseDeclaration(player, declaration) {
+    if (!declaration) return false;
+    engineSetStrain(declaration.suit);
+    game.declarations.push({ player: player, suit: declaration.suit, count: declaration.count });
+    // phase stays BASING — the current baser still holds the committed base
     return true;
 }
 
@@ -1869,13 +1985,16 @@ function engineEndRound() {
 function engineFinalize() {
     let lastRound = game.roundHistory[game.roundHistory.length - 1];
     let attackersWonBase = !!(lastRound && game.attackingTeam.includes(lastRound.winner));
-    let attackersSetFinalBase = !!(game.attackingTeam && game.attackingTeam.includes(game.pivot));
-    let counterScore = game.frameScore;
+    let effectiveFinalBaser = (game.finalBaserSeat !== null && game.finalBaserSeat !== undefined)
+        ? game.finalBaserSeat
+        : ((game.finalBaser !== null && game.finalBaser !== undefined) ? game.finalBaser : game.pivot);
+    let attackersSetFinalBase = !!(game.attackingTeam && game.attackingTeam.includes(effectiveFinalBaser));
+    let multiplayCompensation = Number(game.multiplayCompensation) || 0;
+    let counterScore = game.frameScore - multiplayCompensation;
     let baseScore = 0;
     let baseMultiplier = 1;
     let endingCompensation = 0;
-    let multiplayCompensation = 0;
-    let finalScore = counterScore;
+    let finalScore = counterScore + multiplayCompensation;
 
     if (attackersWonBase) {
         // Attackers win last round: calculate base multiplier per §11.3
@@ -1962,11 +2081,14 @@ function engineFinalize() {
         counterScore,
         baseScore,
         baseMultiplier,
+        finalBaserSeat: effectiveFinalBaser,
+        finalBaser: effectiveFinalBaser,
+        attackersSetFinalBase,
         endingCompensation,
         multiplayCompensation,
         scoreBreakdown,
         endingCompensationActive: !!(game.gameConfig && game.gameConfig.endingCompensation),
-        multiplayCompensationActive: !!(game.gameConfig && game.gameConfig.multiplayCompensation),
+        multiplayCompensationActive: multiplayCompensation !== 0,
         result: t('results.' + frameResult.resultKey, { n: frameResult.levelDelta }),
         frameResult: frameResult
     };

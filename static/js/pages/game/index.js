@@ -127,6 +127,14 @@ let wonCounterCards = [];
 // Persistent name bar DOM refs [south, east, north, west]
 let gDeskNamebars = [null, null, null, null];
 
+// Sequential overbase decision state (note 41)
+let gOverbaseDecision = null;
+
+// Declaration-history hover-box state (note 41f)
+let gDeclarationHistoryRows = [];
+let gDeclHistoryBox = null;
+let gDeclHistoryTbody = null;
+
 // ---------------------------------------------------------------------------
 // Timing state (note 24)
 // ---------------------------------------------------------------------------
@@ -228,19 +236,19 @@ function updateCounterDrawer() {
     for (let card of wonCounterCards) {
         gCounterDrawerInner.appendChild(createCornerCard(card));
     }
-    // Multiplay compensation row (note 25 §2.4)
-    let existingComp = gCounterDrawer.querySelector('.counter-mp-comp');
-    if (existingComp) existingComp.remove();
-    if (game && game.multiplayCompensation && game.multiplayCompensation !== 0) {
+    // Multiplay compensation rows — one per event (note 39d §2)
+    for (let el of Array.from(gCounterDrawer.querySelectorAll('.counter-mp-comp'))) el.remove();
+    let events = (game && Array.isArray(game.multiplayCompensationEvents)) ? game.multiplayCompensationEvents : [];
+    for (let evt of events) {
         let compRow = document.createElement('div');
         compRow.className = 'counter-mp-comp';
-        let sign = game.multiplayCompensation > 0 ? '+' : '-';
+        let sign = evt.signed >= 0 ? '+' : '-';
         compRow.setAttribute('data-sign', sign);
-        compRow.textContent = sign + Math.abs(game.multiplayCompensation);
+        compRow.textContent = sign + Math.abs(evt.signed);
         gCounterDrawer.appendChild(compRow);
     }
     // Zero-space rule (note 25 §8)
-    let hasContent = wonCounterCards.length > 0 || (game && game.multiplayCompensation && game.multiplayCompensation !== 0);
+    let hasContent = wonCounterCards.length > 0 || events.length > 0;
     gCounterDrawer.setAttribute('data-has-content', hasContent ? 'true' : 'false');
 }
 
@@ -538,7 +546,20 @@ function initDeskLabels() {
 function clearDesk() {
     for (let i = 0; i < gDeskSlots.length; i++) {
         let slot = gDeskSlots[i];
-        // Remove cards and transient namebar, but keep persistent .desk-namebar
+        // Remove cards, transient namebar, and basing-pass markers, but keep persistent .desk-namebar
+        slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar), .basing-pass-marker').forEach(el => el.remove());
+        slot.removeAttribute('data-active');
+        slot.removeAttribute('data-winner');
+        slot.removeAttribute('data-has-exposed');
+    }
+    if (gDeskInfo) gDeskInfo.textContent = '';
+    resetAllNamebars();
+}
+
+function clearDeskForOvercallDecisionStep() {
+    for (let i = 0; i < gDeskSlots.length; i++) {
+        let slot = gDeskSlots[i];
+        // Keep PASS markers across sequential decisions; only clear card-like artifacts.
         slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
         slot.removeAttribute('data-active');
         slot.removeAttribute('data-winner');
@@ -546,6 +567,20 @@ function clearDesk() {
     }
     if (gDeskInfo) gDeskInfo.textContent = '';
     resetAllNamebars();
+}
+
+/**
+ * Show a PASS marker in a player's desk slot after a no-overcall decision (note 41ea).
+ */
+function showBasingPassMarker(player) {
+    let slot = gDeskSlots[player];
+    // Remove any existing marker for this player
+    slot.querySelectorAll('.basing-pass-marker').forEach(el => el.remove());
+    let marker = document.createElement('div');
+    marker.className = 'basing-pass-marker';
+    // PASS is authoritative and non-localized for this live-flow marker.
+    marker.textContent = 'PASS';
+    slot.appendChild(marker);
 }
 
 function renderDeskCards(player, cards) {
@@ -736,18 +771,31 @@ function showTimerOverlay(player) {
     let slot = gDeskSlots[player];
     let overlay = document.createElement('div');
     overlay.className = 'timer-overlay';
+    let timingMode = getTimingModeForRuntime();
+    overlay.setAttribute('data-timing-mode', timingMode);
 
-    let shotEl = document.createElement('span');
-    shotEl.className = 'timer-primary';
-    shotEl.textContent = Math.ceil(gShotClockRemaining);
-    overlay.appendChild(shotEl);
-    gShotClockEl = shotEl;
+    // bank-time-only refinement (note 38c): render only bank-time visual element.
+    if (timingMode !== 'bank-time-only') {
+        let shotEl = document.createElement('span');
+        shotEl.className = 'timer-primary';
+        shotEl.textContent = Math.ceil(gShotClockRemaining);
+        overlay.appendChild(shotEl);
+        gShotClockEl = shotEl;
+    } else {
+        gShotClockEl = null;
+    }
 
-    let bankEl = document.createElement('span');
-    bankEl.className = 'timer-secondary';
-    bankEl.textContent = Math.ceil(gBankTimeRemaining);
-    overlay.appendChild(bankEl);
-    gBankTimeEl = bankEl;
+    // shot+bank refinement (note 38c): do not show exhausted bank-time visual element.
+    let shouldShowBank = (timingMode === 'bank-time-only') || gBankTimeRemaining > 0;
+    if (shouldShowBank) {
+        let bankEl = document.createElement('span');
+        bankEl.className = 'timer-secondary';
+        bankEl.textContent = Math.ceil(gBankTimeRemaining);
+        overlay.appendChild(bankEl);
+        gBankTimeEl = bankEl;
+    } else {
+        gBankTimeEl = null;
+    }
 
     slot.appendChild(overlay);
     gTimerOverlayEl = overlay;
@@ -757,8 +805,21 @@ function showTimerOverlay(player) {
  * Update timer display digits.
  */
 function updateTimerDisplay() {
-    if (gShotClockEl) gShotClockEl.textContent = Math.max(0, Math.ceil(gShotClockRemaining));
-    if (gBankTimeEl)  gBankTimeEl.textContent  = Math.max(0, Math.ceil(gBankTimeRemaining));
+    if (gShotClockEl) {
+        gShotClockEl.textContent = Math.max(0, Math.ceil(gShotClockRemaining));
+    }
+    if (gBankTimeEl) {
+        gBankTimeEl.textContent = Math.max(0, Math.ceil(gBankTimeRemaining));
+    }
+
+    // shot+bank exhausted-bank refinement: once bank reaches zero, remove bank element
+    // for the remainder of this frame.
+    if (gTimerOverlayEl && gTimerOverlayEl.getAttribute('data-timing-mode') === 'shot + bank' && gBankTimeRemaining <= 0) {
+        if (gBankTimeEl && gBankTimeEl.parentNode) {
+            gBankTimeEl.parentNode.removeChild(gBankTimeEl);
+        }
+        gBankTimeEl = null;
+    }
 }
 
 /**
@@ -805,10 +866,11 @@ function startPlayerMoveTimer(player, moveType, onTimeout) {
     clearTimers();
     gTimingPhase = moveType === 'base' ? 'playerMove' : 'playerMove';
     let timingCfg = getTimingConfigForPage();
+    let timingMode = getTimingModeForRuntime();
     let shotDuration = (moveType === 'base') ? timingCfg.baseShotClock : timingCfg.playShotClock;
-    gShotClockRemaining = shotDuration;
+    gShotClockRemaining = (timingMode === 'bank-time-only') ? 0 : shotDuration;
     gBankTimeRemaining = game.playerBankTimes[player];
-    gTimerStage = 'shot';
+    gTimerStage = (timingMode === 'bank-time-only') ? 'bank' : 'shot';
     gTimerExpireCallback = onTimeout;
 
     showTimerOverlay(player);
@@ -857,6 +919,15 @@ function stopPlayerMoveTimer(player) {
         }
         clearTimers();
     }
+}
+
+function applyBaseTimeIncrementAfterBaseCompletion(player) {
+    if (!isHumanControlled(player)) return;
+    if (getTimingModeForRuntime() !== 'bank-time-only') return;
+    let timingCfg = getTimingConfigForPage();
+    let inc = Math.floor(Number(timingCfg.baseTimeIncrement) || 0);
+    if (inc <= 0) return;
+    game.playerBankTimes[player] = Math.max(0, Number(game.playerBankTimes[player]) || 0) + inc;
 }
 
 /**
@@ -940,18 +1011,42 @@ function removeNoDeclareButton() {
     gBtnNoDeclare.onclick = null;
 }
 
+function getActiveBaserPlayer() {
+    return (game.currentBaser !== null && game.currentBaser !== undefined) ? game.currentBaser : game.pivot;
+}
+
+function getFinalBaserSeat() {
+    if (!game) return null;
+    if (game.finalBaserSeat !== null && game.finalBaserSeat !== undefined) return game.finalBaserSeat;
+    if (game.finalBaser !== null && game.finalBaser !== undefined) return game.finalBaser;
+    return game.pivot;
+}
+
+function canSeatSeeBaseInPlayingPhase(localSeat) {
+    if (!game || game.phase !== GamePhase.PLAYING) return false;
+    return localSeat === getFinalBaserSeat();
+}
+
 /**
  * Auto-play as bot when human player's time runs out.
  */
 function autoPlayAsBot(player) {
-    if (game.phase === GamePhase.BASING && player === game.pivot) {
+    if (game.phase === GamePhase.BASING && player === getActiveBaserPlayer()) {
         // Auto-base
         let baseCards = botMakeBase(player);
-        engineSetBase(baseCards);
+        let deferPlaying = !!(game && game.gameConfig && game.gameConfig.allowOverbase);
+        let ok = engineSetBase(baseCards, { deferPlaying });
+        if (!ok) {
+            showError(t('errors.baseFailed'));
+            appendLog(t('errors.baseFailed'));
+            return;
+        }
+        applyBaseTimeIncrementAfterBaseCompletion(player);
         clearSelection();
+        clearDesk();
         renderAllHands();
         appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[player] }));
-        startPlayingPhase();
+        afterBasingComplete();
     } else if (game.phase === GamePhase.PLAYING) {
         // Auto-play card(s)
         let cards = botPlay(player);
@@ -986,6 +1081,7 @@ function startNewGame() {
     // Clean up any in-progress dealing timer
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
     currentDeclaration = null;
+    resetDeclarationHistoryRows();
 
     // Clear all active timers (note 24)
     clearTimers();
@@ -1002,10 +1098,6 @@ function startNewGame() {
     hideCountingDialog();
     gBtnPlay.disabled = true;
     gBtnPlay.textContent = t('buttons.play');
-
-    // Reset won counters (§2)
-    wonCounterCards = [];
-    updateCounterDrawer();
 
     // Hide show-base button (§5)
     if (gBtnShowBase) gBtnShowBase.style.display = 'none';
@@ -1065,6 +1157,10 @@ function startNewGame() {
     engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig);
     game.displaySettings = { ...(gResolvedGameSettings.displaySettings || { placeholder: true }) };
 
+    // Reset won counters and refresh drawer only after authoritative new-frame state reset.
+    wonCounterCards = [];
+    updateCounterDrawer();
+
     // Initialize persistent name bars (§3)
     initPersistentNamebars();
 
@@ -1116,12 +1212,190 @@ function updateBotDealCounts() {
 
 function getDenominationHtml(suit, count) {
     if (suit === 4) {
-        let numIcons = count >= 3 ? 2 : count;
-        let s = '<div class="suit-denomination">' + jokerHtml + '</div>';
-        return s.repeat(numIcons);
+        // No-trump in the denomination widget should use the dedicated NTS display.
+        return ntsHtml;
     }
     let s = '<div class="suit-denomination">' + suitTexts[suit] + '</div>';
     return s.repeat(count);
+}
+
+function getNaturalPositionShort(player) {
+    let locale = getLocale();
+    if (locale === 'en') {
+        // Runtime player order: 0=S, 1=E, 2=N, 3=W
+        return ['S', 'E', 'N', 'W'][player] || '';
+    }
+    return ['南', '东', '北', '西'][player] || '';
+}
+
+function getDeclarationWhatHtml(suit, count) {
+    if (suit === 4) {
+        return count >= 4 ? 'WW' : 'VV';
+    }
+    let multiplicity = Math.max(1, Number(count) || 1);
+    let out = '';
+    for (let i = 0; i < multiplicity; i++) {
+        out += '<span class="decl-history-suit-mark" data-suit="' + numberToSuitName[suit] + '">' + suitTexts[suit] + '</span>';
+    }
+    return out;
+}
+
+function getBasingWhenHowLabel(mode) {
+    let locale = getLocale();
+    if (mode === 'oc') {
+        return locale === 'en' ? 'OC' : '反';
+    }
+    return locale === 'en' ? 'OB' : '炒';
+}
+
+function getHistoryAutoStrainText() {
+    return getLocale() === 'en' ? 'auto strain' : '自动名目';
+}
+
+function getCurrentDealtCountForHistory() {
+    if (gTimingPhase === 'finalDeclare') return 25;
+    let dealt = Math.floor((game && game.dealIndex ? game.dealIndex : 0) / NUM_PLAYERS);
+    if (dealt < 0) dealt = 0;
+    if (dealt > 25) dealt = 25;
+    return dealt;
+}
+
+function ensureDeclarationHistoryHoverBox() {
+    if (!gDenomArea) return;
+    if (gDeclHistoryBox && gDeclHistoryTbody) return;
+
+    let box = gDenomArea.querySelector('.decl-history-hover-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.className = 'decl-history-hover-box';
+        box.innerHTML = '<table class="decl-history-table"><tbody></tbody></table>';
+        gDenomArea.appendChild(box);
+    }
+
+    gDeclHistoryBox = box;
+    gDeclHistoryTbody = gDeclHistoryBox.querySelector('tbody');
+    gDenomArea.setAttribute('data-decl-history-empty', '1');
+}
+
+function buildDeclarationHistoryCellValues(row) {
+    if (row.type === 'auto-strain') {
+        return {
+            who: '',
+            whatHtml: row.what || getHistoryAutoStrainText(),
+            whenHow: row.whenHow || '',
+            strainKey: '',
+        };
+    }
+    return {
+        who: getNaturalPositionShort(row.player),
+        whatHtml: getDeclarationWhatHtml(row.suit, row.count),
+        whenHow: row.phase === 'dealing' ? String(row.whenHow || '') : getBasingWhenHowLabel(row.basingMode || 'ob'),
+        strainKey: row.suit === 4 ? (row.count >= 4 ? 'w' : 'v') : numberToSuitName[row.suit],
+    };
+}
+
+function renderDeclarationHistoryRows() {
+    ensureDeclarationHistoryHoverBox();
+    if (!gDeclHistoryTbody) return;
+
+    gDeclHistoryTbody.innerHTML = '';
+    for (let i = 0; i < gDeclarationHistoryRows.length; i++) {
+        let row = gDeclarationHistoryRows[i];
+        let values = buildDeclarationHistoryCellValues(row);
+        let tr = document.createElement('tr');
+        if (values.strainKey) tr.setAttribute('data-strain', values.strainKey);
+
+        let tdWho = document.createElement('td');
+        tdWho.className = 'decl-history-col-who';
+        tdWho.textContent = values.who;
+
+        let tdWhat = document.createElement('td');
+        tdWhat.className = 'decl-history-col-what';
+        tdWhat.innerHTML = values.whatHtml;
+
+        let tdWhenHow = document.createElement('td');
+        tdWhenHow.className = 'decl-history-col-whenhow';
+        tdWhenHow.textContent = values.whenHow;
+
+        tr.appendChild(tdWho);
+        tr.appendChild(tdWhat);
+        tr.appendChild(tdWhenHow);
+        gDeclHistoryTbody.appendChild(tr);
+    }
+
+    if (gDenomArea) {
+        gDenomArea.setAttribute('data-decl-history-empty', gDeclarationHistoryRows.length > 0 ? '0' : '1');
+    }
+}
+
+function appendDeclarationHistoryRow(row) {
+    gDeclarationHistoryRows.push({ ...row });
+    renderDeclarationHistoryRows();
+}
+
+function resetDeclarationHistoryRows() {
+    gDeclarationHistoryRows = [];
+    renderDeclarationHistoryRows();
+}
+
+function recordDealingDeclarationHistory(player, suit, count) {
+    appendDeclarationHistoryRow({
+        type: 'declaration',
+        phase: 'dealing',
+        player,
+        suit,
+        count,
+        whenHow: String(getCurrentDealtCountForHistory()),
+    });
+}
+
+function recordBasingDeclarationHistory(player, suit, count, mode) {
+    appendDeclarationHistoryRow({
+        type: 'declaration',
+        phase: 'basing',
+        player,
+        suit,
+        count,
+        basingMode: mode,
+        whenHow: getBasingWhenHowLabel(mode),
+    });
+}
+
+function recordAutoStrainHistoryRow() {
+    appendDeclarationHistoryRow({
+        type: 'auto-strain',
+        phase: 'auto-strain',
+        who: '',
+        what: getHistoryAutoStrainText(),
+        whenHow: '',
+    });
+}
+
+function renderResolvedStrainDisplay() {
+    if (!gDenomArea || !gStrainDiv) return;
+
+    // Prefer resolved declaration detail (suit + count) when available.
+    let resolved = (game && Array.isArray(game.declarations) && game.declarations.length > 0)
+        ? game.declarations[game.declarations.length - 1]
+        : null;
+
+    if (resolved) {
+        let suitName = resolved.suit === 4 ? (resolved.count >= 4 ? 'w' : 'v') : numberToSuitName[resolved.suit];
+        gDenomArea.setAttribute('strain', suitName);
+        gStrainDiv.innerHTML = getDenominationHtml(resolved.suit, resolved.count);
+        return;
+    }
+
+    // Fallback to authoritative resolved game strain.
+    if (game && game.strain === 4) {
+        gDenomArea.setAttribute('strain', 'v');
+        gStrainDiv.innerHTML = ntsHtml;
+        return;
+    }
+    if (game && game.strain >= 0 && game.strain <= 3) {
+        gDenomArea.setAttribute('strain', numberToSuitName[game.strain]);
+        gStrainDiv.innerHTML = getDenominationHtml(game.strain, 1);
+    }
 }
 
 function updateDeclareMatrix() {
@@ -1207,6 +1481,7 @@ function executeDeclaration(suit, count) {
     appendLog(t('log.declare', { playerName: PLAYER_NAMES[HUMAN_PLAYER], strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
 
     showDeclaredCardsOnDesk(HUMAN_PLAYER, suit, count);
+    recordDealingDeclarationHistory(HUMAN_PLAYER, suit, count);
     updateDeclareMatrix();
 
     // If this is the highest possible declaration, break any active final-declaration window (note 24 §5.3)
@@ -1245,10 +1520,10 @@ function runDealingPhase() {
             let p = (game.pivot + i) % NUM_PLAYERS;
             if (p === HUMAN_PLAYER) continue;
 
-            let decl = botChooseDeclaration(p, currentDeclaration);
+            let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
             if (decl) {
                 let currentCount = currentDeclaration ? currentDeclaration.count : 0;
-                if (decl.count > currentCount) {
+                if (currentDeclaration ? botCompareDeclarations(decl, currentDeclaration, botGetEffectiveDeclarationOrdering()) > 0 : (decl.count > currentCount)) {
                     currentDeclaration = { player: p, suit: decl.suit, count: decl.count };
                     
                     let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
@@ -1258,6 +1533,7 @@ function runDealingPhase() {
                     gDeclMethodSp.textContent = t('labels.declareMethod');
                     appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
                     showDeclaredCardsOnDesk(p, decl.suit, decl.count);
+                    recordDealingDeclarationHistory(p, decl.suit, decl.count);
                 }
             }
         }
@@ -1317,10 +1593,10 @@ function runFinalDeclarationWindow() {
     for (let i = 0; i < NUM_PLAYERS; i++) {
         let p = (game.pivot + i) % NUM_PLAYERS;
         if (isHumanControlled(p)) continue;
-        let decl = botChooseDeclaration(p, currentDeclaration);
+        let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
         if (decl) {
             let currentCount = currentDeclaration ? currentDeclaration.count : 0;
-            if (decl.count > currentCount) {
+            if (currentDeclaration ? botCompareDeclarations(decl, currentDeclaration, botGetEffectiveDeclarationOrdering()) > 0 : (decl.count > currentCount)) {
                 currentDeclaration = { player: p, suit: decl.suit, count: decl.count };
                 let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
                 gDenomArea.setAttribute('strain', suitName);
@@ -1329,6 +1605,7 @@ function runFinalDeclarationWindow() {
                 gDeclMethodSp.textContent = t('labels.declareMethod');
                 appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
                 showDeclaredCardsOnDesk(p, decl.suit, decl.count);
+                recordDealingDeclarationHistory(p, decl.suit, decl.count);
 
                 // If bot made highest-possible, break immediately (§5.3)
                 if (engineIsHighestPossibleDeclaration(currentDeclaration)) {
@@ -1384,6 +1661,7 @@ function resolveDeclaredPhase() {
         gDenomArea.setAttribute('strain', 'v');
         gStrainDiv.innerHTML = ntsHtml;
         appendLog(t('log.noDeclaration'));
+        recordAutoStrainHistoryRow();
     }
 
     // Update pivot seat indicator
@@ -1407,78 +1685,417 @@ function resolveDeclaredPhase() {
 // ---------------------------------------------------------------------------
 
 function runBasingPhase() {
+    let baser = getActiveBaserPlayer();
     updatePhaseDisplay(t('phase.basing'));
+    renderResolvedStrainDisplay();
+    gOverbaseDecision = null;
+    gDeclareMatrix.style.display = 'none';
+    removeNoDeclareButton();
 
-    if (isHumanControlled(game.pivot)) {
-        // Human-controlled player is pivot — render their hand and wait for selection
-        activeHumanPlayer = game.pivot;
+    if (isHumanControlled(baser)) {
+        // Human-controlled player is the active baser — render their hand and wait for selection.
+        activeHumanPlayer = baser;
         clearSelection();
-        renderHand(game.pivot);
-        updatePhaseDisplay(t('phase.selectBase', { n: BASE_SIZE }) + (TEST_MODE ? ' (' + PLAYER_NAMES[game.pivot] + ')' : ''));
+        renderHand(baser);
+        updatePhaseDisplay(t('phase.selectBase', { n: BASE_SIZE }) + (TEST_MODE ? ' (' + PLAYER_NAMES[baser] + ')' : ''));
         updateStatus(t('status.selectBase', { n: BASE_SIZE }));
         gBtnPlay.textContent = t('buttons.baseProgress', { current: 0, total: BASE_SIZE });
         gBtnPlay.disabled = true;
 
         // Start base shot clock (note 24 §10.1)
-        startPlayerMoveTimer(game.pivot, 'base', () => {
-            autoPlayAsBot(game.pivot);
+        startPlayerMoveTimer(baser, 'base', () => {
+            autoPlayAsBot(baser);
         });
     } else {
-        // Bot is pivot — auto-base
-        let baseCards = botMakeBase(game.pivot);
-        engineSetBase(baseCards);
-        renderAllHands();
-        appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[game.pivot] }));
-        afterBasingComplete();
+        // Bot is the active baser — auto-base after 0.5 s delay (note 41e)
+        setTimeout(function() {
+            let baseCards = botMakeBase(baser);
+            let deferPlaying = !!(game && game.gameConfig && game.gameConfig.allowOverbase);
+            let ok = engineSetBase(baseCards, { deferPlaying });
+            if (!ok) {
+                showError(t('errors.baseFailed'));
+                appendLog(t('errors.baseFailed'));
+                return;
+            }
+            clearDesk();
+            renderAllHands();
+            appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[baser] }));
+            afterBasingComplete();
+        }, 500);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Overbase calling window (note 24 §7)
+// Sequential overbase decisions (note 41)
 // ---------------------------------------------------------------------------
 
 /**
- * After a set-base move, start a 10s overbase calling window if overbase is enabled.
+ * After set-base, run sequential overcall decisions if overbase is enabled.
  * Otherwise, proceed directly to playing phase.
  */
 function afterBasingComplete() {
     if (game.gameConfig && game.gameConfig.allowOverbase) {
-        runOverbaseWindow();
+        runSequentialOverbaseFlow();
     } else {
         startPlayingPhase();
     }
 }
 
 /**
- * 10s overbase calling window (note 24 §7).
- * An overbase move breaks immediately → new set-base.
- * Unanimous "No declaration" or timeout → proceed to playing.
+ * Start timer for an overcall decision step.
+ * Overcall decisions are play-timed and separate from set-base timing.
+ * Special rule (shot+bank + no legal overcall): no bank drain, auto-pass on shot expiry.
  */
-function runOverbaseWindow() {
-    gNoDeclareClicked.clear();
+function startOvercallDecisionTimer(player, hasLegalOvercall, onTimeout) {
+    let timingMode = getTimingModeForRuntime();
+    if (isHumanControlled(player) && timingMode === 'shot + bank' && !hasLegalOvercall) {
+        clearTimers();
+        gTimingPhase = 'overcallDecision';
+        let timingCfg = getTimingConfigForPage();
+        gShotClockRemaining = timingCfg.playShotClock;
+        gBankTimeRemaining = game.playerBankTimes[player];
+        gTimerStage = 'shot';
+        gTimerExpireCallback = onTimeout;
+        showTimerOverlay(player);
 
-    // Show declare-matrix so the no-declare button is visible (note 25 §3)
-    gDeclareMatrix.style.display = 'grid';
-    // Disable all declaration suit buttons during overbase
-    for (let btn of gDeclBtnsSingle) { if (btn) btn.disabled = true; }
-    for (let btn of gDeclBtnsDouble) { if (btn) btn.disabled = true; }
-
-    // Bots auto-decline for overbase
-    for (let i = 0; i < NUM_PLAYERS; i++) {
-        if (!isHumanControlled(i)) gNoDeclareClicked.add(i);
+        gTimerInterval = setInterval(() => {
+            gShotClockRemaining -= 0.1;
+            if (gShotClockRemaining <= 0) {
+                gShotClockRemaining = 0;
+                clearTimers();
+                onTimeout();
+                return;
+            }
+            updateTimerDisplay();
+        }, 100);
+        return;
     }
 
-    startCallingWindowTimer('overbaseWindow', getTimingConfigForPage().overbaseWindow, () => {
-        // Timer expired or broken — proceed to playing phase
-        removeNoDeclareButton();
-        gDeclareMatrix.style.display = 'none';
+    startPlayerMoveTimer(player, 'play', onTimeout);
+    gTimingPhase = 'overcallDecision';
+}
+
+function getCurrentDeclarationHolder() {
+    if (currentDeclaration && currentDeclaration.player !== null && currentDeclaration.player !== undefined) {
+        return currentDeclaration.player;
+    }
+    if (game && Array.isArray(game.declarations) && game.declarations.length > 0) {
+        let last = game.declarations[game.declarations.length - 1];
+        if (last && last.player !== null && last.player !== undefined) return last.player;
+    }
+    return null;
+}
+
+function isEligiblePostDealingOverbaseActor(player) {
+    let baser = getActiveBaserPlayer();
+    let declarationHolder = getCurrentDeclarationHolder();
+    if (player === baser) return false;
+    if (declarationHolder !== null && declarationHolder !== undefined && player === declarationHolder) return false;
+    return true;
+}
+
+function buildPostDealingOverbaseActorOrder(startPlayer) {
+    let order = [];
+    // After an accepted overbase + set-base, restart from the afterhand of the last baser (note 41ec).
+    // If startPlayer is provided, begin from that player; otherwise use afterhand of pivot.
+    if (startPlayer === undefined) {
+        startPlayer = (game.pivot + 1) % NUM_PLAYERS;
+    }
+    // Use the table's advancing sequence starting from startPlayer.
+    // Eligibility is then filtered from authoritative current baser/declaration-holder state.
+    for (let i = 0; i < NUM_PLAYERS; i++) {
+        let player = (startPlayer + i) % NUM_PLAYERS;
+        if (!isEligiblePostDealingOverbaseActor(player)) continue;
+        order.push(player);
+    }
+    return order;
+}
+
+function runSequentialOverbaseFlow() {
+    let baser = getActiveBaserPlayer();
+    let declarationHolder = getCurrentDeclarationHolder();
+    // Restart post-dealing sequence from the afterhand of the last baser (note 41ec)
+    let startPlayer = (baser + 1) % NUM_PLAYERS;
+    
+    // Build full advancing sequence including all players (for automatic PASS display in note 41ec)
+    let fullSequence = [];
+    for (let i = 0; i < NUM_PLAYERS; i++) {
+        fullSequence.push((startPlayer + i) % NUM_PLAYERS);
+    }
+    
+    // Build eligible-only order for decision-making
+    let order = buildPostDealingOverbaseActorOrder(startPlayer);
+    
+    gOverbaseDecision = {
+        order,
+        fullSequence,
+        index: 0,
+        basePivot: game.pivot,
+        baser: baser,
+        declarationHolder: declarationHolder,
+        // note 41h: restriction state — set true when latest baser's afterhand passes
+        latestBaserAfterhandPassed: false,
+    };
+    runNextOvercallDecisionStep();
+}
+
+function buildOvercallOptionKey(opt) {
+    return String(opt.suit) + ':' + String(opt.count);
+}
+
+function applyOvercallDecision(player, decl) {
+    let previousDeclaration = currentDeclaration ? { ...currentDeclaration } : null;
+    currentDeclaration = { player: player, suit: decl.suit, count: decl.count };
+    let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
+    gDenomArea.setAttribute('strain', suitName);
+    gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
+    gDeclareSp.textContent = POSITION_LABELS[player];
+    gDeclMethodSp.textContent = t('labels.declareMethod');
+    appendLog(t('log.declare', { playerName: PLAYER_NAMES[player], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+    // note 41h / 41ha: restriction is only active when the overbaseRestrictions setting is 'default'.
+    let restrictionSettingEnabled = !!(game && game.gameConfig && game.gameConfig.overbaseRestrictions === 'default');
+    let isNonOverbase = !!(restrictionSettingEnabled
+        && gOverbaseDecision
+        && gOverbaseDecision.latestBaserAfterhandPassed
+        && game.finalBaserSeat !== null && game.finalBaserSeat !== undefined
+        && player === (game.finalBaserSeat + 2) % NUM_PLAYERS);
+
+    // note 41f + 41h: basingMode 'oc' for any non-overbase event, 'ob' for true overbase
+    let basingMode;
+    if (isNonOverbase) {
+        basingMode = 'oc';
+    } else {
+        basingMode = (previousDeclaration && previousDeclaration.suit === decl.suit) ? 'oc' : 'ob';
+    }
+    recordBasingDeclarationHistory(player, decl.suit, decl.count, basingMode);
+
+    gDeclareMatrix.style.display = 'none';
+    removeNoDeclareButton();
+
+    if (isNonOverbase) {
+        // note 41ha: clear other players' artifacts first, then show this declaration,
+        // then advance with a brief pause so the declaration is visibly rendered.
+        clearDeskForOvercallDecisionStep();
+        showDeclaredCardsOnDesk(player, decl.suit, decl.count);
+        engineApplyNonOverbaseDeclaration(player, decl);
+        setTimeout(function() {
+            if (gOverbaseDecision) {
+                gOverbaseDecision.index++;
+                runNextOvercallDecisionStep();
+            } else {
+                startPlayingPhase();
+            }
+        }, 500);
+    } else {
+        showDeclaredCardsOnDesk(player, decl.suit, decl.count);
+        engineApplyOverbaseDeclaration(player, decl);
+        runBasingPhase();
+    }
+}
+
+function finishOvercallDecisionStep(player, result) {
+    if (isHumanControlled(player)) {
+        stopPlayerMoveTimer(player);
+    }
+    gDeclareMatrix.style.display = 'none';
+    removeNoDeclareButton();
+
+    if (result && result.type === 'overcall' && result.declaration) {
+        applyOvercallDecision(player, result.declaration);
+        return;
+    }
+
+    // note 41h: track whether the latest baser's afterhand explicitly passes
+    // note 41h / 41ha: only set when overbaseRestrictions is enabled
+    if (gOverbaseDecision
+            && game.gameConfig && game.gameConfig.overbaseRestrictions === 'default'
+            && game.finalBaserSeat !== null && game.finalBaserSeat !== undefined) {
+        if (player === (game.finalBaserSeat + 1) % NUM_PLAYERS) {
+            gOverbaseDecision.latestBaserAfterhandPassed = true;
+        }
+    }
+
+    // Show PASS marker in this player's desk slot (note 41e)
+    showBasingPassMarker(player);
+
+    if (!gOverbaseDecision) {
         startPlayingPhase();
+        return;
+    }
+    gOverbaseDecision.index++;
+    runNextOvercallDecisionStep();
+}
+
+function runNextOvercallDecisionStep() {
+    if (!gOverbaseDecision) {
+        startPlayingPhase();
+        return;
+    }
+    if (gOverbaseDecision.index >= gOverbaseDecision.order.length) {
+        // Render trailing mandatory/automatic PASS actors that occur after the
+        // last eligible decision actor in full advancing sequence (note 41ed).
+        if (gOverbaseDecision.lastProcessedFullSequenceIndex === undefined) {
+            gOverbaseDecision.lastProcessedFullSequenceIndex = -1;
+        }
+        for (let i = gOverbaseDecision.lastProcessedFullSequenceIndex + 1; i < gOverbaseDecision.fullSequence.length; i++) {
+            let trailingMandatoryPassActor = gOverbaseDecision.fullSequence[i];
+            if (trailingMandatoryPassActor === gOverbaseDecision.baser) continue;
+            showBasingPassMarker(trailingMandatoryPassActor);
+        }
+
+        // Final PASS display and linger before PLAYING (note 41ec §5)
+        gOverbaseDecision = null;
+        // After the last PASS is shown, linger for ~500ms before entering PLAYING
+        setTimeout(function() {
+            startPlayingPhase();
+        }, 500);
+        return;
+    }
+
+    // Show PASS for automatically passed ineligible actors before the next eligible actor (note 41ec §4)
+    let nextEligiblePlayer = gOverbaseDecision.order[gOverbaseDecision.index];
+    let nextEligibleIndex = gOverbaseDecision.fullSequence.indexOf(nextEligiblePlayer);
+    
+    // Check for and show PASS for any ineligible actors that come before nextEligiblePlayer
+    if (gOverbaseDecision.lastProcessedFullSequenceIndex === undefined) {
+        gOverbaseDecision.lastProcessedFullSequenceIndex = -1;
+    }
+    
+    // Show PASS for all ineligible actors between last processed and next eligible
+    let didShowAutomaticPass = false;
+    for (let i = gOverbaseDecision.lastProcessedFullSequenceIndex + 1; i < nextEligibleIndex; i++) {
+        let ineligiblePlayer = gOverbaseDecision.fullSequence[i];
+        if (ineligiblePlayer === gOverbaseDecision.baser) continue;
+        // note 41h: automatic pass for ineligible actor also counts as afterhand pass
+        // note 41h / 41ha: only set when overbaseRestrictions is enabled
+        if (game.gameConfig && game.gameConfig.overbaseRestrictions === 'default'
+                && game.finalBaserSeat !== null && game.finalBaserSeat !== undefined
+                && ineligiblePlayer === (game.finalBaserSeat + 1) % NUM_PLAYERS) {
+            gOverbaseDecision.latestBaserAfterhandPassed = true;
+        }
+        showBasingPassMarker(ineligiblePlayer);
+        didShowAutomaticPass = true;
+    }
+    
+    if (didShowAutomaticPass) {
+        // If we showed automatic pass, give it a moment to be visible before proceeding
+        gOverbaseDecision.lastProcessedFullSequenceIndex = nextEligibleIndex - 1;
+        setTimeout(function() {
+            runNextOvercallDecisionStep();
+        }, 250);
+        return;
+    }
+    
+    gOverbaseDecision.lastProcessedFullSequenceIndex = nextEligibleIndex;
+
+    let player = nextEligiblePlayer;
+    gOverbaseDecision.activeActor = player;
+
+    // Sequential visual discipline: clear stale actor visuals and render only
+    // the current authoritative declaration state before this actor decides.
+    clearDeskForOvercallDecisionStep();
+    highlightActivePlayer(player);
+
+    let legal = botGetLegalOvercallDeclarations(player, currentDeclaration, 'basing-overcall');
+    let hasLegal = legal.length > 0;
+
+    if (!isHumanControlled(player)) {
+        // 0.5 s delay before bot overcall decision is committed (note 41e)
+        setTimeout(function() {
+            let choice = botChooseDeclaration(player, currentDeclaration, 'basing-overcall');
+            if (choice) {
+                finishOvercallDecisionStep(player, { type: 'overcall', declaration: choice });
+            } else {
+                appendLog(t('timing.noDeclaration') + ' - ' + PLAYER_NAMES[player]);
+                finishOvercallDecisionStep(player, { type: 'pass' });
+            }
+        }, 500);
+        return;
+    }
+
+    activeHumanPlayer = player;
+    clearSelection();
+    renderHand(player);
+    updatePhaseDisplay(t('phase.declaring'));
+    updateStatus(t('status.declaring'));
+
+    gDeclareMatrix.style.display = 'grid';
+    for (let btn of gDeclBtnsSingle) {
+        if (btn) {
+            btn.disabled = true;
+            btn.onclick = null;
+        }
+    }
+    for (let btn of gDeclBtnsDouble) {
+        if (btn) {
+            btn.disabled = true;
+            btn.onclick = null;
+        }
+    }
+
+    let legalSet = new Set(legal.map(buildOvercallOptionKey));
+    for (let suit = 0; suit <= 4; suit++) {
+        // note 41ha: suit=4 (NTS/joker) — VV and WW are separate, independent choices.
+        // Single button (VV) covers count=1/2/3; double button (WW) covers count=4 only.
+        if (suit === 4) {
+            let btnS4 = gDeclBtnsSingle[4];
+            if (btnS4) {
+                btnS4.innerHTML = 'VV';
+                btnS4.disabled = !legalSet.has('4:1') && !legalSet.has('4:2') && !legalSet.has('4:3');
+                if (!btnS4.disabled) {
+                    btnS4.onclick = () => {
+                        let picked = legal.find(o => o.suit === 4 && (o.count === 1 || o.count === 2 || o.count === 3));
+                        if (!picked) return;
+                        finishOvercallDecisionStep(player, { type: 'overcall', declaration: picked });
+                    };
+                }
+            }
+            let btnD4 = gDeclBtnsDouble[4];
+            if (btnD4) {
+                btnD4.innerHTML = 'WW';
+                btnD4.disabled = !legalSet.has('4:4');
+                if (!btnD4.disabled) {
+                    btnD4.onclick = () => {
+                        let picked = legal.find(o => o.suit === 4 && o.count === 4);
+                        if (!picked) return;
+                        finishOvercallDecisionStep(player, { type: 'overcall', declaration: picked });
+                    };
+                }
+            }
+            continue;
+        }
+        let btnS = gDeclBtnsSingle[suit];
+        if (btnS) {
+            btnS.innerHTML = suitTexts[suit];
+            btnS.disabled = !legalSet.has(String(suit) + ':1') && !legalSet.has(String(suit) + ':3');
+            if (!btnS.disabled) {
+                btnS.onclick = () => {
+                    let picked = legal.find(o => o.suit === suit && (o.count === 1 || o.count === 3));
+                    if (!picked) return;
+                    finishOvercallDecisionStep(player, { type: 'overcall', declaration: picked });
+                };
+            }
+        }
+        let btnD = gDeclBtnsDouble[suit];
+        if (btnD) {
+            btnD.innerHTML = suitTexts[suit] + suitTexts[suit];
+            btnD.disabled = !legalSet.has(String(suit) + ':2') && !legalSet.has(String(suit) + ':4');
+            if (!btnD.disabled) {
+                btnD.onclick = () => {
+                    let picked = legal.find(o => o.suit === suit && (o.count === 2 || o.count === 4));
+                    if (!picked) return;
+                    finishOvercallDecisionStep(player, { type: 'overcall', declaration: picked });
+                };
+            }
+        }
+    }
+
+    showNoDeclareButton(() => {
+        finishOvercallDecisionStep(player, { type: 'pass' });
     });
 
-    // Show "No declaration" button for human (§6)
-    showNoDeclareButton(() => {
-        gDeclareMatrix.style.display = 'none';
-        breakCallingWindowTimer();
+    startOvercallDecisionTimer(player, hasLegal, () => {
+        finishOvercallDecisionStep(player, { type: 'pass' });
     });
 }
 
@@ -1487,13 +2104,20 @@ function runOverbaseWindow() {
 // ---------------------------------------------------------------------------
 
 function startPlayingPhase() {
+    clearDesk();
+    if (!engineCommitBasingToPlaying()) {
+        showError('Cannot enter playing phase: invalid hand/base card counts.');
+        appendLog('Cannot enter playing phase: invalid hand/base card counts.');
+        return;
+    }
     updatePhaseDisplay(t('phase.playing'));
+    renderResolvedStrainDisplay();
     gBtnPlay.textContent = t('buttons.play');
     clearSelection();
     renderAllHands();
 
-    // Show-base button if reference player is the baser (§5)
-    if (gBtnShowBase && game.pivot === HUMAN_PLAYER && game.base) {
+    // Show-base button only for the final baser during playing phase.
+    if (gBtnShowBase && canSeatSeeBaseInPlayingPhase(HUMAN_PLAYER) && game.base) {
         gBtnShowBase.style.display = 'block';
         // Populate base preview
         if (gBasePreview) {
@@ -1766,6 +2390,10 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
     // Mark FailedMultiplayState hold in progress
     game.failedMultiplay.holdInProgress = true;
 
+    // Immediate visible updates at failed-multiplay registration time (note 39e).
+    updateScoreDisplay();
+    updateCounterDrawer();
+
     // 1) Announce all blockers
     let allBlockerNames = fm.allBlockerSeats.map(s => PLAYER_NAMES[s]).join(', ');
     appendLog(t('log.multiplayFailed', {
@@ -1856,7 +2484,7 @@ function humanPlayCards() {
         return;
     }
 
-    let cp = (game.phase === GamePhase.BASING) ? game.pivot : engineGetCurrentPlayer();
+    let cp = (game.phase === GamePhase.BASING) ? getActiveBaserPlayer() : engineGetCurrentPlayer();
     humanPlayCardsCore(cp);
 }
 
@@ -1877,14 +2505,14 @@ const SETTINGS_SELECT_OPTIONS = {
     autoStrain: ['false', 'true'],
     allowOverbase: ['false', 'true'],
     overbaseRestrictions: ['none', 'default'],
-    failedMultiplayHandling: ['default'],
+    failedMultiplayHandling: ['default', 'compensation'],
     allowCrossings: ['false', 'true'],
     scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
     baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
     levelsPreset: ['', 'default', 'high-school', 'slow', 'plain', 'short'],
     gameMode: ['endless', 'pass-A'],
-    timingPreset: ['default', 'fast', 'slow'],
-    timingMode: ['human-only'],
+    timingPreset: ['', 'normal', '180+30'],
+    timingMode: ['shot + bank', 'bank-time-only'],
 };
 
 function cloneRuleConfig(cfg) {
@@ -1923,6 +2551,16 @@ function getTimingConfigForPage() {
     };
 }
 
+function getTimingModeForRuntime() {
+    if (game && game.gameConfig && game.gameConfig.timingMode) {
+        return game.gameConfig.timingMode;
+    }
+    if (gResolvedGameSettings && gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.timingMode) {
+        return gResolvedGameSettings.ruleConfig.timingMode;
+    }
+    return 'shot + bank';
+}
+
 const LEVEL_VALUE_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const LEVEL_MATRIX_COUNTER_LEVELS = new Set([3, 8, 11]);
 const LEVEL_MATRIX_KEY_SPACER = '__SPACER__';
@@ -1949,7 +2587,10 @@ function settingsOptionLabel(value) {
         'Berkeley': 'berkeley',
         'endless': 'endless',
         'pass-A': 'passA',
-        'human-only': 'humanOnly',
+        'shot + bank': 'shotPlusBank',
+        'bank-time-only': 'bankTimeOnly',
+        'normal': 'normal',
+        '180+30': 'timing180Plus30',
         // scoring preset values
         'traditional': 'traditional',
         'traditional-power': 'traditionalPower',
@@ -2000,6 +2641,14 @@ function syncLevelsPresetLabel() {
     if (!levelsPresets) return;
     let detected = window.shengjiDetectLevelsPreset(gSettingsDraftRuleConfig);
     gSettingsDraftRuleConfig.levelsPreset = detected || '';
+}
+
+function syncTimingPresetLabel() {
+    let detected = '';
+    if (typeof window.shengjiDetectTimingPreset === 'function') {
+        detected = window.shengjiDetectTimingPreset(gSettingsDraftRuleConfig) || '';
+    }
+    gSettingsDraftRuleConfig.timingPreset = detected;
 }
 
 function createEmptyLevelsMatrixState() {
@@ -2120,13 +2769,55 @@ function setRuleConfigFieldValue(field, rawValue) {
         return;
     }
 
+    if (field === 'timingPreset') {
+        gSettingsDraftRuleConfig[field] = rawValue;
+        let timingPresets = window.shengjiTimingPresets;
+        if (timingPresets && timingPresets[rawValue]) {
+            let tp = timingPresets[rawValue];
+            if (tp.timingMode !== undefined) gSettingsDraftRuleConfig.timingMode = tp.timingMode;
+            if (tp.playShotClock !== undefined) gSettingsDraftRuleConfig.timing.playShotClock = Number(tp.playShotClock);
+            if (tp.baseShotClock !== undefined) gSettingsDraftRuleConfig.timing.baseShotClock = Number(tp.baseShotClock);
+            if (tp.bankTime !== undefined) gSettingsDraftRuleConfig.timing.bankTime = Number(tp.bankTime);
+            if (tp.baseTimeIncrement !== undefined) gSettingsDraftRuleConfig.timing.baseTimeIncrement = Number(tp.baseTimeIncrement);
+        }
+        return;
+    }
+
+    if (field === 'timingMode') {
+        gSettingsDraftRuleConfig.timingMode = rawValue;
+        syncTimingPresetLabel();
+        return;
+    }
+
+    if (field === 'failedMultiplayHandling') {
+        gSettingsDraftRuleConfig.failedMultiplayHandling = rawValue;
+        gSettingsDraftRuleConfig.multiplayCompensation = (rawValue === 'compensation');
+        return;
+    }
+
     let value = rawValue;
     if (rawValue === 'true') value = true;
     if (rawValue === 'false') value = false;
     if (rawValue === true || rawValue === false) value = rawValue;
 
     if (field in (gSettingsDraftRuleConfig.timing || {})) {
-        gSettingsDraftRuleConfig.timing[field] = Number(rawValue);
+        let n = Math.floor(Number(rawValue));
+        let min = null;
+        let max = null;
+        if (field === 'playShotClock') { min = 1; max = 10; }
+        if (field === 'baseShotClock') { min = 1; max = 60; }
+        if (field === 'bankTime') { min = 10; max = 300; }
+        if (field === 'baseTimeIncrement') { min = 1; max = 60; }
+
+        if (!Number.isFinite(n)) {
+            n = Number(gSettingsDraftRuleConfig.timing[field]);
+        }
+        if (!Number.isFinite(n)) n = (min !== null ? min : 0);
+        if (min !== null && n < min) n = min;
+        if (max !== null && n > max) n = max;
+
+        gSettingsDraftRuleConfig.timing[field] = n;
+        syncTimingPresetLabel();
         return;
     }
 
@@ -2144,6 +2835,12 @@ function setRuleConfigFieldValue(field, rawValue) {
             if (!Number.isFinite(numeric)) numeric = min;
             if (numeric < min) numeric = min;
             if (numeric > dcMax) numeric = dcMax;
+        }
+
+        if (field === 'multiplayCompensationAmount') {
+            if (!Number.isFinite(numeric)) numeric = 5;
+            if (numeric < 1) numeric = 1;
+            if (numeric > 10) numeric = 10;
         }
 
         gSettingsDraftRuleConfig[field] = numeric;
@@ -2492,6 +3189,37 @@ function createGameModeRadioSelector(currentValue, readOnly) {
     return radioGroup;
 }
 
+function createTimingModeRadioSelector(currentValue, readOnly) {
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    const opts = [
+        { value: 'shot + bank', label: t('settingsDialog.options.shotPlusBank') },
+        { value: 'bank-time-only', label: t('settingsDialog.options.bankTimeOnly') }
+    ];
+    for (let opt of opts) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'timingMode';
+        radio.value = opt.value;
+        radio.checked = (opt.value === String(currentValue));
+        radio.disabled = !!readOnly;
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue('timingMode', opt.value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(opt.label));
+        radioGroup.appendChild(radioLabel);
+    }
+    return radioGroup;
+}
+
 function createKnockBackConditionRow(readOnly) {
     let row = document.createElement('div');
     row.className = 'levels-row levels-row-knock-back-condition';
@@ -2644,6 +3372,12 @@ function createSettingsFieldEl(field, readOnly) {
         return wrapper;
     }
 
+    if (field === 'timingMode') {
+        wrapper.appendChild(createTimingModeRadioSelector(currentValue, readOnly));
+        wrapper.setAttribute('data-settings-field', field);
+        return wrapper;
+    }
+
     let optionsProvider = SETTINGS_SELECT_OPTIONS[field];
 
     if (optionsProvider) {
@@ -2666,6 +3400,26 @@ function createSettingsFieldEl(field, readOnly) {
         }
         if (field === 'levelThreshold') {
             el.min = '2';
+            el.step = '1';
+        }
+        if (field === 'playShotClock') {
+            el.min = '1';
+            el.max = '10';
+            el.step = '1';
+        }
+        if (field === 'baseShotClock') {
+            el.min = '1';
+            el.max = '60';
+            el.step = '1';
+        }
+        if (field === 'bankTime') {
+            el.min = '10';
+            el.max = '300';
+            el.step = '1';
+        }
+        if (field === 'baseTimeIncrement') {
+            el.min = '1';
+            el.max = '60';
             el.step = '1';
         }
         if (currentValue !== null && currentValue !== undefined && currentValue !== Infinity) {
@@ -2734,6 +3488,261 @@ function createGameModeHint() {
     let key = (mode === 'pass-A') ? 'passA' : 'endless';
     hint.textContent = t('settingsDialog.gameModeHints.' + key);
     return hint;
+}
+
+function createTimingPresetHint() {
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    let preset = gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingPreset ? gSettingsDraftRuleConfig.timingPreset : '';
+    if (preset === 'normal') {
+        hint.textContent = t('settingsDialog.timingPresetHints.normal');
+    } else if (preset === '180+30') {
+        hint.textContent = t('settingsDialog.timingPresetHints.timing180Plus30');
+    } else {
+        hint.textContent = t('settingsDialog.timingPresetHints.custom');
+    }
+    return hint;
+}
+
+function createGeneralAutoStrainSelector(currentValue, readOnly) {
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    const opts = [
+        { value: 'false', label: t('settingsDialog.options.nts'), disabled: false },
+        { value: 'true', label: t('settingsDialog.options.thirdInitBase'), disabled: true }
+    ];
+    let current = String(!!currentValue);
+    for (let opt of opts) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'autoStrain';
+        radio.value = opt.value;
+        radio.checked = (opt.value === current);
+        radio.disabled = !!readOnly || !!opt.disabled;
+        if (opt.disabled) radioLabel.classList.add('is-option-disabled');
+        if (!readOnly && !opt.disabled) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue('autoStrain', radio.value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(opt.label));
+        radioGroup.appendChild(radioLabel);
+    }
+    return radioGroup;
+}
+
+function createGeneralHint(text, extraClass = '') {
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    if (extraClass) hint.classList.add(extraClass);
+    hint.textContent = text;
+    return hint;
+}
+
+function renderGeneralTabBody(container, readOnly) {
+    let rows = document.createElement('div');
+    rows.className = 'general-tab-rows';
+
+    // Row 1: deck count with disabled 1/3/4 options visible.
+    let row1 = document.createElement('div');
+    row1.className = 'general-row';
+    let deckField = document.createElement('div');
+    deckField.className = 'settings-field';
+    deckField.setAttribute('data-settings-field', 'deckCount');
+    let deckLabel = document.createElement('label');
+    deckLabel.textContent = t('settingsDialog.fields.deckCount');
+    let deckSel = document.createElement('select');
+    deckSel.setAttribute('data-settings-field', 'deckCount');
+    const deckOptions = [
+        { value: '1', disabled: true },
+        { value: '2', disabled: false },
+        { value: '3', disabled: true },
+        { value: '4', disabled: true },
+    ];
+    for (let opt of deckOptions) {
+        let op = document.createElement('option');
+        op.value = opt.value;
+        op.textContent = opt.value;
+        op.disabled = !!opt.disabled;
+        deckSel.appendChild(op);
+    }
+    deckSel.value = String(getRuleConfigFieldValue('deckCount'));
+    deckSel.disabled = !!readOnly;
+    if (!readOnly) {
+        deckSel.addEventListener('change', () => {
+            setRuleConfigFieldValue('deckCount', deckSel.value);
+            renderSettingsDialog();
+        });
+    }
+    deckField.appendChild(deckLabel);
+    deckField.appendChild(deckSel);
+    row1.appendChild(deckField);
+    rows.appendChild(row1);
+
+    // Row 2: auto strain radios + hint.
+    let row2 = document.createElement('div');
+    row2.className = 'general-row';
+    let autoField = document.createElement('div');
+    autoField.className = 'settings-field';
+    autoField.setAttribute('data-settings-field', 'autoStrain');
+    let autoLabel = document.createElement('label');
+    autoLabel.textContent = t('settingsDialog.fields.autoStrain');
+    autoField.appendChild(autoLabel);
+    autoField.appendChild(createGeneralAutoStrainSelector(getRuleConfigFieldValue('autoStrain'), readOnly));
+    row2.appendChild(autoField);
+    row2.appendChild(createGeneralHint(t('settingsDialog.generalHints.autoStrain'), 'general-hint-auto-strain'));
+    rows.appendChild(row2);
+
+    // Row 3: overbase + conditional restriction + conditional hint.
+    let row3 = document.createElement('div');
+    row3.className = 'general-row';
+
+    let overbaseField = document.createElement('div');
+    overbaseField.className = 'settings-field';
+    overbaseField.setAttribute('data-settings-field', 'allowOverbase');
+    let overbaseLabel = document.createElement('label');
+    overbaseLabel.textContent = t('settingsDialog.fields.allowOverbase');
+    let overbaseInput = document.createElement('input');
+    overbaseInput.type = 'checkbox';
+    overbaseInput.checked = !!getRuleConfigFieldValue('allowOverbase');
+    overbaseInput.disabled = !!readOnly;
+    overbaseInput.setAttribute('data-settings-field', 'allowOverbase');
+    if (!readOnly) {
+        overbaseInput.addEventListener('change', () => {
+            setRuleConfigFieldValue('allowOverbase', overbaseInput.checked);
+            if (!overbaseInput.checked) {
+                setRuleConfigFieldValue('overbaseRestrictions', 'none');
+            }
+            renderSettingsDialog();
+        });
+    }
+    overbaseField.appendChild(overbaseLabel);
+    overbaseField.appendChild(overbaseInput);
+    row3.appendChild(overbaseField);
+
+    let showRestriction = !!getRuleConfigFieldValue('allowOverbase');
+    let restrictionChecked = String(getRuleConfigFieldValue('overbaseRestrictions')) === 'default';
+    if (showRestriction) {
+        let restrictionField = document.createElement('div');
+        restrictionField.className = 'settings-field';
+        restrictionField.setAttribute('data-settings-field', 'overbaseRestrictions');
+        let restrictionLabel = document.createElement('label');
+        restrictionLabel.textContent = t('settingsDialog.fields.overbaseRestrictions');
+        let restrictionInput = document.createElement('input');
+        restrictionInput.type = 'checkbox';
+        restrictionInput.checked = restrictionChecked;
+        restrictionInput.disabled = !!readOnly;
+        restrictionInput.setAttribute('data-settings-field', 'overbaseRestrictions');
+        if (!readOnly) {
+            restrictionInput.addEventListener('change', () => {
+                setRuleConfigFieldValue('overbaseRestrictions', restrictionInput.checked ? 'default' : 'none');
+                renderSettingsDialog();
+            });
+        }
+        restrictionField.appendChild(restrictionLabel);
+        restrictionField.appendChild(restrictionInput);
+        row3.appendChild(restrictionField);
+
+        if (restrictionChecked) {
+            row3.appendChild(createGeneralHint(t('settingsDialog.generalHints.overbaseRestriction'), 'general-hint-overbase-restriction'));
+        }
+    }
+    rows.appendChild(row3);
+
+    // Row 4: crossing + hint.
+    let row4 = document.createElement('div');
+    row4.className = 'general-row';
+    let crossingField = document.createElement('div');
+    crossingField.className = 'settings-field';
+    crossingField.setAttribute('data-settings-field', 'allowCrossings');
+    let crossingLabel = document.createElement('label');
+    crossingLabel.textContent = t('settingsDialog.fields.allowCrossings');
+    let crossingInput = document.createElement('input');
+    crossingInput.type = 'checkbox';
+    crossingInput.checked = !!getRuleConfigFieldValue('allowCrossings');
+    crossingInput.disabled = !!readOnly;
+    crossingInput.setAttribute('data-settings-field', 'allowCrossings');
+    if (!readOnly) {
+        crossingInput.addEventListener('change', () => {
+            setRuleConfigFieldValue('allowCrossings', crossingInput.checked);
+            renderSettingsDialog();
+        });
+    }
+    crossingField.appendChild(crossingLabel);
+    crossingField.appendChild(crossingInput);
+    row4.appendChild(crossingField);
+    row4.appendChild(createGeneralHint(t('settingsDialog.generalHints.crossing'), 'general-hint-crossing'));
+    rows.appendChild(row4);
+
+    // Row 5: failed multiplay + conditional compensation amount + hint.
+    let row5 = document.createElement('div');
+    row5.className = 'general-row';
+
+    let failedField = document.createElement('div');
+    failedField.className = 'settings-field';
+    failedField.setAttribute('data-settings-field', 'failedMultiplayHandling');
+    let failedLabel = document.createElement('label');
+    failedLabel.textContent = t('settingsDialog.fields.failedMultiplayHandling');
+    let failedSelect = document.createElement('select');
+    failedSelect.setAttribute('data-settings-field', 'failedMultiplayHandling');
+    const failOptions = [
+        { value: 'default', key: 'failedMultiplayNormal' },
+        { value: 'compensation', key: 'failedMultiplayCompensation' },
+    ];
+    for (let opt of failOptions) {
+        let op = document.createElement('option');
+        op.value = opt.value;
+        op.textContent = t('settingsDialog.options.' + opt.key);
+        failedSelect.appendChild(op);
+    }
+    failedSelect.value = String(getRuleConfigFieldValue('failedMultiplayHandling') || 'default');
+    failedSelect.disabled = !!readOnly;
+    if (!readOnly) {
+        failedSelect.addEventListener('change', () => {
+            setRuleConfigFieldValue('failedMultiplayHandling', failedSelect.value);
+            renderSettingsDialog();
+        });
+    }
+    failedField.appendChild(failedLabel);
+    failedField.appendChild(failedSelect);
+    row5.appendChild(failedField);
+
+    let showComp = (String(getRuleConfigFieldValue('failedMultiplayHandling') || 'default') === 'compensation');
+    if (showComp) {
+        let compField = document.createElement('div');
+        compField.className = 'settings-field';
+        compField.setAttribute('data-settings-field', 'multiplayCompensationAmount');
+        let compLabel = document.createElement('label');
+        compLabel.textContent = t('settingsDialog.fields.multiplayCompensationAmount');
+        let compInput = document.createElement('input');
+        compInput.type = 'number';
+        compInput.min = '1';
+        compInput.max = '10';
+        compInput.step = '1';
+        compInput.value = String(getRuleConfigFieldValue('multiplayCompensationAmount'));
+        compInput.disabled = !!readOnly;
+        compInput.setAttribute('data-settings-field', 'multiplayCompensationAmount');
+        if (!readOnly) {
+            compInput.addEventListener('change', () => {
+                setRuleConfigFieldValue('multiplayCompensationAmount', compInput.value);
+                renderSettingsDialog();
+            });
+        }
+        compField.appendChild(compLabel);
+        compField.appendChild(compInput);
+        row5.appendChild(compField);
+        row5.appendChild(createGeneralHint(t('settingsDialog.generalHints.multiplayCompensationAmount'), 'general-hint-multiplay-compensation'));
+    }
+
+    rows.appendChild(row5);
+
+    container.appendChild(rows);
 }
 
 function renderScoringTabBody(container, readOnly) {
@@ -2808,6 +3817,43 @@ function renderLevelsTabBody(container, readOnly) {
     container.appendChild(rows);
 }
 
+function renderTimingTabBody(container, readOnly) {
+    let rows = document.createElement('div');
+    rows.className = 'timing-tab-rows';
+
+    // Row 1: timing preset + right hint.
+    let row1 = document.createElement('div');
+    row1.className = 'timing-row';
+    row1.appendChild(createSettingsFieldEl('timingPreset', readOnly));
+    row1.appendChild(createTimingPresetHint());
+    rows.appendChild(row1);
+
+    // Row 2: timing mode radios.
+    let row2 = document.createElement('div');
+    row2.className = 'timing-row';
+    row2.appendChild(createSettingsFieldEl('timingMode', readOnly));
+    rows.appendChild(row2);
+
+    // Row 3: numeric fields in one row with mode-based visibility.
+    let row3 = document.createElement('div');
+    row3.className = 'timing-row timing-row-numbers';
+    let mode = gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingMode
+        ? gSettingsDraftRuleConfig.timingMode
+        : 'shot + bank';
+
+    if (mode === 'shot + bank') {
+        row3.appendChild(createSettingsFieldEl('playShotClock', readOnly));
+        row3.appendChild(createSettingsFieldEl('baseShotClock', readOnly));
+        row3.appendChild(createSettingsFieldEl('bankTime', readOnly));
+    } else {
+        row3.appendChild(createSettingsFieldEl('bankTime', readOnly));
+        row3.appendChild(createSettingsFieldEl('baseTimeIncrement', readOnly));
+    }
+    rows.appendChild(row3);
+
+    container.appendChild(rows);
+}
+
 function renderSettingsDialog() {
     if (!gSettingsDialog || !gSettingsBody) return;
 
@@ -2841,6 +3887,7 @@ function renderSettingsDialog() {
     // Second-level tab active states
     for (let tab of gSettingsTabs) {
         let tabName = tab.getAttribute('data-tab');
+        tab.textContent = t('settingsDialog.tabs.' + tabName);
         tab.setAttribute('data-active', tabName === gSettingsActiveTab ? 'true' : 'false');
     }
 
@@ -2849,8 +3896,12 @@ function renderSettingsDialog() {
 
     if (gSettingsActiveTab === 'scoring') {
         renderScoringTabBody(gSettingsBody, readOnly);
+    } else if (gSettingsActiveTab === 'general') {
+        renderGeneralTabBody(gSettingsBody, readOnly);
     } else if (gSettingsActiveTab === 'levels') {
         renderLevelsTabBody(gSettingsBody, readOnly);
+    } else if (gSettingsActiveTab === 'timing') {
+        renderTimingTabBody(gSettingsBody, readOnly);
     } else {
         let grid = document.createElement('div');
         grid.className = 'settings-grid';
@@ -2880,6 +3931,7 @@ function openSettingsDialog(mode) {
     // Sync preset labels to current config state
     syncScoringPresetLabel();
     syncLevelsPresetLabel();
+    syncTimingPresetLabel();
     resetLevelsMatrixStateFromRuleConfig();
 
     renderSettingsDialog();
@@ -2943,13 +3995,16 @@ function humanPlayCardsCore(cp) {
             showError(t('errors.selectBaseCount', { n: BASE_SIZE }));
             return;
         }
-        let ok = engineSetBase(cards);
+        let deferPlaying = !!(game && game.gameConfig && game.gameConfig.allowOverbase);
+        let ok = engineSetBase(cards, { deferPlaying });
         if (!ok) {
             showError(t('errors.baseFailed'));
             return;
         }
-        stopPlayerMoveTimer(game.pivot);
+        stopPlayerMoveTimer(cp);
+        applyBaseTimeIncrementAfterBaseCompletion(cp);
         clearSelection();
+        clearDesk();
         appendLog(t('log.humanBaseDone'));
         renderAllHands();
         afterBasingComplete();
@@ -3284,6 +4339,10 @@ window.addEventListener('dblclick', function(e) {
 // ---------------------------------------------------------------------------
 // Initial state
 // ---------------------------------------------------------------------------
+ensureDeclarationHistoryHoverBox();
+if (gDenomArea) {
+    gDenomArea.addEventListener('mouseenter', renderDeclarationHistoryRows);
+}
 ensureResolvedSettings();
 updatePhaseDisplay(t('phase.initial'));
 updateStatus(t('status.ready'));

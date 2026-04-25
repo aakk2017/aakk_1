@@ -60,6 +60,7 @@
     align-items: center;
     overflow: visible;
     position: relative;
+
     /* padding-bottom: 2.5vh; */
 }
 
@@ -662,6 +663,21 @@
     -webkit-backdrop-filter: blur(3px);
 }
 
+/* Basing-phase PASS marker shown in a player's desk slot after a no-overcall decision (note 41e) */
+.basing-pass-marker {
+    font-family: var(--font-timer), "Noto Sans SC";
+    font-style: italic;
+    font-weight: bold;
+    font-size: calc(var(--card-width) / 3);
+    color: #1a3d7a;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: var(--radius);
+    padding: 0.4vh 1.4vh;
+    text-align: center;
+    user-select: none;
+    pointer-events: none;
+}
+
 /* No-declaration button — merged column inside declare-matrix */
 .btn-no-declare {
     min-width: 5.5vh;
@@ -683,6 +699,95 @@
     color: #bbb;
     background: white;
 }
+
+/* Declaration-history hover box (note 41f) */
+#div-denomination-area {
+    position: relative;
+    overflow: hidden;
+    height: 15vh;
+    margin: 0 1vh 0 0;
+    align-self: flex-start;
+}
+
+#div-denomination-area:hover {
+    height: auto;
+}
+
+#div-denomination-area[data-decl-history-empty="1"]:hover {
+    height: 15vh;
+}
+
+.decl-history-hover-box {
+    position: static;
+    width: 100%;
+    box-sizing: border-box;
+    display: none;
+    border-top: 1px solid rgba(0, 0, 0, 0.35);
+    margin-top: 0.2vh;
+    padding-top: 0.2vh;
+}
+
+#div-seats {
+    margin-top: 0;
+    margin-bottom: 0;
+    align-self: flex-start;
+}
+
+#div-denomination-area:hover .decl-history-hover-box {
+    display: block;
+}
+
+#div-denomination-area[data-decl-history-empty="1"]:hover .decl-history-hover-box {
+    display: none;
+}
+
+.decl-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-family: "Roboto", "Noto Sans SC";
+    font-size: 1.9vh;
+}
+
+.decl-history-table td {
+    border: none;
+    padding: 0.15vh 0.25vh;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Keep internal separators only (no outermost border rectangle) */
+.decl-history-table td + td {
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.decl-history-table tr + tr td {
+    border-top: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.decl-history-col-who {
+    width: 32%;
+}
+
+.decl-history-col-what {
+    width: 36%;
+}
+
+.decl-history-col-whenhow {
+    width: 32%;
+}
+
+.decl-history-suit-mark {
+    font-family: 'suit';
+}
+
+/* Row-local strain color mapping (same token family as denomination display) */
+.decl-history-table tr[data-strain="s"] { color: var(--s-color); }
+.decl-history-table tr[data-strain="h"] { color: var(--h-color); }
+.decl-history-table tr[data-strain="d"] { color: var(--d-color); }
+.decl-history-table tr[data-strain="c"] { color: var(--c-color); }
+.decl-history-table tr[data-strain="w"] { color: var(--w-color); }
+.decl-history-table tr[data-strain="v"] { color: var(--v-color); }
 
 @keyframes flashError { 0%, 100% { opacity: 1; color: #ff4444; } 50% { opacity: 0.5; color: #ffffff; } }
 
@@ -929,6 +1034,65 @@
     max-width: 52vh;
     align-self: flex-end;
     margin-top: 0;
+}
+
+/* ── Timing tab row-based layout (note 38a) ── */
+.timing-tab-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2vh;
+}
+
+.timing-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1.4vh;
+    flex-wrap: wrap;
+}
+
+.timing-row .settings-field-hint {
+    flex: 1;
+    min-width: 14vh;
+    max-width: 52vh;
+    align-self: flex-end;
+    margin-top: 0;
+}
+
+.timing-row-numbers {
+    width: 100%;
+}
+
+.timing-row-numbers .settings-field {
+    min-width: 16vh;
+}
+
+/* ── General tab row-based layout (note 39a) ── */
+.general-tab-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2vh;
+}
+
+.general-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1.4vh;
+    flex-wrap: wrap;
+}
+
+.general-row .settings-field-hint {
+    flex: 1;
+    min-width: 14vh;
+    max-width: 52vh;
+    align-self: flex-end;
+    margin-top: 0;
+}
+
+.settings-radio-option.is-option-disabled {
+    opacity: 0.6;
+    cursor: default;
 }
 
 .levels-row-matrix {
