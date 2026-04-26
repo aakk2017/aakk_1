@@ -96,6 +96,14 @@
             <menu class="menubar">
                 <li><button class="footer-link-btn" id="btn-goto-recap" data-i18n="buttons.gotoRecap">&#8617; 牌谱</button></li>
                 <li><button class="footer-link-btn" id="btn-game-settings" data-i18n="buttons.gameSettings">设置</button></li>
+                <li class="footer-switch-item">
+                    <label class="footer-switch" for="switch-bot-passive-declaration">
+                        <input type="checkbox" id="switch-bot-passive-declaration">
+                        <span class="footer-switch-track" aria-hidden="true"></span>
+                        <span class="footer-switch-label" data-i18n="buttons.botDeclarationMode">Bot declaration</span>
+                        <span class="footer-switch-state" id="span-bot-passive-declaration-state">normal</span>
+                    </label>
+                </li>
                 <li><button class="footer-link-btn" id="btn-toggle-test" data-i18n="buttons.testModeOff" onclick="toggleTestMode()">测试模式: 关</button></li>
             </menu>
             <div id="statusbar">

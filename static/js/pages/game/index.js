@@ -29,6 +29,7 @@ const gLabelEast   = document.getElementById('label-east');
 const gLabelSouth  = document.getElementById('label-south');
 const gBtnNewGame  = document.getElementById('btn-new-game');
 const gBtnPlay     = document.getElementById('btn-play');
+const gGameActions = document.getElementById('game-actions');
 // gBtnDeclare removed
 const gDeclareMatrix = document.getElementById('declare-matrix');
 const gDeclBtnsSingle = [0, 1, 2, 3, 4].map(i => document.getElementById('declare-btn-s' + i));
@@ -57,8 +58,11 @@ const gBasePreview = document.getElementById('base-preview');
 const gCountingDialog  = document.getElementById('counting-dialog');
 const gCountingOverlay = document.getElementById('counting-overlay');
 const gDeskCenterLeft  = document.getElementById('desk-center-left');
+const gDeskCenterRight = document.getElementById('desk-center-right');
 const gBtnNoDeclare    = document.getElementById('btn-no-declare');
 const gBtnGameSettings = document.getElementById('btn-game-settings');
+const gBotPassiveDeclarationSwitch = document.getElementById('switch-bot-passive-declaration');
+const gBotPassiveDeclarationState = document.getElementById('span-bot-passive-declaration-state');
 const gSettingsOverlay = document.getElementById('settings-overlay');
 const gSettingsDialog  = document.getElementById('settings-dialog');
 const gSettingsTitle   = document.getElementById('settings-title');
@@ -85,6 +89,31 @@ function toggleTestMode() {
     const btn = document.getElementById('btn-toggle-test');
     if (btn) btn.textContent = t(TEST_MODE ? 'buttons.testModeOn' : 'buttons.testModeOff');
 }
+
+let gBotDeclarationMode = 'normal';
+
+function isPassiveDeclarationBotMode() {
+    return gBotDeclarationMode === 'passive';
+}
+
+function syncBotDeclarationModeSwitchUi() {
+    if (gBotPassiveDeclarationSwitch) {
+        gBotPassiveDeclarationSwitch.checked = isPassiveDeclarationBotMode();
+    }
+    if (gBotPassiveDeclarationState) {
+        gBotPassiveDeclarationState.textContent = t(isPassiveDeclarationBotMode()
+            ? 'buttons.botDeclarationModePassive'
+            : 'buttons.botDeclarationModeNormal');
+    }
+}
+
+function setBotDeclarationMode(mode) {
+    gBotDeclarationMode = (mode === 'passive') ? 'passive' : 'normal';
+    syncBotDeclarationModeSwitchUi();
+}
+
+window.isPassiveDeclarationBotMode = isPassiveDeclarationBotMode;
+window.getBotDeclarationMode = function() { return gBotDeclarationMode; };
 
 // Track which human-controlled player's hand is currently displayed
 let activeHumanPlayer = HUMAN_PLAYER;
@@ -113,6 +142,8 @@ const BOT_DELAY = 600;
 
 // Dealing phase state
 let currentDeclaration = null;   // declaration made by human during dealing
+let gAutoStrain3rdTriggerCard = null; // 3rd undealt card used for auto-strain (note 44a)
+let gAutoStrain3rdTriggered = false;
 let dealingTimer     = null;   // setInterval handle for deal animation
 
 // Frame number within current game (starts at 1, increments per frame)
@@ -126,6 +157,11 @@ let wonCounterCards = [];
 
 // Persistent name bar DOM refs [south, east, north, west]
 let gDeskNamebars = [null, null, null, null];
+let gCrossingSeatStatuses = [null, null, null, null];
+let gCrossingState = null;
+let gCrossingClaimControlsHost = null;
+let gBtnCrossClaim = null;
+let gBtnCrossDecline = null;
 
 // Sequential overbase decision state (note 41)
 let gOverbaseDecision = null;
@@ -324,6 +360,7 @@ function initPersistentNamebars() {
 
         container.appendChild(nb);
         gDeskNamebars[p] = nb;
+        gCrossingSeatStatuses[p] = null;
     }
 }
 
@@ -386,6 +423,76 @@ function resetAllNamebars() {
                 preview.classList.remove('has-exposed');
             }
         }
+    }
+}
+
+function ensureCrossingClaimControlsHost() {
+    if (gCrossingClaimControlsHost) return gCrossingClaimControlsHost;
+    if (!gDeskCenterRight) return null;
+    let host = document.createElement('div');
+    host.className = 'crossing-claim-controls-desk';
+    host.setAttribute('data-visible', 'false');
+    gDeskCenterRight.appendChild(host);
+    gCrossingClaimControlsHost = host;
+    return gCrossingClaimControlsHost;
+}
+
+function setCrossingClaimControlsVisible(visible) {
+    let host = ensureCrossingClaimControlsHost();
+    if (!host) return;
+    host.setAttribute('data-visible', visible ? 'true' : 'false');
+}
+
+function showDeskEventMarker(player, text, scopeKey) {
+    let slot = gDeskSlots[player];
+    if (!slot) return;
+    slot.querySelectorAll('.basing-pass-marker[data-marker-scope="' + scopeKey + '"]').forEach(el => el.remove());
+    let marker = document.createElement('div');
+    marker.className = 'basing-pass-marker';
+    marker.setAttribute('data-marker-scope', scopeKey);
+    marker.textContent = text;
+    slot.appendChild(marker);
+}
+
+function clearDeskEventMarkersByScope(scopeKey) {
+    for (let p = 0; p < NUM_PLAYERS; p++) {
+        let slot = gDeskSlots[p];
+        if (!slot) continue;
+        slot.querySelectorAll('.basing-pass-marker[data-marker-scope="' + scopeKey + '"]').forEach(el => el.remove());
+    }
+}
+
+function ensureLocalCrossingActionButtons() {
+    let host = ensureCrossingClaimControlsHost();
+    if (!host) return;
+    if (!gBtnCrossClaim) {
+        gBtnCrossClaim = document.createElement('button');
+        gBtnCrossClaim.type = 'button';
+        gBtnCrossClaim.className = 'button game-btn crossing-action-btn';
+        gBtnCrossClaim.style.display = 'none';
+        host.appendChild(gBtnCrossClaim);
+    }
+    if (!gBtnCrossDecline) {
+        gBtnCrossDecline = document.createElement('button');
+        gBtnCrossDecline.type = 'button';
+        gBtnCrossDecline.className = 'button game-btn crossing-action-btn';
+        gBtnCrossDecline.style.display = 'none';
+        host.appendChild(gBtnCrossDecline);
+    }
+}
+
+function hideLocalCrossingActionButtons() {
+    ensureLocalCrossingActionButtons();
+    setCrossingClaimControlsVisible(false);
+    if (gBtnCrossClaim) {
+        gBtnCrossClaim.style.display = 'none';
+        gBtnCrossClaim.disabled = true;
+        gBtnCrossClaim.onclick = null;
+    }
+    if (gBtnCrossDecline) {
+        gBtnCrossDecline.style.display = 'none';
+        gBtnCrossDecline.disabled = true;
+        gBtnCrossDecline.onclick = null;
     }
 }
 
@@ -477,15 +584,17 @@ function toggleCardSelection(cardId, el) {
         }
         return;
     }
-    if (game.phase === GamePhase.PLAYING && !isHumanControlled(engineGetCurrentPlayer())) return;
+    let allowCrossingSelection = isLocalCrossingSelectionMode();
+    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isHumanControlled(engineGetCurrentPlayer())) return;
     if (game.phase !== GamePhase.PLAYING && game.phase !== GamePhase.BASING) return;
+    if (gCrossingState && gCrossingState.trickPlayBlocked && !allowCrossingSelection) return;
 
     if (selectedCardIds.has(cardId)) {
         selectedCardIds.delete(cardId);
         el.setAttribute('card-selected', 'false');
     } else {
         // Auto-deselect rule: if following a single-card lead and one card is already selected
-        if (game.phase === GamePhase.PLAYING && game.currentTurnIndex > 0 && game.leadInfo && game.leadInfo.volume === 1) {
+        if (!allowCrossingSelection && game.phase === GamePhase.PLAYING && game.currentTurnIndex > 0 && game.leadInfo && game.leadInfo.volume === 1) {
             if (selectedCardIds.size === 1) {
                 clearSelection();
             }
@@ -512,6 +621,22 @@ function updatePlayButton() {
     if (gFCInteraction) {
         gBtnPlay.disabled = false;
         gBtnPlay.textContent = t('buttons.confirmMarks');
+        return;
+    }
+    let crossingMode = getLocalCrossingActionMode();
+    if (crossingMode === 'cross') {
+        gBtnPlay.disabled = !isValidCrossingSelection(HUMAN_PLAYER, getSelectedCards(HUMAN_PLAYER), true);
+        gBtnPlay.textContent = t('buttons.toCross');
+        return;
+    }
+    if (crossingMode === 'crossback') {
+        gBtnPlay.disabled = !isValidCrossingSelection(HUMAN_PLAYER, getSelectedCards(HUMAN_PLAYER), false);
+        gBtnPlay.textContent = t('buttons.toCrossBack');
+        return;
+    }
+    if (gCrossingState && gCrossingState.trickPlayBlocked) {
+        gBtnPlay.disabled = true;
+        gBtnPlay.textContent = t('buttons.play');
         return;
     }
     if (game.phase === GamePhase.BASING) {
@@ -573,14 +698,8 @@ function clearDeskForOvercallDecisionStep() {
  * Show a PASS marker in a player's desk slot after a no-overcall decision (note 41ea).
  */
 function showBasingPassMarker(player) {
-    let slot = gDeskSlots[player];
-    // Remove any existing marker for this player
-    slot.querySelectorAll('.basing-pass-marker').forEach(el => el.remove());
-    let marker = document.createElement('div');
-    marker.className = 'basing-pass-marker';
     // PASS is authoritative and non-localized for this live-flow marker.
-    marker.textContent = 'PASS';
-    slot.appendChild(marker);
+    showDeskEventMarker(player, 'PASS', 'basing-overcall');
 }
 
 function renderDeskCards(player, cards) {
@@ -1081,6 +1200,8 @@ function startNewGame() {
     // Clean up any in-progress dealing timer
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
     currentDeclaration = null;
+    gAutoStrain3rdTriggerCard = null;
+    gAutoStrain3rdTriggered = false;
     resetDeclarationHistoryRows();
 
     // Clear all active timers (note 24)
@@ -1088,6 +1209,9 @@ function startNewGame() {
 
     // §3: Clear forehand-control and failed-multiplay aftermath UI state
     gFCInteraction = null;
+    gCrossingState = null;
+    hideLocalCrossingActionButtons();
+    clearCrossingSeatStatuses();
 
     clearLog();
     clearSelection();
@@ -1281,9 +1405,10 @@ function buildDeclarationHistoryCellValues(row) {
     if (row.type === 'auto-strain') {
         return {
             who: '',
-            whatHtml: row.what || getHistoryAutoStrainText(),
+            whatHtml: row.what || t('log.nobodyDeclared'),
             whenHow: row.whenHow || '',
             strainKey: '',
+            autoNoDeclaration: true,
         };
     }
     return {
@@ -1291,6 +1416,7 @@ function buildDeclarationHistoryCellValues(row) {
         whatHtml: getDeclarationWhatHtml(row.suit, row.count),
         whenHow: row.phase === 'dealing' ? String(row.whenHow || '') : getBasingWhenHowLabel(row.basingMode || 'ob'),
         strainKey: row.suit === 4 ? (row.count >= 4 ? 'w' : 'v') : numberToSuitName[row.suit],
+        autoNoDeclaration: false,
     };
 }
 
@@ -1303,23 +1429,32 @@ function renderDeclarationHistoryRows() {
         let row = gDeclarationHistoryRows[i];
         let values = buildDeclarationHistoryCellValues(row);
         let tr = document.createElement('tr');
+        if (values.autoNoDeclaration) tr.className = 'decl-history-row-auto';
         if (values.strainKey) tr.setAttribute('data-strain', values.strainKey);
 
-        let tdWho = document.createElement('td');
-        tdWho.className = 'decl-history-col-who';
-        tdWho.textContent = values.who;
+        if (values.autoNoDeclaration) {
+            let tdAuto = document.createElement('td');
+            tdAuto.className = 'decl-history-col-auto';
+            tdAuto.colSpan = 3;
+            tdAuto.innerHTML = values.whatHtml;
+            tr.appendChild(tdAuto);
+        } else {
+            let tdWho = document.createElement('td');
+            tdWho.className = 'decl-history-col-who';
+            tdWho.textContent = values.who;
 
-        let tdWhat = document.createElement('td');
-        tdWhat.className = 'decl-history-col-what';
-        tdWhat.innerHTML = values.whatHtml;
+            let tdWhat = document.createElement('td');
+            tdWhat.className = 'decl-history-col-what';
+            tdWhat.innerHTML = values.whatHtml;
 
-        let tdWhenHow = document.createElement('td');
-        tdWhenHow.className = 'decl-history-col-whenhow';
-        tdWhenHow.textContent = values.whenHow;
+            let tdWhenHow = document.createElement('td');
+            tdWhenHow.className = 'decl-history-col-whenhow';
+            tdWhenHow.textContent = values.whenHow;
 
-        tr.appendChild(tdWho);
-        tr.appendChild(tdWhat);
-        tr.appendChild(tdWhenHow);
+            tr.appendChild(tdWho);
+            tr.appendChild(tdWhat);
+            tr.appendChild(tdWhenHow);
+        }
         gDeclHistoryTbody.appendChild(tr);
     }
 
@@ -1366,9 +1501,21 @@ function recordAutoStrainHistoryRow() {
         type: 'auto-strain',
         phase: 'auto-strain',
         who: '',
-        what: getHistoryAutoStrainText(),
+        what: t('log.nobodyDeclared'),
         whenHow: '',
     });
+}
+
+function redealQiangzhuangNoDeclarationFrame() {
+    // In qiangzhuang, no declaration means pivot is unresolved; redeal immediately.
+    removeNoDeclareButton();
+    clearDesk();
+    gDeclareSp.textContent = '';
+    gDeclMethodSp.textContent = '';
+    gAutoStrain3rdTriggerCard = null;
+    gAutoStrain3rdTriggered = false;
+    resetDeclarationHistoryRows();
+    startNewGame();
 }
 
 function renderResolvedStrainDisplay() {
@@ -1656,10 +1803,38 @@ function resolveDeclaredPhase() {
             appendLog(t('log.declare', { playerName: PLAYER_NAMES[bestDeclaration.player], strain: bestDeclaration.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
             showDeclaredCardsOnDesk(bestDeclaration.player, bestDeclaration.suit, bestDeclaration.count);
         }
+    } else if (game && game.isQiangzhuang) {
+        redealQiangzhuangNoDeclarationFrame();
+        return;
+    } else if (game.gameConfig && game.gameConfig.autoStrain === true && game.base && game.base.length >= 3) {
+        let triggerCard = game.base[2];
+        let resolvedStrain;
+        if (triggerCard.isJoker()) {
+            resolvedStrain = 4;
+        } else {
+            resolvedStrain = triggerCard.suit;
+        }
+        engineSetStrain(resolvedStrain);
+        if (resolvedStrain === 4) {
+            gDenomArea.setAttribute('strain', 'v');
+            gStrainDiv.innerHTML = ntsHtml;
+        } else {
+            let suitName = numberToSuitName[resolvedStrain];
+            gDenomArea.setAttribute('strain', suitName);
+            gStrainDiv.innerHTML = getDenominationHtml(resolvedStrain, 1);
+        }
+        gDeclareSp.textContent = '';
+        gDeclMethodSp.textContent = t('labels.thirdBase');
+        appendLog(t('log.nobodyDeclared'));
+        recordAutoStrainHistoryRow();
+        gAutoStrain3rdTriggerCard = triggerCard;
+        gAutoStrain3rdTriggered = true;
     } else {
         engineSetStrain(4);
         gDenomArea.setAttribute('strain', 'v');
         gStrainDiv.innerHTML = ntsHtml;
+        gDeclareSp.textContent = '';
+        gDeclMethodSp.textContent = t('labels.autoNts');
         appendLog(t('log.noDeclaration'));
         recordAutoStrainHistoryRow();
     }
@@ -1674,6 +1849,11 @@ function resolveDeclaredPhase() {
     updateScoreDisplay();
 
     clearDesk(); // Clear exposed declaration cards
+
+    // Show 3rd-base trigger card in pivot's desk area (note 44a)
+    if (gAutoStrain3rdTriggerCard) {
+        renderDeskCards(game.pivot, [gAutoStrain3rdTriggerCard]);
+    }
 
     // Move to basing phase
     enginePickUpBase();
@@ -1717,6 +1897,7 @@ function runBasingPhase() {
                 appendLog(t('errors.baseFailed'));
                 return;
             }
+            gAutoStrain3rdTriggerCard = null;
             clearDesk();
             renderAllHands();
             appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[baser] }));
@@ -1734,7 +1915,10 @@ function runBasingPhase() {
  * Otherwise, proceed directly to playing phase.
  */
 function afterBasingComplete() {
-    if (game.gameConfig && game.gameConfig.allowOverbase) {
+    if (gAutoStrain3rdTriggered) {
+        gAutoStrain3rdTriggered = false;
+        startPlayingPhase();
+    } else if (game.gameConfig && game.gameConfig.allowOverbase) {
         runSequentialOverbaseFlow();
     } else {
         startPlayingPhase();
@@ -2100,6 +2284,509 @@ function runNextOvercallDecisionStep() {
 }
 
 // ---------------------------------------------------------------------------
+// Crossing claim window and move progression (note 42b)
+// ---------------------------------------------------------------------------
+
+function getCrossingTeamKeyForSeat(player) {
+    if (game && Array.isArray(game.defendingTeam) && game.defendingTeam.includes(player)) return 'defending';
+    return 'attacking';
+}
+
+function getOppositeSeat(player) {
+    return (player + 2) % NUM_PLAYERS;
+}
+
+function buildCrossingTeamRuntimeState() {
+    return {
+        claimed: false,
+        claimantSeat: null,
+        partnerSeat: null,
+        phase: 'no-claim',
+        botPending: false,
+    };
+}
+
+function canOpenCrossingClaimWindow() {
+    return !!(game && game.gameConfig && game.gameConfig.allowCrossings && game.strain !== 4);
+}
+
+function createCrossingEligibilitySnapshot() {
+    let snapshot = {};
+    for (let player = 0; player < NUM_PLAYERS; player++) {
+        let trumpCount = engineCountTrumpIfStrain(game.hands[player], game.strain, game.level);
+        snapshot[player] = trumpCount <= 5;
+    }
+    return snapshot;
+}
+
+function isCardTrumpForCurrentFrame(card) {
+    if (!card || !game) return false;
+    if (game.strain === 4) return true;
+    return card.suit === 4 || card.rank === game.level || card.suit === game.strain;
+}
+
+function getLocalCrossingActionMode() {
+    return (gCrossingState && gCrossingState.localAction) ? gCrossingState.localAction.mode : null;
+}
+
+function isLocalCrossingSelectionMode() {
+    if (!gCrossingState || !gCrossingState.localAction || !gCrossingState.trickPlayBlocked) return false;
+    let mode = gCrossingState.localAction.mode;
+    return (mode === 'cross' || mode === 'crossback') && gCrossingState.localAction.seat === HUMAN_PLAYER;
+}
+
+function crossingHasAnyActiveTeamProcess() {
+    if (!gCrossingState || !gCrossingState.teamState) return false;
+    return ['defending', 'attacking'].some(teamKey => {
+        let phase = gCrossingState.teamState[teamKey].phase;
+        return phase !== 'no-claim' && phase !== 'done';
+    });
+}
+
+function refreshCrossingTrickPlayBlocked() {
+    if (!gCrossingState) return false;
+    gCrossingState.trickPlayBlocked = !!(gCrossingState.claimWindowActive || crossingHasAnyActiveTeamProcess());
+    return gCrossingState.trickPlayBlocked;
+}
+
+function clearCrossingSeatStatuses() {
+    for (let player = 0; player < NUM_PLAYERS; player++) {
+        clearDeskEventMarkersByScope('crossing-claim-seat-' + player);
+    }
+    if (gCrossingState) {
+        gCrossingState.resolvedMarkersActive = false;
+        gCrossingState.resolvedMarkersClearedAtFirstLead = false;
+    }
+}
+
+function renderCrossingSeatStatuses() {
+    if (!gCrossingState || !gCrossingState.claimWindowActive) return;
+    for (let player = 0; player < NUM_PLAYERS; player++) {
+        let resolved = gCrossingState.resolvedBySeat[player];
+        if (!resolved) {
+            clearDeskEventMarkersByScope('crossing-claim-seat-' + player);
+            continue;
+        }
+        let isCross = (resolved.action === 'claim' || resolved.action === 'claim-ignored');
+        let markerText = isCross ? t('buttons.toCross') : 'PASS';
+        showDeskEventMarker(player, markerText, 'crossing-claim-seat-' + player);
+        gCrossingState.resolvedMarkersActive = true;
+        gCrossingState.resolvedMarkersClearedAtFirstLead = false;
+    }
+}
+
+function clearCrossingClaimControls() {
+    hideLocalCrossingActionButtons();
+}
+
+function refreshCrossingClaimControls() {
+    ensureLocalCrossingActionButtons();
+    renderCrossingSeatStatuses();
+
+    if (!gCrossingState || !gCrossingState.claimWindowActive) {
+        hideLocalCrossingActionButtons();
+        return;
+    }
+
+    let localResolved = !!gCrossingState.resolvedBySeat[HUMAN_PLAYER];
+    let localEligible = !!gCrossingState.eligibilityBySeat[HUMAN_PLAYER];
+    setCrossingClaimControlsVisible(true);
+
+    gBtnCrossClaim.style.display = '';
+    gBtnCrossClaim.textContent = t('buttons.toCross');
+    gBtnCrossClaim.disabled = localResolved || !localEligible;
+    gBtnCrossClaim.onclick = gBtnCrossClaim.disabled ? null : (() => {
+        resolveCrossingClaimWindowSeat(HUMAN_PLAYER, 'claim', 'click');
+    });
+
+    gBtnCrossDecline.style.display = '';
+    gBtnCrossDecline.textContent = t('buttons.noCrossing');
+    gBtnCrossDecline.disabled = localResolved;
+    gBtnCrossDecline.onclick = gBtnCrossDecline.disabled ? null : (() => {
+        resolveCrossingClaimWindowSeat(HUMAN_PLAYER, 'no-crossing', 'click');
+    });
+}
+
+function crossingAllSeatsResolved() {
+    if (!gCrossingState) return false;
+    for (let player = 0; player < NUM_PLAYERS; player++) {
+        if (!gCrossingState.resolvedBySeat[player]) return false;
+    }
+    return true;
+}
+
+function crossingAllTeamProcessesDone() {
+    if (!gCrossingState || !gCrossingState.teamState) return true;
+    return ['defending', 'attacking'].every(teamKey => {
+        let phase = gCrossingState.teamState[teamKey].phase;
+        return phase === 'no-claim' || phase === 'done';
+    });
+}
+
+function recordCrossingSeatResolution(player, action, reason) {
+    if (!gCrossingState || gCrossingState.resolvedBySeat[player]) return false;
+
+    let resolvedAction = action;
+    if (action === 'claim') {
+        let teamKey = getCrossingTeamKeyForSeat(player);
+        let teamState = gCrossingState.teamState[teamKey];
+        if (!gCrossingState.eligibilityBySeat[player]) return false;
+        if (!teamState.claimed) {
+            teamState.claimed = true;
+            teamState.claimantSeat = player;
+            teamState.partnerSeat = getOppositeSeat(player);
+            teamState.phase = 'claim-accepted';
+            appendLog(t('log.crossingClaimAccepted', { playerName: PLAYER_NAMES[player] }));
+        } else {
+            resolvedAction = 'claim-ignored';
+            appendLog(t('log.crossingClaimIgnored', { playerName: PLAYER_NAMES[player] }));
+        }
+    } else if (reason === 'timeout') {
+        appendLog(t('log.crossingTimedOutNoClaim', { playerName: PLAYER_NAMES[player] }));
+    }
+
+    gCrossingState.resolvedBySeat[player] = { action: resolvedAction, reason, at: Date.now() };
+    return true;
+}
+
+function resolveCrossingClaimWindowSeat(player, action, reason) {
+    if (!gCrossingState || !gCrossingState.claimWindowActive) return false;
+    let didResolve = recordCrossingSeatResolution(player, action, reason);
+    if (!didResolve) return false;
+    refreshCrossingClaimControls();
+    if (crossingAllSeatsResolved()) {
+        breakCallingWindowTimer();
+    }
+    return true;
+}
+
+function sortCardsHighToLow(cards) {
+    let out = cards.slice();
+    out.sort((a, b) => {
+        if (a.order !== b.order) return b.order - a.order;
+        if (a.rank !== b.rank) return b.rank - a.rank;
+        return b.suit - a.suit;
+    });
+    return out;
+}
+
+function pickRandomArrayItem(items) {
+    if (!items || items.length === 0) return null;
+    return items[Math.floor(Math.random() * items.length)];
+}
+
+function pickByShortestPlainDivision(cards, count) {
+    let buckets = {};
+    for (let card of cards) {
+        if (isCardTrumpForCurrentFrame(card)) continue;
+        let key = String(card.suit);
+        if (!buckets[key]) buckets[key] = [];
+        buckets[key].push(card);
+    }
+    let groups = Object.keys(buckets).map(key => ({ key, cards: sortCardsHighToLow(buckets[key]) }));
+    let chosen = [];
+    while (chosen.length < count) {
+        groups = groups.filter(group => group.cards.length > 0);
+        if (groups.length === 0) break;
+        let minLen = Math.min(...groups.map(group => group.cards.length));
+        let shortest = groups.filter(group => group.cards.length === minLen);
+        let g = pickRandomArrayItem(shortest);
+        if (!g) break;
+        chosen.push(g.cards.shift());
+    }
+    return chosen;
+}
+
+function pickBotCrossCards(player) {
+    let hand = game.hands[player] || [];
+    let selected = sortCardsHighToLow(hand.filter(card => isCardTrumpForCurrentFrame(card)));
+    if (selected.length > 5) return null;
+    if (selected.length < 5) {
+        selected = selected.concat(pickByShortestPlainDivision(hand, 5 - selected.length));
+    }
+    if (selected.length < 5) {
+        let ids = new Set(selected.map(c => c.cardId));
+        let fallback = sortCardsHighToLow(hand.filter(c => !ids.has(c.cardId)));
+        selected = selected.concat(fallback.slice(0, 5 - selected.length));
+    }
+    return selected.slice(0, 5);
+}
+
+function pickBotCrossbackCards(player) {
+    let hand = game.hands[player] || [];
+    let selected = pickByShortestPlainDivision(hand, 5);
+    if (selected.length < 5) {
+        let ids = new Set(selected.map(c => c.cardId));
+        let fallback = sortCardsHighToLow(hand.filter(c => !ids.has(c.cardId)));
+        selected = selected.concat(fallback.slice(0, 5 - selected.length));
+    }
+    return selected.slice(0, 5);
+}
+
+function isValidCrossingSelection(player, cards, requireAllTrumps) {
+    if (!Array.isArray(cards) || cards.length !== 5) return false;
+    let hand = game.hands[player] || [];
+    let handIds = new Set(hand.map(c => c.cardId));
+    let selectedIds = new Set(cards.map(c => c.cardId));
+    if (selectedIds.size !== cards.length) return false;
+    for (let card of cards) {
+        if (!handIds.has(card.cardId)) return false;
+    }
+    if (!requireAllTrumps) return true;
+    let trumps = hand.filter(c => isCardTrumpForCurrentFrame(c));
+    for (let trump of trumps) {
+        if (!selectedIds.has(trump.cardId)) return false;
+    }
+    return true;
+}
+
+function transferCardsBetweenSeats(fromSeat, toSeat, cards) {
+    let ids = new Set(cards.map(card => card.cardId));
+    game.hands[fromSeat] = (game.hands[fromSeat] || []).filter(card => !ids.has(card.cardId));
+    game.hands[toSeat] = (game.hands[toSeat] || []).concat(cards);
+    engineSortHand(game.hands[fromSeat]);
+    engineSortHand(game.hands[toSeat]);
+}
+
+function performCrossMove(teamKey, cards) {
+    if (!gCrossingState || !gCrossingState.teamState || !gCrossingState.teamState[teamKey]) return false;
+    let ts = gCrossingState.teamState[teamKey];
+    if (ts.phase !== 'waiting-cross') return false;
+    if (!isValidCrossingSelection(ts.claimantSeat, cards, true)) return false;
+
+    transferCardsBetweenSeats(ts.claimantSeat, ts.partnerSeat, cards);
+    ts.phase = 'waiting-crossback';
+    ts.botPending = false;
+    appendLog(t('log.crossingMoveDone', { playerName: PLAYER_NAMES[ts.claimantSeat], partnerName: PLAYER_NAMES[ts.partnerSeat] }));
+    renderAllHands();
+    return true;
+}
+
+function performCrossbackMove(teamKey, cards) {
+    if (!gCrossingState || !gCrossingState.teamState || !gCrossingState.teamState[teamKey]) return false;
+    let ts = gCrossingState.teamState[teamKey];
+    if (ts.phase !== 'waiting-crossback') return false;
+    if (!isValidCrossingSelection(ts.partnerSeat, cards, false)) return false;
+
+    transferCardsBetweenSeats(ts.partnerSeat, ts.claimantSeat, cards);
+    ts.phase = 'done';
+    ts.botPending = false;
+    appendLog(t('log.crossingCrossbackDone', { playerName: PLAYER_NAMES[ts.partnerSeat], partnerName: PLAYER_NAMES[ts.claimantSeat] }));
+    renderAllHands();
+    return true;
+}
+
+function refreshCrossingLocalActionState() {
+    if (!gCrossingState) return;
+    let nextAction = null;
+    if (!gCrossingState.claimWindowActive) {
+        for (let teamKey of ['defending', 'attacking']) {
+            let ts = gCrossingState.teamState[teamKey];
+            if (!ts) continue;
+            if (ts.phase === 'waiting-cross' && ts.claimantSeat === HUMAN_PLAYER) {
+                nextAction = { mode: 'cross', teamKey, seat: HUMAN_PLAYER };
+                break;
+            }
+            if (ts.phase === 'waiting-crossback' && ts.partnerSeat === HUMAN_PLAYER) {
+                nextAction = { mode: 'crossback', teamKey, seat: HUMAN_PLAYER };
+                break;
+            }
+        }
+    }
+
+    let prev = gCrossingState.localAction;
+    gCrossingState.localAction = nextAction;
+    if (!nextAction) {
+        hideLocalCrossingActionButtons();
+        updatePlayButton();
+        return;
+    }
+    let enteredNewAction = (!prev || prev.mode !== nextAction.mode || prev.teamKey !== nextAction.teamKey || prev.seat !== nextAction.seat);
+    if (enteredNewAction) {
+        clearSelection();
+        if (nextAction.mode === 'cross' && nextAction.seat === HUMAN_PLAYER) {
+            let hand = game.hands[HUMAN_PLAYER] || [];
+            for (let card of hand) {
+                if (isCardTrumpForCurrentFrame(card)) selectedCardIds.add(card.cardId);
+            }
+        }
+    }
+    activeHumanPlayer = HUMAN_PLAYER;
+    renderHand(HUMAN_PLAYER);
+    hideLocalCrossingActionButtons();
+    updatePlayButton();
+}
+
+function maybeFinalizeCrossingProcesses() {
+    if (!gCrossingState || gCrossingState.claimWindowActive) return false;
+    if (!crossingAllTeamProcessesDone()) return false;
+
+    gCrossingState.localAction = null;
+    clearSelection();
+    hideLocalCrossingActionButtons();
+    game.currentLeader = game.pivot;
+    game.currentTurnIndex = 0;
+    appendLog(t('log.crossingAllDone'));
+    refreshCrossingTrickPlayBlocked();
+    promptCurrentPlayer();
+    return true;
+}
+
+function scheduleBotCrossingAction(teamKey, mode) {
+    if (!gCrossingState || !gCrossingState.teamState || !gCrossingState.teamState[teamKey]) return;
+    let ts = gCrossingState.teamState[teamKey];
+    if (ts.botPending) return;
+    ts.botPending = true;
+
+    setTimeout(() => {
+        if (!gCrossingState || !gCrossingState.teamState || !gCrossingState.teamState[teamKey]) return;
+        let state = gCrossingState.teamState[teamKey];
+        state.botPending = false;
+
+        if (mode === 'cross' && state.phase === 'waiting-cross') {
+            let cards = pickBotCrossCards(state.claimantSeat) || (game.hands[state.claimantSeat] || []).slice(0, 5);
+            performCrossMove(teamKey, cards);
+        } else if (mode === 'crossback' && state.phase === 'waiting-crossback') {
+            let cards = pickBotCrossbackCards(state.partnerSeat) || (game.hands[state.partnerSeat] || []).slice(0, 5);
+            performCrossbackMove(teamKey, cards);
+        }
+
+        driveCrossingProcesses();
+    }, BOT_DELAY);
+}
+
+function driveCrossingProcesses() {
+    if (!gCrossingState || gCrossingState.claimWindowActive) return;
+    refreshCrossingTrickPlayBlocked();
+    refreshCrossingLocalActionState();
+
+    if (!crossingHasAnyActiveTeamProcess()) {
+        maybeFinalizeCrossingProcesses();
+        return;
+    }
+
+    for (let teamKey of ['defending', 'attacking']) {
+        let ts = gCrossingState.teamState[teamKey];
+        if (!ts) continue;
+        if (ts.phase === 'waiting-cross' && ts.claimantSeat !== HUMAN_PLAYER) {
+            scheduleBotCrossingAction(teamKey, 'cross');
+        } else if (ts.phase === 'waiting-crossback' && ts.partnerSeat !== HUMAN_PLAYER) {
+            scheduleBotCrossingAction(teamKey, 'crossback');
+        }
+    }
+
+    highlightActivePlayer(-1);
+    updatePhaseDisplay(t('phase.crossingPending'));
+    updateStatus(t('status.crossingPending'));
+    updatePlayButton();
+}
+
+function trySubmitLocalCrossingSelection() {
+    if (!gCrossingState || !gCrossingState.localAction) return false;
+    let action = gCrossingState.localAction;
+    if (action.seat !== HUMAN_PLAYER) return false;
+    if (action.mode !== 'cross' && action.mode !== 'crossback') return false;
+
+    let cards = getSelectedCards(HUMAN_PLAYER);
+    let requireAllTrumps = (action.mode === 'cross');
+    if (!isValidCrossingSelection(HUMAN_PLAYER, cards, requireAllTrumps)) {
+        showError(requireAllTrumps ? t('errors.crossingRequireAllTrumps') : t('errors.crossingSelectFive'));
+        return true;
+    }
+
+    stopPlayerMoveTimer(HUMAN_PLAYER);
+    let ok = (action.mode === 'cross') ? performCrossMove(action.teamKey, cards) : performCrossbackMove(action.teamKey, cards);
+    if (!ok) {
+        showError(t('errors.playFailed'));
+        return true;
+    }
+
+    clearSelection();
+    driveCrossingProcesses();
+    return true;
+}
+
+function scheduleBotClaimWindowDecisions() {
+    for (let player = 0; player < NUM_PLAYERS; player++) {
+        if (player === HUMAN_PLAYER) continue;
+        let delay = 260 + (player * 80);
+        setTimeout(() => {
+            if (!gCrossingState || !gCrossingState.claimWindowActive) return;
+            if (gCrossingState.resolvedBySeat[player]) return;
+            let eligible = !!gCrossingState.eligibilityBySeat[player];
+            resolveCrossingClaimWindowSeat(player, eligible ? 'claim' : 'no-crossing', 'bot');
+        }, delay);
+    }
+}
+
+function finalizeCrossingClaimWindow() {
+    if (!gCrossingState || gCrossingState.claimWindowClosed) return;
+    gCrossingState.claimWindowClosed = true;
+    gCrossingState.claimWindowActive = false;
+
+    for (let player = 0; player < NUM_PLAYERS; player++) {
+        if (!gCrossingState.resolvedBySeat[player]) {
+            recordCrossingSeatResolution(player, 'no-crossing', 'timeout');
+        }
+    }
+
+    for (let teamKey of ['defending', 'attacking']) {
+        let ts = gCrossingState.teamState[teamKey];
+        if (ts.phase === 'claim-accepted') ts.phase = 'waiting-cross';
+    }
+
+    clearCrossingClaimControls();
+    refreshCrossingTrickPlayBlocked();
+    updatePlayButton();
+
+    if (gCrossingState.trickPlayBlocked) {
+        driveCrossingProcesses();
+        return;
+    }
+    promptCurrentPlayer();
+}
+
+function openCrossingClaimWindow() {
+    gCrossingState = {
+        claimWindowActive: true,
+        claimWindowClosed: false,
+        claimWindowDeadline: Date.now() + 5000,
+        eligibilityBySeat: createCrossingEligibilitySnapshot(),
+        resolvedBySeat: { 0: null, 1: null, 2: null, 3: null },
+        teamState: {
+            defending: buildCrossingTeamRuntimeState(),
+            attacking: buildCrossingTeamRuntimeState(),
+        },
+        localAction: null,
+        trickPlayBlocked: true,
+        resolvedMarkersActive: false,
+        resolvedMarkersClearedAtFirstLead: false,
+    };
+
+    clearSelection();
+    highlightActivePlayer(-1);
+    updatePlayButton();
+    updatePhaseDisplay(t('phase.crossingClaim'));
+    updateStatus(t('status.crossingClaim'));
+    refreshCrossingClaimControls();
+    scheduleBotClaimWindowDecisions();
+    startCallingWindowTimer('crossingClaimWindow', 5, () => finalizeCrossingClaimWindow());
+}
+
+function setCrossingTeamPhase(teamKey, phase) {
+    if (!gCrossingState || !gCrossingState.teamState || !gCrossingState.teamState[teamKey]) return false;
+    gCrossingState.teamState[teamKey].phase = phase;
+    refreshCrossingTrickPlayBlocked();
+    if (!gCrossingState.claimWindowActive && gCrossingState.trickPlayBlocked) {
+        driveCrossingProcesses();
+    } else if (!gCrossingState.claimWindowActive && !gCrossingState.trickPlayBlocked && game && game.phase === GamePhase.PLAYING) {
+        clearCrossingClaimControls();
+        promptCurrentPlayer();
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Playing phase
 // ---------------------------------------------------------------------------
 
@@ -2131,6 +2818,11 @@ function startPlayingPhase() {
             }
             gBasePreview.appendChild(row);
         }
+    }
+
+    if (canOpenCrossingClaimWindow()) {
+        openCrossingClaimWindow();
+        return;
     }
 
     promptCurrentPlayer();
@@ -2288,6 +2980,15 @@ function commitForehandControl(mode) {
 }
 
 function promptCurrentPlayer() {
+    if (gCrossingState && gCrossingState.trickPlayBlocked) {
+        driveCrossingProcesses();
+        highlightActivePlayer(-1);
+        updatePhaseDisplay(gCrossingState.claimWindowActive ? t('phase.crossingClaim') : t('phase.crossingPending'));
+        updateStatus(gCrossingState.claimWindowActive ? t('status.crossingClaim') : t('status.crossingPending'));
+        updatePlayButton();
+        return;
+    }
+
     let cp = engineGetCurrentPlayer();
     let isLeading = (game.currentTurnIndex === 0);
 
@@ -2302,6 +3003,16 @@ function promptCurrentPlayer() {
     }
 
     if (gDeskInfo)  gDeskInfo.innerHTML = t('desk.roundInfo', { round: game.currentRound, playerName: PLAYER_NAMES[cp], action: isLeading ? t('desk.leadAction') : t('desk.followAction') });
+
+    let shouldClearCrossingResolvedMarkers = !!(
+        gCrossingState
+        && gCrossingState.resolvedMarkersActive
+        && !gCrossingState.resolvedMarkersClearedAtFirstLead
+        && isLeading
+        && cp === game.pivot
+        && game.currentRound === 1
+        && game.currentTurnIndex === 0
+    );
 
     highlightActivePlayer(cp);
 
@@ -2366,6 +3077,11 @@ function promptCurrentPlayer() {
         renderHand(cp);
         updatePlayButton();
 
+        if (shouldClearCrossingResolvedMarkers) {
+            clearCrossingSeatStatuses();
+            gCrossingState.resolvedMarkersClearedAtFirstLead = true;
+        }
+
         // Start play-card shot clock (note 24 §10.2)
         startPlayerMoveTimer(cp, 'play', () => {
             autoPlayAsBot(cp);
@@ -2374,6 +3090,10 @@ function promptCurrentPlayer() {
         updateStatus(t('status.botThinking', { playerName: PLAYER_NAMES[cp] }));
         updatePhaseDisplay(t('phase.botPlaying', { playerName: PLAYER_NAMES[cp] }));
         gBtnPlay.disabled = true;
+        if (shouldClearCrossingResolvedMarkers) {
+            clearCrossingSeatStatuses();
+            gCrossingState.resolvedMarkersClearedAtFirstLead = true;
+        }
         // Bot plays after a delay
         setTimeout(() => botTakeTurn(cp), BOT_DELAY);
     }
@@ -2484,6 +3204,10 @@ function humanPlayCards() {
         return;
     }
 
+    if (trySubmitLocalCrossingSelection()) {
+        return;
+    }
+
     let cp = (game.phase === GamePhase.BASING) ? getActiveBaserPlayer() : engineGetCurrentPlayer();
     humanPlayCardsCore(cp);
 }
@@ -2494,8 +3218,8 @@ function humanPlayCards() {
 
 const SETTINGS_FIELDS_BY_TAB = {
     presets: ['presetName'],
-    general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings'],
-    scoring: ['scoringPreset', 'endingCompensation', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme', 'attackersSelfBaseHalfMultiplier'],
+    general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
+    scoring: ['scoringPreset', 'endingCompensation', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
     levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'gameMode'],
     timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
 };
@@ -2503,6 +3227,7 @@ const SETTINGS_FIELDS_BY_TAB = {
 const SETTINGS_SELECT_OPTIONS = {
     presetName: () => Object.keys(window.shengjiSettingsPresets || { 'default': {} }),
     autoStrain: ['false', 'true'],
+    pivotPassMode: ['winner-pivot', 'rotate-pivot'],
     allowOverbase: ['false', 'true'],
     overbaseRestrictions: ['none', 'default'],
     failedMultiplayHandling: ['default', 'compensation'],
@@ -2514,6 +3239,50 @@ const SETTINGS_SELECT_OPTIONS = {
     timingPreset: ['', 'normal', '180+30'],
     timingMode: ['shot + bank', 'bank-time-only'],
 };
+
+const PRESET_RULE_RADIO_OPTIONS = [
+    { value: '', labelKey: 'none' },
+    { value: 'default', labelKey: 'default' },
+    { value: 'high-school', labelKey: 'highSchool' },
+    { value: 'Berkeley', labelKey: 'berkeley' },
+    { value: 'experimental', labelKey: 'experimental' },
+    { value: 'plain', labelKey: 'plain' },
+    { value: 'short-level rotate-pivot', labelKey: 'shortLevelRotatePivot' },
+];
+
+const MAIN_PRESET_BUILTIN_NAMES = PRESET_RULE_RADIO_OPTIONS.map(opt => opt.value).filter(v => v !== '');
+const MAIN_PRESET_COMPARISON_FIELDS = [
+    'deckCount',
+    'autoStrain',
+    'pivotPassMode',
+    'allowOverbase',
+    'overbaseRestrictions',
+    'allowCrossings',
+    'failedMultiplayHandling',
+    'multiplayCompensationAmount',
+    'scoringPreset',
+    'countingSystem',
+    'endingCompensation',
+    'stageThreshold',
+    'levelThreshold',
+    'levelUpLimitPerFrame',
+    'baseMultiplierScheme',
+    'attackersSelfBaseHalfMultiplier',
+    'baseMultiplierLimit',
+    'levelsPreset',
+    'levelConfiguration',
+    'startLevel',
+    'mustDefendStartMarker',
+    'mustDefendLevels',
+    'mustStopStartMarker',
+    'mustStopLevels',
+    'knockBackLevels',
+    'knockBackConditionMode',
+    'knockBackTakeStageRequired',
+    'gameMode',
+    'doubleDeclarationOrdering',
+];
+let gMainPresetSyncGuard = false;
 
 function cloneRuleConfig(cfg) {
     if (!cfg) return null;
@@ -2577,6 +3346,8 @@ function settingsOptionLabel(value) {
     const map = {
         'true': 'yes',
         'false': 'no',
+        'winner-pivot': 'winnerPivot',
+        'rotate-pivot': 'rotatePivot',
         'Infinity': 'unlimited',
         'none': 'none',
         '': 'noPreset',
@@ -2630,7 +3401,6 @@ function syncScoringPresetLabel() {
         if (sp.levelThreshold !== undefined && cfg.levelThreshold !== sp.levelThreshold) ok = false;
         if (sp.levelUpLimitPerFrame !== undefined && cfg.levelUpLimitPerFrame !== sp.levelUpLimitPerFrame) ok = false;
         if (sp.baseMultiplierScheme !== undefined && cfg.baseMultiplierScheme !== sp.baseMultiplierScheme) ok = false;
-        if (sp.attackersSelfBaseHalfMultiplier !== undefined && !!cfg.attackersSelfBaseHalfMultiplier !== sp.attackersSelfBaseHalfMultiplier) ok = false;
         if (ok) { matched = key; break; }
     }
     gSettingsDraftRuleConfig.scoringPreset = matched;
@@ -2649,6 +3419,80 @@ function syncTimingPresetLabel() {
         detected = window.shengjiDetectTimingPreset(gSettingsDraftRuleConfig) || '';
     }
     gSettingsDraftRuleConfig.timingPreset = detected;
+}
+
+function getRuleConfigValueByPath(cfg, path) {
+    if (!cfg) return undefined;
+    let parts = path.split('.');
+    let cur = cfg;
+    for (let key of parts) {
+        if (cur === null || cur === undefined) return undefined;
+        cur = cur[key];
+    }
+    return cur;
+}
+
+function normalizeRuleConfigForMainPresetMatch(cfg) {
+    let overrides = cloneRuleConfig(cfg || {});
+    if (!overrides) return null;
+    delete overrides.presetName;
+    if (typeof shengjiResolveGameRuleConfig === 'function') {
+        return shengjiResolveGameRuleConfig({ presetName: 'default', overrides });
+    }
+    return overrides;
+}
+
+function buildMainPresetComparisonSnapshot(cfg) {
+    let out = {};
+    for (let path of MAIN_PRESET_COMPARISON_FIELDS) {
+        let value = getRuleConfigValueByPath(cfg, path);
+        if (Array.isArray(value)) {
+            out[path] = value.slice();
+        } else if (value && typeof value === 'object') {
+            out[path] = JSON.parse(JSON.stringify(value));
+        } else {
+            out[path] = value;
+        }
+    }
+    return out;
+}
+
+function snapshotsExactMatch(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function syncMainPresetSelectionByExactMatch() {
+    if (!gSettingsDraftRuleConfig) return;
+
+    let normalizedCurrent = normalizeRuleConfigForMainPresetMatch(gSettingsDraftRuleConfig);
+    if (!normalizedCurrent) return;
+    let currentSnap = buildMainPresetComparisonSnapshot(normalizedCurrent);
+
+    let matched = '';
+    for (let presetName of MAIN_PRESET_BUILTIN_NAMES) {
+        if (!window.shengjiSettingsPresets || !window.shengjiSettingsPresets[presetName]) continue;
+        let canonical = (typeof shengjiResolveGameRuleConfig === 'function')
+            ? shengjiResolveGameRuleConfig({ presetName })
+            : null;
+        if (!canonical) continue;
+        let canonicalSnap = buildMainPresetComparisonSnapshot(canonical);
+        if (snapshotsExactMatch(currentSnap, canonicalSnap)) {
+            matched = presetName;
+            break;
+        }
+    }
+
+    gSettingsDraftRuleConfig.presetName = matched;
+}
+
+function syncPresetCouplingStateAfterFieldEdit(editedField) {
+    if (editedField === 'presetName') return;
+    if (gMainPresetSyncGuard) return;
+
+    syncScoringPresetLabel();
+    syncLevelsPresetLabel();
+    syncTimingPresetLabel();
+    syncMainPresetSelectionByExactMatch();
 }
 
 function createEmptyLevelsMatrixState() {
@@ -2719,191 +3563,216 @@ function resetLevelsMatrixStateFromRuleConfig() {
 }
 
 function setRuleConfigFieldValue(field, rawValue) {
-    if (field === 'presetName') {
-        if (typeof shengjiResolveGameRuleConfig === 'function') {
-            gSettingsDraftRuleConfig = cloneRuleConfig(shengjiResolveGameRuleConfig({ presetName: rawValue }));
-        }
-        return;
-    }
-
-    if (field === 'scoringPreset') {
-        gSettingsDraftRuleConfig[field] = rawValue;
-        let scoringPresets = window.shengjiScoringPresets;
-        if (scoringPresets && scoringPresets[rawValue]) {
-            let sp = scoringPresets[rawValue];
-            // Apply all authoritative preset fields
-            if (sp.endingCompensation !== undefined) gSettingsDraftRuleConfig.endingCompensation = sp.endingCompensation;
-            if (sp.stageThreshold !== undefined) gSettingsDraftRuleConfig.stageThreshold = sp.stageThreshold;
-            if (sp.levelThreshold !== undefined) gSettingsDraftRuleConfig.levelThreshold = sp.levelThreshold;
-            if (sp.levelUpLimitPerFrame !== undefined) gSettingsDraftRuleConfig.levelUpLimitPerFrame = sp.levelUpLimitPerFrame;
-            if (sp.baseMultiplierScheme !== undefined) gSettingsDraftRuleConfig.baseMultiplierScheme = sp.baseMultiplierScheme;
-            if (sp.attackersSelfBaseHalfMultiplier !== undefined) {
-                gSettingsDraftRuleConfig.attackersSelfBaseHalfMultiplier = sp.attackersSelfBaseHalfMultiplier;
-                // Presets that require attackersSelfBaseHalfMultiplier must also enable allowOverbase
-                // so normalizeRuleConfig does not force the value back to false.
-                if (sp.attackersSelfBaseHalfMultiplier) gSettingsDraftRuleConfig.allowOverbase = true;
+    try {
+        if (field === 'presetName') {
+            if (rawValue === '') {
+                gSettingsDraftRuleConfig = cloneRuleConfig(gSettingsDraftRuleConfig || {});
+                // none is a custom non-matching state, not a hidden preset bundle.
+                gSettingsDraftRuleConfig.presetName = '';
+                // Keep scoring sub-preset selector consistent with actual scoring fields.
+                syncScoringPresetLabel();
+                return;
             }
+            if (typeof shengjiResolveGameRuleConfig === 'function' && window.shengjiSettingsPresets && window.shengjiSettingsPresets[rawValue]) {
+                gMainPresetSyncGuard = true;
+                let previousTiming = {
+                    timingMode: gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingMode,
+                    timingPreset: gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingPreset,
+                    timing: { ...((gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timing) || {}) },
+                };
+                gSettingsDraftRuleConfig = cloneRuleConfig(shengjiResolveGameRuleConfig({ presetName: rawValue }));
+                gSettingsDraftRuleConfig.timingMode = previousTiming.timingMode;
+                gSettingsDraftRuleConfig.timingPreset = previousTiming.timingPreset;
+                gSettingsDraftRuleConfig.timing = { ...previousTiming.timing };
+                // Recompute scoring sub-preset by exact scoring-bundle match, rather than keeping a stale preset string.
+                syncScoringPresetLabel();
+                resetLevelsMatrixStateFromRuleConfig();
+                gMainPresetSyncGuard = false;
+            } else {
+                gSettingsDraftRuleConfig = cloneRuleConfig(gSettingsDraftRuleConfig || {});
+                gSettingsDraftRuleConfig.presetName = String(rawValue);
+            }
+            return;
         }
-        // If '' was chosen, keep the current individual fields unchanged (intentional custom state).
-        return;
-    }
 
-    if (field === 'levelsPreset') {
-        gSettingsDraftRuleConfig[field] = rawValue;
-        let levelsPresets = window.shengjiLevelsPresets;
-        if (levelsPresets && levelsPresets[rawValue]) {
-            let lp = levelsPresets[rawValue];
-            // Apply all authoritative preset fields
-            if (lp.startLevel !== undefined) gSettingsDraftRuleConfig.startLevel = lp.startLevel;
-            if (lp.mustDefendStartMarker !== undefined) gSettingsDraftRuleConfig.mustDefendStartMarker = !!lp.mustDefendStartMarker;
-            if (lp.mustStopStartMarker !== undefined) gSettingsDraftRuleConfig.mustStopStartMarker = !!lp.mustStopStartMarker;
-            if (lp.mustDefendLevels !== undefined) gSettingsDraftRuleConfig.mustDefendLevels = Array.isArray(lp.mustDefendLevels) ? [...lp.mustDefendLevels] : [];
-            if (lp.mustStopLevels !== undefined) gSettingsDraftRuleConfig.mustStopLevels = Array.isArray(lp.mustStopLevels) ? [...lp.mustStopLevels] : [];
-            if (lp.knockBackLevels !== undefined) gSettingsDraftRuleConfig.knockBackLevels = Array.isArray(lp.knockBackLevels) ? [...lp.knockBackLevels] : [];
-            if (lp.knockBackConditionMode !== undefined) gSettingsDraftRuleConfig.knockBackConditionMode = lp.knockBackConditionMode;
-            if (lp.knockBackTakeStageRequired !== undefined) gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!lp.knockBackTakeStageRequired;
-            if (lp.gameMode !== undefined) gSettingsDraftRuleConfig.gameMode = lp.gameMode;
+        if (field === 'scoringPreset') {
+            gSettingsDraftRuleConfig[field] = rawValue;
+            let scoringPresets = window.shengjiScoringPresets;
+            if (scoringPresets && scoringPresets[rawValue]) {
+                let sp = scoringPresets[rawValue];
+                // Apply all authoritative preset fields
+                if (sp.endingCompensation !== undefined) gSettingsDraftRuleConfig.endingCompensation = sp.endingCompensation;
+                if (sp.stageThreshold !== undefined) gSettingsDraftRuleConfig.stageThreshold = sp.stageThreshold;
+                if (sp.levelThreshold !== undefined) gSettingsDraftRuleConfig.levelThreshold = sp.levelThreshold;
+                if (sp.levelUpLimitPerFrame !== undefined) gSettingsDraftRuleConfig.levelUpLimitPerFrame = sp.levelUpLimitPerFrame;
+                if (sp.baseMultiplierScheme !== undefined) gSettingsDraftRuleConfig.baseMultiplierScheme = sp.baseMultiplierScheme;
+            }
+            // If '' was chosen, keep the current individual fields unchanged (intentional custom state).
+            return;
+        }
+
+        if (field === 'levelsPreset') {
+            gSettingsDraftRuleConfig[field] = rawValue;
+            let levelsPresets = window.shengjiLevelsPresets;
+            if (levelsPresets && levelsPresets[rawValue]) {
+                let lp = levelsPresets[rawValue];
+                // Apply all authoritative preset fields
+                if (lp.startLevel !== undefined) gSettingsDraftRuleConfig.startLevel = lp.startLevel;
+                if (lp.mustDefendStartMarker !== undefined) gSettingsDraftRuleConfig.mustDefendStartMarker = !!lp.mustDefendStartMarker;
+                if (lp.mustStopStartMarker !== undefined) gSettingsDraftRuleConfig.mustStopStartMarker = !!lp.mustStopStartMarker;
+                if (lp.mustDefendLevels !== undefined) gSettingsDraftRuleConfig.mustDefendLevels = Array.isArray(lp.mustDefendLevels) ? [...lp.mustDefendLevels] : [];
+                if (lp.mustStopLevels !== undefined) gSettingsDraftRuleConfig.mustStopLevels = Array.isArray(lp.mustStopLevels) ? [...lp.mustStopLevels] : [];
+                if (lp.knockBackLevels !== undefined) gSettingsDraftRuleConfig.knockBackLevels = Array.isArray(lp.knockBackLevels) ? [...lp.knockBackLevels] : [];
+                if (lp.knockBackConditionMode !== undefined) gSettingsDraftRuleConfig.knockBackConditionMode = lp.knockBackConditionMode;
+                if (lp.knockBackTakeStageRequired !== undefined) gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!lp.knockBackTakeStageRequired;
+                if (lp.gameMode !== undefined) gSettingsDraftRuleConfig.gameMode = lp.gameMode;
+                resetLevelsMatrixStateFromRuleConfig();
+            }
+            // If '' was chosen, keep the current individual fields unchanged (intentional custom state).
+            return;
+        }
+
+        if (field === 'timingPreset') {
+            gSettingsDraftRuleConfig[field] = rawValue;
+            let timingPresets = window.shengjiTimingPresets;
+            if (timingPresets && timingPresets[rawValue]) {
+                let tp = timingPresets[rawValue];
+                if (tp.timingMode !== undefined) gSettingsDraftRuleConfig.timingMode = tp.timingMode;
+                if (tp.playShotClock !== undefined) gSettingsDraftRuleConfig.timing.playShotClock = Number(tp.playShotClock);
+                if (tp.baseShotClock !== undefined) gSettingsDraftRuleConfig.timing.baseShotClock = Number(tp.baseShotClock);
+                if (tp.bankTime !== undefined) gSettingsDraftRuleConfig.timing.bankTime = Number(tp.bankTime);
+                if (tp.baseTimeIncrement !== undefined) gSettingsDraftRuleConfig.timing.baseTimeIncrement = Number(tp.baseTimeIncrement);
+            }
+            return;
+        }
+
+        if (field === 'timingMode') {
+            gSettingsDraftRuleConfig.timingMode = rawValue;
+            syncTimingPresetLabel();
+            return;
+        }
+
+        if (field === 'failedMultiplayHandling') {
+            gSettingsDraftRuleConfig.failedMultiplayHandling = rawValue;
+            gSettingsDraftRuleConfig.multiplayCompensation = (rawValue === 'compensation');
+            return;
+        }
+
+        let value = rawValue;
+        if (rawValue === 'true') value = true;
+        if (rawValue === 'false') value = false;
+        if (rawValue === true || rawValue === false) value = rawValue;
+
+        if (field in (gSettingsDraftRuleConfig.timing || {})) {
+            let n = Math.floor(Number(rawValue));
+            let min = null;
+            let max = null;
+            if (field === 'playShotClock') { min = 1; max = 10; }
+            if (field === 'baseShotClock') { min = 1; max = 60; }
+            if (field === 'bankTime') { min = 10; max = 300; }
+            if (field === 'baseTimeIncrement') { min = 1; max = 60; }
+
+            if (!Number.isFinite(n)) {
+                n = Number(gSettingsDraftRuleConfig.timing[field]);
+            }
+            if (!Number.isFinite(n)) n = (min !== null ? min : 0);
+            if (min !== null && n < min) n = min;
+            if (max !== null && n > max) n = max;
+
+            gSettingsDraftRuleConfig.timing[field] = n;
+            syncTimingPresetLabel();
+            return;
+        }
+
+        if (['deckCount', 'multiplayCompensationAmount', 'stageThreshold', 'levelThreshold', 'startLevel'].includes(field)) {
+            let numeric = Number(rawValue);
+            if (!Number.isFinite(numeric)) {
+                numeric = Number(gSettingsDraftRuleConfig[field]);
+            }
+            numeric = Math.floor(numeric);
+
+            if (field === 'stageThreshold' || field === 'levelThreshold') {
+                let deckCount = Number(gSettingsDraftRuleConfig.deckCount) || 2;
+                let dcMax = deckCount * 100;
+                let min = (field === 'stageThreshold') ? 1 : 2;
+                if (!Number.isFinite(numeric)) numeric = min;
+                if (numeric < min) numeric = min;
+                if (numeric > dcMax) numeric = dcMax;
+            }
+
+            if (field === 'multiplayCompensationAmount') {
+                if (!Number.isFinite(numeric)) numeric = 5;
+                if (numeric < 1) numeric = 1;
+                if (numeric > 10) numeric = 10;
+            }
+
+            gSettingsDraftRuleConfig[field] = numeric;
+            if (['stageThreshold', 'levelThreshold'].includes(field)) syncScoringPresetLabel();
+            if (['startLevel'].includes(field)) {
+                applyLevelsMatrixStateToRuleConfig();
+                syncLevelsPresetLabel();
+            }
+            return;
+        }
+
+        if (field === 'levelUpLimitPerFrame') {
+            gSettingsDraftRuleConfig[field] = (rawValue === '' || rawValue === null) ? null : Number(rawValue);
+            syncScoringPresetLabel();
+            return;
+        }
+
+        if (field === 'mustDefendLevels' || field === 'mustStopLevels' || field === 'knockBackLevels') {
+            gSettingsDraftRuleConfig[field] = Array.isArray(rawValue) ? [...rawValue].sort((a, b) => a - b) : [];
+            // Mutual exclusion with repeated bidirectional switching support.
+            if (field === 'mustDefendLevels') {
+                let defend = new Set(gSettingsDraftRuleConfig.mustDefendLevels || []);
+                gSettingsDraftRuleConfig.mustStopLevels = (gSettingsDraftRuleConfig.mustStopLevels || []).filter(x => !defend.has(x));
+            } else if (field === 'mustStopLevels') {
+                let stop = new Set(gSettingsDraftRuleConfig.mustStopLevels || []);
+                gSettingsDraftRuleConfig.mustDefendLevels = (gSettingsDraftRuleConfig.mustDefendLevels || []).filter(x => !stop.has(x));
+            }
             resetLevelsMatrixStateFromRuleConfig();
-        }
-        // If '' was chosen, keep the current individual fields unchanged (intentional custom state).
-        return;
-    }
-
-    if (field === 'timingPreset') {
-        gSettingsDraftRuleConfig[field] = rawValue;
-        let timingPresets = window.shengjiTimingPresets;
-        if (timingPresets && timingPresets[rawValue]) {
-            let tp = timingPresets[rawValue];
-            if (tp.timingMode !== undefined) gSettingsDraftRuleConfig.timingMode = tp.timingMode;
-            if (tp.playShotClock !== undefined) gSettingsDraftRuleConfig.timing.playShotClock = Number(tp.playShotClock);
-            if (tp.baseShotClock !== undefined) gSettingsDraftRuleConfig.timing.baseShotClock = Number(tp.baseShotClock);
-            if (tp.bankTime !== undefined) gSettingsDraftRuleConfig.timing.bankTime = Number(tp.bankTime);
-            if (tp.baseTimeIncrement !== undefined) gSettingsDraftRuleConfig.timing.baseTimeIncrement = Number(tp.baseTimeIncrement);
-        }
-        return;
-    }
-
-    if (field === 'timingMode') {
-        gSettingsDraftRuleConfig.timingMode = rawValue;
-        syncTimingPresetLabel();
-        return;
-    }
-
-    if (field === 'failedMultiplayHandling') {
-        gSettingsDraftRuleConfig.failedMultiplayHandling = rawValue;
-        gSettingsDraftRuleConfig.multiplayCompensation = (rawValue === 'compensation');
-        return;
-    }
-
-    let value = rawValue;
-    if (rawValue === 'true') value = true;
-    if (rawValue === 'false') value = false;
-    if (rawValue === true || rawValue === false) value = rawValue;
-
-    if (field in (gSettingsDraftRuleConfig.timing || {})) {
-        let n = Math.floor(Number(rawValue));
-        let min = null;
-        let max = null;
-        if (field === 'playShotClock') { min = 1; max = 10; }
-        if (field === 'baseShotClock') { min = 1; max = 60; }
-        if (field === 'bankTime') { min = 10; max = 300; }
-        if (field === 'baseTimeIncrement') { min = 1; max = 60; }
-
-        if (!Number.isFinite(n)) {
-            n = Number(gSettingsDraftRuleConfig.timing[field]);
-        }
-        if (!Number.isFinite(n)) n = (min !== null ? min : 0);
-        if (min !== null && n < min) n = min;
-        if (max !== null && n > max) n = max;
-
-        gSettingsDraftRuleConfig.timing[field] = n;
-        syncTimingPresetLabel();
-        return;
-    }
-
-    if (['deckCount', 'multiplayCompensationAmount', 'stageThreshold', 'levelThreshold', 'startLevel'].includes(field)) {
-        let numeric = Number(rawValue);
-        if (!Number.isFinite(numeric)) {
-            numeric = Number(gSettingsDraftRuleConfig[field]);
-        }
-        numeric = Math.floor(numeric);
-
-        if (field === 'stageThreshold' || field === 'levelThreshold') {
-            let deckCount = Number(gSettingsDraftRuleConfig.deckCount) || 2;
-            let dcMax = deckCount * 100;
-            let min = (field === 'stageThreshold') ? 1 : 2;
-            if (!Number.isFinite(numeric)) numeric = min;
-            if (numeric < min) numeric = min;
-            if (numeric > dcMax) numeric = dcMax;
-        }
-
-        if (field === 'multiplayCompensationAmount') {
-            if (!Number.isFinite(numeric)) numeric = 5;
-            if (numeric < 1) numeric = 1;
-            if (numeric > 10) numeric = 10;
-        }
-
-        gSettingsDraftRuleConfig[field] = numeric;
-        if (['stageThreshold', 'levelThreshold'].includes(field)) syncScoringPresetLabel();
-        if (['startLevel'].includes(field)) {
-            applyLevelsMatrixStateToRuleConfig();
             syncLevelsPresetLabel();
+            return;
         }
-        return;
-    }
 
-    if (field === 'levelUpLimitPerFrame') {
-        gSettingsDraftRuleConfig[field] = (rawValue === '' || rawValue === null) ? null : Number(rawValue);
-        syncScoringPresetLabel();
-        return;
-    }
-
-    if (field === 'mustDefendLevels' || field === 'mustStopLevels' || field === 'knockBackLevels') {
-        gSettingsDraftRuleConfig[field] = Array.isArray(rawValue) ? [...rawValue].sort((a, b) => a - b) : [];
-        // Mutual exclusion with repeated bidirectional switching support.
-        if (field === 'mustDefendLevels') {
-            let defend = new Set(gSettingsDraftRuleConfig.mustDefendLevels || []);
-            gSettingsDraftRuleConfig.mustStopLevels = (gSettingsDraftRuleConfig.mustStopLevels || []).filter(x => !defend.has(x));
-        } else if (field === 'mustStopLevels') {
-            let stop = new Set(gSettingsDraftRuleConfig.mustStopLevels || []);
-            gSettingsDraftRuleConfig.mustDefendLevels = (gSettingsDraftRuleConfig.mustDefendLevels || []).filter(x => !stop.has(x));
+        if (field === 'mustDefendStartMarker' || field === 'mustStopStartMarker') {
+            gSettingsDraftRuleConfig[field] = !!rawValue;
+            if (gSettingsDraftRuleConfig.mustDefendStartMarker && gSettingsDraftRuleConfig.mustStopStartMarker) {
+                gSettingsDraftRuleConfig.mustStopStartMarker = false;
+            }
+            resetLevelsMatrixStateFromRuleConfig();
+            syncLevelsPresetLabel();
+            return;
         }
-        resetLevelsMatrixStateFromRuleConfig();
-        syncLevelsPresetLabel();
-        return;
-    }
 
-    if (field === 'mustDefendStartMarker' || field === 'mustStopStartMarker') {
-        gSettingsDraftRuleConfig[field] = !!rawValue;
-        if (gSettingsDraftRuleConfig.mustDefendStartMarker && gSettingsDraftRuleConfig.mustStopStartMarker) {
-            gSettingsDraftRuleConfig.mustStopStartMarker = false;
+        if (field === 'gameMode') {
+            gSettingsDraftRuleConfig.gameMode = rawValue;
+            syncLevelsPresetLabel();
+            return;
         }
-        resetLevelsMatrixStateFromRuleConfig();
-        syncLevelsPresetLabel();
-        return;
-    }
 
-    if (field === 'gameMode') {
-        gSettingsDraftRuleConfig.gameMode = rawValue;
-        syncLevelsPresetLabel();
-        return;
-    }
+        if (field === 'knockBackConditionMode') {
+            gSettingsDraftRuleConfig.knockBackConditionMode = rawValue;
+            syncLevelsPresetLabel();
+            return;
+        }
 
-    if (field === 'knockBackConditionMode') {
-        gSettingsDraftRuleConfig.knockBackConditionMode = rawValue;
-        syncLevelsPresetLabel();
-        return;
-    }
+        if (field === 'knockBackTakeStageRequired') {
+            gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!rawValue;
+            syncLevelsPresetLabel();
+            return;
+        }
 
-    if (field === 'knockBackTakeStageRequired') {
-        gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!rawValue;
-        syncLevelsPresetLabel();
-        return;
-    }
-
-    gSettingsDraftRuleConfig[field] = value;
-    if (['endingCompensation', 'baseMultiplierScheme', 'attackersSelfBaseHalfMultiplier'].includes(field)) {
-        syncScoringPresetLabel();
+        gSettingsDraftRuleConfig[field] = value;
+        if (['endingCompensation', 'baseMultiplierScheme'].includes(field)) {
+            syncScoringPresetLabel();
+        }
+    } finally {
+        if (field === 'presetName') {
+            gMainPresetSyncGuard = false;
+        }
+        syncPresetCouplingStateAfterFieldEdit(field);
     }
 }
 
@@ -3049,7 +3918,7 @@ function createLevelsSpecialMatrix(readOnly) {
                     levelsMatrixToggleLiteral('mustDefendLevels', levelKey);
                 }
                 applyLevelsMatrixStateToRuleConfig();
-                syncLevelsPresetLabel();
+                syncPresetCouplingStateAfterFieldEdit('mustDefendLevels');
                 renderSettingsDialog();
             },
             isSelected: (levelKey) => {
@@ -3071,7 +3940,7 @@ function createLevelsSpecialMatrix(readOnly) {
                     levelsMatrixToggleLiteral('mustStopLevels', levelKey);
                 }
                 applyLevelsMatrixStateToRuleConfig();
-                syncLevelsPresetLabel();
+                syncPresetCouplingStateAfterFieldEdit('mustStopLevels');
                 renderSettingsDialog();
             },
             isSelected: (levelKey) => {
@@ -3089,7 +3958,7 @@ function createLevelsSpecialMatrix(readOnly) {
             onClick: (levelKey) => {
                 levelsMatrixToggleLiteral('knockBackLevels', levelKey);
                 applyLevelsMatrixStateToRuleConfig();
-                syncLevelsPresetLabel();
+                syncPresetCouplingStateAfterFieldEdit('knockBackLevels');
                 renderSettingsDialog();
             },
             isSelected: (levelKey) => {
@@ -3290,6 +4159,41 @@ function createKnockBackConditionRow(readOnly) {
     return row;
 }
 
+function createPresetRulesRadioSelector(currentValue, readOnly) {
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group settings-preset-rules-group';
+
+    let current = (currentValue === undefined || currentValue === null) ? 'default' : String(currentValue);
+
+    for (let opt of PRESET_RULE_RADIO_OPTIONS) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option settings-preset-rules-option';
+
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'presetName';
+        radio.value = opt.value;
+        radio.checked = (opt.value === current);
+        radio.disabled = !!readOnly;
+        radio.setAttribute('data-settings-field', 'presetName');
+
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue('presetName', opt.value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(t('settingsDialog.presetRuleLabels.' + opt.labelKey)));
+        radioGroup.appendChild(radioLabel);
+    }
+
+    return radioGroup;
+}
+
 function createSettingsFieldEl(field, readOnly) {
     let wrapper = document.createElement('div');
     wrapper.className = 'settings-field';
@@ -3374,6 +4278,12 @@ function createSettingsFieldEl(field, readOnly) {
 
     if (field === 'timingMode') {
         wrapper.appendChild(createTimingModeRadioSelector(currentValue, readOnly));
+        wrapper.setAttribute('data-settings-field', field);
+        return wrapper;
+    }
+
+    if (field === 'presetName') {
+        wrapper.appendChild(createPresetRulesRadioSelector(currentValue, readOnly));
         wrapper.setAttribute('data-settings-field', field);
         return wrapper;
     }
@@ -3509,7 +4419,7 @@ function createGeneralAutoStrainSelector(currentValue, readOnly) {
     radioGroup.className = 'settings-radio-group';
     const opts = [
         { value: 'false', label: t('settingsDialog.options.nts'), disabled: false },
-        { value: 'true', label: t('settingsDialog.options.thirdInitBase'), disabled: true }
+        { value: 'true', label: t('settingsDialog.options.thirdInitBase'), disabled: false }
     ];
     let current = String(!!currentValue);
     for (let opt of opts) {
@@ -3526,6 +4436,38 @@ function createGeneralAutoStrainSelector(currentValue, readOnly) {
             radio.addEventListener('change', () => {
                 if (radio.checked) {
                     setRuleConfigFieldValue('autoStrain', radio.value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(opt.label));
+        radioGroup.appendChild(radioLabel);
+    }
+    return radioGroup;
+}
+
+function createPivotPassModeRadioSelector(currentValue, readOnly) {
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    const opts = [
+        { value: 'winner-pivot', label: t('settingsDialog.options.winnerPivot') },
+        { value: 'rotate-pivot', label: t('settingsDialog.options.rotatePivot') },
+    ];
+    let current = String(currentValue || 'winner-pivot');
+    for (let opt of opts) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'pivotPassMode';
+        radio.value = opt.value;
+        radio.checked = (opt.value === current);
+        radio.disabled = !!readOnly;
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setRuleConfigFieldValue('pivotPassMode', opt.value);
                     renderSettingsDialog();
                 }
             });
@@ -3599,7 +4541,7 @@ function renderGeneralTabBody(container, readOnly) {
     row2.appendChild(createGeneralHint(t('settingsDialog.generalHints.autoStrain'), 'general-hint-auto-strain'));
     rows.appendChild(row2);
 
-    // Row 3: overbase + conditional restriction + conditional hint.
+    // Row 3: overbase + conditional restriction + conditional attackers-self-base-half + conditional hint.
     let row3 = document.createElement('div');
     row3.className = 'general-row';
 
@@ -3648,6 +4590,26 @@ function renderGeneralTabBody(container, readOnly) {
         restrictionField.appendChild(restrictionLabel);
         restrictionField.appendChild(restrictionInput);
         row3.appendChild(restrictionField);
+
+        let attackersHalfField = document.createElement('div');
+        attackersHalfField.className = 'settings-field';
+        attackersHalfField.setAttribute('data-settings-field', 'attackersSelfBaseHalfMultiplier');
+        let attackersHalfLabel = document.createElement('label');
+        attackersHalfLabel.textContent = t('settingsDialog.fields.attackersSelfBaseHalfMultiplier');
+        let attackersHalfInput = document.createElement('input');
+        attackersHalfInput.type = 'checkbox';
+        attackersHalfInput.checked = !!getRuleConfigFieldValue('attackersSelfBaseHalfMultiplier');
+        attackersHalfInput.disabled = !!readOnly;
+        attackersHalfInput.setAttribute('data-settings-field', 'attackersSelfBaseHalfMultiplier');
+        if (!readOnly) {
+            attackersHalfInput.addEventListener('change', () => {
+                setRuleConfigFieldValue('attackersSelfBaseHalfMultiplier', attackersHalfInput.checked);
+                renderSettingsDialog();
+            });
+        }
+        attackersHalfField.appendChild(attackersHalfLabel);
+        attackersHalfField.appendChild(attackersHalfInput);
+        row3.appendChild(attackersHalfField);
 
         if (restrictionChecked) {
             row3.appendChild(createGeneralHint(t('settingsDialog.generalHints.overbaseRestriction'), 'general-hint-overbase-restriction'));
@@ -3742,6 +4704,19 @@ function renderGeneralTabBody(container, readOnly) {
 
     rows.appendChild(row5);
 
+    // Row 6: pivot-pass mode radios (last row).
+    let row6 = document.createElement('div');
+    row6.className = 'general-row';
+    let pivotPassField = document.createElement('div');
+    pivotPassField.className = 'settings-field';
+    pivotPassField.setAttribute('data-settings-field', 'pivotPassMode');
+    let pivotPassLabel = document.createElement('label');
+    pivotPassLabel.textContent = t('settingsDialog.fields.pivotPassMode');
+    pivotPassField.appendChild(pivotPassLabel);
+    pivotPassField.appendChild(createPivotPassModeRadioSelector(getRuleConfigFieldValue('pivotPassMode'), readOnly));
+    row6.appendChild(pivotPassField);
+    rows.appendChild(row6);
+
     container.appendChild(rows);
 }
 
@@ -3776,12 +4751,6 @@ function renderScoringTabBody(container, readOnly) {
     row4.appendChild(createSettingsFieldEl('baseMultiplierScheme', readOnly));
     row4.appendChild(createBaseMultiplierSchemeHint());
     rows.appendChild(row4);
-
-    // Row 5: attackers' self-base half multiplier
-    let row5 = document.createElement('div');
-    row5.className = 'scoring-row';
-    row5.appendChild(createSettingsFieldEl('attackersSelfBaseHalfMultiplier', readOnly));
-    rows.appendChild(row5);
 
     container.appendChild(rows);
 }
@@ -3854,6 +4823,18 @@ function renderTimingTabBody(container, readOnly) {
     container.appendChild(rows);
 }
 
+function renderPresetsTabBody(container, readOnly) {
+    let rows = document.createElement('div');
+    rows.className = 'preset-tab-rows';
+
+    let row = document.createElement('div');
+    row.className = 'preset-row';
+    row.appendChild(createSettingsFieldEl('presetName', readOnly));
+    rows.appendChild(row);
+
+    container.appendChild(rows);
+}
+
 function renderSettingsDialog() {
     if (!gSettingsDialog || !gSettingsBody) return;
 
@@ -3894,7 +4875,9 @@ function renderSettingsDialog() {
     gSettingsBody.className = readOnly ? 'settings-readonly' : '';
     gSettingsBody.innerHTML = '';
 
-    if (gSettingsActiveTab === 'scoring') {
+    if (gSettingsActiveTab === 'presets') {
+        renderPresetsTabBody(gSettingsBody, readOnly);
+    } else if (gSettingsActiveTab === 'scoring') {
         renderScoringTabBody(gSettingsBody, readOnly);
     } else if (gSettingsActiveTab === 'general') {
         renderGeneralTabBody(gSettingsBody, readOnly);
@@ -3932,6 +4915,7 @@ function openSettingsDialog(mode) {
     syncScoringPresetLabel();
     syncLevelsPresetLabel();
     syncTimingPresetLabel();
+    syncMainPresetSelectionByExactMatch();
     resetLevelsMatrixStateFromRuleConfig();
 
     renderSettingsDialog();
@@ -3987,6 +4971,10 @@ function onNewGameButtonClick() {
 
 function humanPlayCardsCore(cp) {
     if (!isHumanControlled(cp)) return;
+    if (gCrossingState && gCrossingState.trickPlayBlocked) {
+        trySubmitLocalCrossingSelection();
+        return;
+    }
     let cards = getSelectedCards(cp);
 
     if (game.phase === GamePhase.BASING) {
@@ -4004,6 +4992,7 @@ function humanPlayCardsCore(cp) {
         stopPlayerMoveTimer(cp);
         applyBaseTimeIncrementAfterBaseCompletion(cp);
         clearSelection();
+        gAutoStrain3rdTriggerCard = null;
         clearDesk();
         appendLog(t('log.humanBaseDone'));
         renderAllHands();
@@ -4283,6 +5272,12 @@ if (gBtnGameSettings) {
     gBtnGameSettings.addEventListener('click', onFooterSettingsClick);
 }
 
+if (gBotPassiveDeclarationSwitch) {
+    gBotPassiveDeclarationSwitch.addEventListener('change', () => {
+        setBotDeclarationMode(gBotPassiveDeclarationSwitch.checked ? 'passive' : 'normal');
+    });
+}
+
 if (gBtnSettingsCancel) {
     gBtnSettingsCancel.addEventListener('click', closeSettingsDialog);
 }
@@ -4344,5 +5339,6 @@ if (gDenomArea) {
     gDenomArea.addEventListener('mouseenter', renderDeclarationHistoryRows);
 }
 ensureResolvedSettings();
+syncBotDeclarationModeSwitchUi();
 updatePhaseDisplay(t('phase.initial'));
 updateStatus(t('status.ready'));

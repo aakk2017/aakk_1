@@ -120,6 +120,12 @@ function botGetLegalOvercallDeclarations(player, currentDeclaration, phase = 'de
  * Returns { suit, count } or null if no declaration.
  */
 function botChooseDeclaration(player, currentDeclaration = null, phase = 'dealing') {
+    if ((phase === 'dealing' || phase === 'finalDeclare')
+        && typeof window.isPassiveDeclarationBotMode === 'function'
+        && window.isPassiveDeclarationBotMode()) {
+        return null;
+    }
+
     let hand = game.hands[player];
     let level = game.level;
     let handSize = hand.length;

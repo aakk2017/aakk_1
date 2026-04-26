@@ -2369,16 +2369,23 @@ function engineComputeFrameResult(finalScore) {
 
     let advancingPlayers = defenseHolds ? [...game.defendingTeam] : [...game.attackingTeam];
 
-    // Next pivot: defense holds → pivot's ally; attack wins → first attacker clockwise
+    let pivotPassMode = (game.gameConfig && game.gameConfig.pivotPassMode) || 'winner-pivot';
+
+    // Rotate mode: successor is always relative to current pivot and advancing direction.
     let nextPivot;
-    if (defenseHolds) {
-        nextPivot = (game.pivot + 2) % NUM_PLAYERS;
+    if (pivotPassMode === 'rotate-pivot') {
+        nextPivot = (game.pivot + 1) % NUM_PLAYERS;
     } else {
-        for (let i = 1; i < NUM_PLAYERS; i++) {
-            let p = (game.pivot + i) % NUM_PLAYERS;
-            if (game.attackingTeam.includes(p)) {
-                nextPivot = p;
-                break;
+        // Winner mode (existing behavior): defense holds -> pivot's ally; attack wins -> first attacker in advancing direction.
+        if (defenseHolds) {
+            nextPivot = (game.pivot + 2) % NUM_PLAYERS;
+        } else {
+            for (let i = 1; i < NUM_PLAYERS; i++) {
+                let p = (game.pivot + i) % NUM_PLAYERS;
+                if (game.attackingTeam.includes(p)) {
+                    nextPivot = p;
+                    break;
+                }
             }
         }
     }

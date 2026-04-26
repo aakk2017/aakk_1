@@ -258,6 +258,66 @@
     text-decoration: underline;
 }
 
+.footer-switch-item {
+    display: flex;
+    align-items: center;
+    padding: 0 1.6vh;
+}
+
+.footer-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.8vh;
+    color: #eee;
+    font-family: "Roboto", "suit", "Noto Sans SC";
+    font-size: 1.8vh;
+    cursor: pointer;
+    user-select: none;
+    height: 6vh;
+}
+
+.footer-switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.footer-switch-track {
+    position: relative;
+    width: 4.8vh;
+    height: 2.6vh;
+    border-radius: 1.3vh;
+    background: rgba(255, 255, 255, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    transition: background 0.15s ease;
+}
+
+.footer-switch-track::after {
+    content: '';
+    position: absolute;
+    top: 0.2vh;
+    left: 0.2vh;
+    width: 2vh;
+    height: 2vh;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s ease;
+}
+
+.footer-switch input:checked + .footer-switch-track {
+    background: rgba(56, 191, 71, 0.75);
+}
+
+.footer-switch input:checked + .footer-switch-track::after {
+    transform: translateX(2.2vh);
+}
+
+.footer-switch-state {
+    color: rgba(255, 255, 255, 0.82);
+    min-width: 5.5vh;
+}
+
 /* ── Counter drawer (§2) ── */
 #counter-drawer {
     position: absolute;
@@ -352,6 +412,79 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.crossing-controls {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    gap: 0.35vh;
+    padding: 0.35vh;
+    margin-top: 0.25vh;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid #aaa;
+    border-radius: var(--radius);
+    z-index: 22;
+}
+
+.crossing-controls[data-visible="true"] {
+    display: flex;
+}
+
+.crossing-btn {
+    min-width: 6.8vh;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: calc(var(--card-width) / 5.2);
+    line-height: 1.2;
+    padding: 0.25vh 0.6vh;
+    border: 1px solid #47a;
+    border-radius: var(--radius);
+    background: #69c;
+    color: #fff;
+    cursor: pointer;
+}
+
+.crossing-btn:hover:not(:disabled) {
+    background: #47a;
+}
+
+.crossing-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.crossing-seat-status {
+    position: absolute;
+    right: 0.6vh;
+    top: calc(var(--card-height) / 35);
+    min-width: 4.4vh;
+    text-align: right;
+    font-family: "Roboto Mono", "Noto Sans SC";
+    font-size: calc(var(--card-width) / 5.4);
+    color: #ffe89a;
+}
+
+.crossing-seat-status[data-crossing-resolved="true"] {
+    color: #fff;
+}
+
+.crossing-claim-controls-desk {
+    display: none;
+    gap: 0.6vh;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.5vh;
+}
+
+.crossing-claim-controls-desk[data-visible="true"] {
+    display: flex;
+}
+
+.crossing-action-btn {
+    margin-left: 0;
 }
 
 /* Breathing animation for on-play name bar */
@@ -777,6 +910,16 @@
     width: 32%;
 }
 
+.decl-history-col-auto {
+    width: 100%;
+    text-align: center;
+}
+
+.decl-history-row-auto td {
+    border-left: none !important;
+    text-align: center;
+}
+
 .decl-history-suit-mark {
     font-family: 'suit';
 }
@@ -812,7 +955,7 @@
     transform: translate(-50%, -50%);
     z-index: 110;
     width: min(95vw, 110vh);
-    max-height: 88vh;
+    height: 62vh;
     overflow: hidden;
     background: #f8f8f8;
     border: 2px solid #666;
@@ -887,8 +1030,9 @@
     display: flex;
     flex-direction: column;
     flex: 1;
-    overflow: auto;
+    overflow: hidden;
     min-width: 0;
+    min-height: 0;
 }
 
 #settings-placeholder-panel {
@@ -927,6 +1071,9 @@
 #settings-body {
     padding: 1.2vh 1.8vh;
     flex: 1;
+    min-height: 0;
+    overflow: auto;
+    box-sizing: border-box;
 }
 
 .settings-grid {
@@ -1223,6 +1370,17 @@
     display: contents; /* legacy: lets children join parent grid */
 }
 
+.preset-tab-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8vh;
+}
+
+.preset-row {
+    display: flex;
+    flex-direction: column;
+}
+
 .settings-radio-group {
     display: flex;
     flex-wrap: wrap;
@@ -1277,6 +1435,17 @@
 
 .settings-readonly .settings-radio-option input[type="radio"] {
     cursor: default;
+}
+
+.settings-preset-rules-group {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 0.45vh;
+}
+
+.settings-preset-rules-option {
+    width: 100%;
 }
 
 .settings-field-hint {
