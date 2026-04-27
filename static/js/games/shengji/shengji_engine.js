@@ -900,17 +900,28 @@ function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allB
     if (!game.fcChances[failer]) game.fcChances[failer] = { forehand: forehand, count: 0 };
     game.fcChances[failer].count++;
 
-    // Failed-multiplay compensation runtime semantics (note 39c/39d):
-    // compensation applies only in compensation mode and equals revokedCardCount * amount.
+    // Failed-multiplay compensation runtime semantics (note 39c/39d/48c):
+    // compensation applies in supported compensation modes.
+    // - compensation: revokedCardCount * amount
+    // - lian-zhong-compensation: intendedLeadCardCount * 5
     // Sign: negative when the failing side is the attackers; positive when the failing side is the defenders.
     let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
-    let compensationEnabled = (handling === 'compensation') || !!(game.gameConfig && game.gameConfig.multiplayCompensation);
+    let compensationEnabled =
+        (handling === 'compensation')
+        || (handling === 'lian-zhong-compensation')
+        || !!(game.gameConfig && game.gameConfig.multiplayCompensation);
     if (compensationEnabled) {
-        let revokedCount = Array.isArray(revokedCards) ? revokedCards.length : 0;
-        let amount = Number(game.gameConfig && game.gameConfig.multiplayCompensationAmount);
-        if (!Number.isFinite(amount)) amount = 0;
-        amount = Math.max(0, Math.floor(amount));
-        let magnitude = revokedCount * amount;
+        let magnitude = 0;
+        if (handling === 'lian-zhong-compensation') {
+            let intendedCount = Array.isArray(intendedLead) ? intendedLead.length : 0;
+            magnitude = Math.max(0, Math.floor(intendedCount)) * 5;
+        } else {
+            let revokedCount = Array.isArray(revokedCards) ? revokedCards.length : 0;
+            let amount = Number(game.gameConfig && game.gameConfig.multiplayCompensationAmount);
+            if (!Number.isFinite(amount)) amount = 0;
+            amount = Math.max(0, Math.floor(amount));
+            magnitude = revokedCount * amount;
+        }
         if (magnitude !== 0) {
             // Determine sign: attacker failure reduces frame score; defender failure increases it.
             let failerIsAttacker = Array.isArray(game.attackingTeam) && game.attackingTeam.includes(failer);
@@ -1629,15 +1640,15 @@ function engineSetTeams() {
 }
 
 /**
- * Apply attacker-self-base half-multiplier rule.
+ * Apply attacker-self-base half rule to base score only.
  * Rule gate: only applies when attackers set the final base and config enables it.
- * Numeric semantics: preserve float (no integer forcing), lower bounded by 1.
+ * Numeric semantics: preserve float (no integer forcing), lower bounded by 0.
  */
-function engineApplyAttackersSelfBaseHalfMultiplier(baseMultiplier, cfg, attackersSetFinalBase) {
+function engineApplyAttackersSelfBaseHalfToBaseScore(baseScore, cfg, attackersSetFinalBase) {
     if (cfg && cfg.attackersSelfBaseHalfMultiplier && attackersSetFinalBase) {
-        return Math.max(1, baseMultiplier / 2);
+        return Math.max(0, baseScore / 2);
     }
-    return baseMultiplier;
+    return baseScore;
 }
 
 function engineResetFailedMultiplayCompensationState() {
@@ -1992,6 +2003,9 @@ function engineFinalize() {
     let multiplayCompensation = Number(game.multiplayCompensation) || 0;
     let counterScore = game.frameScore - multiplayCompensation;
     let baseScore = 0;
+    let baseScoreBeforeSelfBaseHalf = 0;
+    let baseScoreAfterSelfBaseHalf = 0;
+    let baseScoreSelfBaseHalfApplied = false;
     let baseMultiplier = 1;
     let endingCompensation = 0;
     let finalScore = counterScore + multiplayCompensation;
@@ -2036,17 +2050,21 @@ function engineFinalize() {
             if (baseMultiplier > cap) baseMultiplier = cap;
         }
 
-        // Attackers' self-base half multiplier (gated + float-preserving)
-        baseMultiplier = engineApplyAttackersSelfBaseHalfMultiplier(baseMultiplier, game.gameConfig, attackersSetFinalBase);
-
-        baseScore = engineCountScore(game.base) * baseMultiplier;
+        baseScoreBeforeSelfBaseHalf = engineCountScore(game.base) * baseMultiplier;
+        baseScoreAfterSelfBaseHalf = engineApplyAttackersSelfBaseHalfToBaseScore(
+            baseScoreBeforeSelfBaseHalf,
+            game.gameConfig,
+            attackersSetFinalBase
+        );
+        baseScoreSelfBaseHalfApplied = baseScoreAfterSelfBaseHalf !== baseScoreBeforeSelfBaseHalf;
+        baseScore = baseScoreAfterSelfBaseHalf;
         finalScore += baseScore;
     }
 
     game.phase = GamePhase.GAME_OVER;
 
     // Compute ending compensation in canonical frame-score unit.
-    // Note 36c: ending compensation = ending length * authoritative base multiplier / 2.
+    // Note 48a: ending compensation = ending length * authoritative base multiplier / 2 * unit.
     if (game.gameConfig && game.gameConfig.endingCompensation) {
         let endingLength = 0;
         for (let i = game.roundHistory.length - 1; i >= 0; i--) {
@@ -2057,7 +2075,11 @@ function engineFinalize() {
             }
         }
         if (endingLength > 0) {
-            endingCompensation = endingLength * (baseMultiplier / 2);
+            let endingCompensationUnit = Number(game.gameConfig.endingCompensationUnit);
+            if (!Number.isFinite(endingCompensationUnit)) endingCompensationUnit = 2;
+            if (endingCompensationUnit < 1) endingCompensationUnit = 1;
+            if (endingCompensationUnit > 10) endingCompensationUnit = 10;
+            endingCompensation = endingLength * (baseMultiplier / 2) * endingCompensationUnit;
             finalScore += endingCompensation;
         }
     }
@@ -2070,6 +2092,9 @@ function engineFinalize() {
 
     let scoreBreakdown = {
         counterScore,
+        baseScoreBeforeSelfBaseHalf,
+        baseScoreAfterSelfBaseHalf,
+        baseScoreSelfBaseHalfApplied,
         baseScore,
         endingCompensation,
         multiplayCompensation,
@@ -2079,6 +2104,9 @@ function engineFinalize() {
     return {
         totalScore: finalScore,
         counterScore,
+        baseScoreBeforeSelfBaseHalf,
+        baseScoreAfterSelfBaseHalf,
+        baseScoreSelfBaseHalfApplied,
         baseScore,
         baseMultiplier,
         finalBaserSeat: effectiveFinalBaser,
@@ -2311,22 +2339,56 @@ function engineDoesWinningHandCoreMatchKnockBackCondition(cards, mode) {
     return coreElement.cards.every(card => card.rank === game.level);
 }
 
-function engineGetKnockBackDestinationAbsolute(player, currentAbs) {
+function engineGetWinningHandCoreElement(cards) {
+    let decomp = engineResolveLead(cards || []);
+    let coreElement = decomp && decomp.coreElement ? decomp.coreElement : null;
+    if (!coreElement || !Array.isArray(coreElement.cards) || coreElement.cards.length === 0) {
+        return null;
+    }
+    return coreElement;
+}
+
+function engineIsValidKnockBackDestinationAbsolute(abs, startLevel, kbLevelSet) {
+    if (abs < 0) return false;
+    let cycleIndex = Math.floor(abs / 13);
+    let level = engineCycleOffsetToLevel(abs % 13, startLevel);
+
+    // Rigid floor: first-cycle start level is always the minimum destination.
+    if (cycleIndex === 0 && level === startLevel) return true;
+
+    // Same-rank-as-start in second+ cycles is never a destination.
+    if (cycleIndex > 0 && level === startLevel) return false;
+
+    return kbLevelSet.has(level);
+}
+
+function engineGetKnockBackDestinationAbsolute(player, currentAbs, stepCount = 1) {
     let cfg = game.gameConfig || {};
     let startLevel = engineGetConfiguredStartLevel();
-    let currentCycle = Math.floor(currentAbs / 13);
-    let currentOffset = currentAbs % 13;
     let kbLevels = Array.isArray(cfg.knockBackLevels) ? cfg.knockBackLevels : [];
+    let kbLevelSet = new Set(kbLevels);
+    let rigidFloorAbs = 0;
+    let steps = Math.max(1, Math.floor(Number(stepCount) || 1));
+    let cursor = currentAbs;
 
-    let candidates = [currentCycle * 13];
-    for (let level of kbLevels) {
-        let abs = currentCycle * 13 + engineLevelToCycleOffset(level, startLevel);
-        if (abs < currentAbs) candidates.push(abs);
+    for (let i = 0; i < steps; i++) {
+        let found = null;
+        for (let cand = cursor - 1; cand >= rigidFloorAbs; cand--) {
+            if (engineIsValidKnockBackDestinationAbsolute(cand, startLevel, kbLevelSet)) {
+                found = cand;
+                break;
+            }
+        }
+
+        if (found === null) {
+            // Clamp at rigid SL boundary.
+            return rigidFloorAbs;
+        }
+        cursor = found;
+        if (cursor <= rigidFloorAbs) return rigidFloorAbs;
     }
 
-    // If we are already at the cycle start, fall back to the same start marker.
-    if (candidates.length === 0) return currentCycle * 13 + currentOffset;
-    return Math.max(...candidates);
+    return Math.max(cursor, rigidFloorAbs);
 }
 
 /**
@@ -2476,6 +2538,29 @@ function engineApplyFrameResult(frameResult) {
     let baseLevels = engineCanonicalizeSideLevels(game.playerLevels);
     let knockBackTriggered = engineIsKnockbackTriggered(frameResult);
     let knockBackAppliedPlayers = [];
+    let knockBackStepCount = 1;
+    if (knockBackTriggered) {
+        let mode = (cfg && cfg.knockBackConditionMode) ? cfg.knockBackConditionMode : 'unlimited';
+        let allowTwoStep = !!cfg.nonSingleKnockBackTwoSteps && mode !== 'singleT';
+        if (allowTwoStep) {
+            let lastRound = (game.roundHistory && game.roundHistory.length > 0)
+                ? game.roundHistory[game.roundHistory.length - 1]
+                : null;
+            let winningCards = (lastRound && lastRound.played)
+                ? (lastRound.played[lastRound.winner] || [])
+                : [];
+            let coreElement = engineGetWinningHandCoreElement(winningCards);
+            let isNonSingleLevelerOnlyCore = !!(
+                coreElement
+                && Array.isArray(coreElement.cards)
+                && coreElement.cards.length >= 2
+                && coreElement.cards.every(card => card.rank === game.level)
+            );
+            if (isNonSingleLevelerOnlyCore) {
+                knockBackStepCount = 2;
+            }
+        }
+    }
     if (knockBackTriggered) {
         // Attackers trigger knock-back on defenders.
         let processedDefendingSides = {};
@@ -2487,7 +2572,7 @@ function engineApplyFrameResult(frameResult) {
             let sidePlayers = engineGetPlayersForSide(sideIndex);
             let sideAnchor = sidePlayers[0];
             let currentAbs = engineGetCycleAwareAbsoluteLevel(sideAnchor, baseLevels[sideAnchor]);
-            let destinationAbs = engineGetKnockBackDestinationAbsolute(sideAnchor, currentAbs);
+            let destinationAbs = engineGetKnockBackDestinationAbsolute(sideAnchor, currentAbs, knockBackStepCount);
             let destinationCycle = Math.floor(destinationAbs / 13);
             let destinationLevel = engineCycleOffsetToLevel(destinationAbs % 13, engineGetConfiguredStartLevel());
             for (let sidePlayer of sidePlayers) {
@@ -2525,6 +2610,7 @@ function engineApplyFrameResult(frameResult) {
         nextPivot: frameResult.nextPivot,
         nextLevel: nextLevel,
         knockBackTriggered,
+        knockBackStepCount,
         knockBackAppliedPlayers,
         gameWon,
         winners,

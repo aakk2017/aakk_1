@@ -3219,8 +3219,8 @@ function humanPlayCards() {
 const SETTINGS_FIELDS_BY_TAB = {
     presets: ['presetName'],
     general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
-    scoring: ['scoringPreset', 'endingCompensation', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
-    levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'gameMode'],
+    scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
+    levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
     timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
 };
 
@@ -3230,7 +3230,7 @@ const SETTINGS_SELECT_OPTIONS = {
     pivotPassMode: ['winner-pivot', 'rotate-pivot'],
     allowOverbase: ['false', 'true'],
     overbaseRestrictions: ['none', 'default'],
-    failedMultiplayHandling: ['default', 'compensation'],
+    failedMultiplayHandling: ['default', 'compensation', 'lian-zhong-compensation'],
     allowCrossings: ['false', 'true'],
     scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
     baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
@@ -3263,6 +3263,7 @@ const MAIN_PRESET_COMPARISON_FIELDS = [
     'scoringPreset',
     'countingSystem',
     'endingCompensation',
+    'endingCompensationUnit',
     'stageThreshold',
     'levelThreshold',
     'levelUpLimitPerFrame',
@@ -3279,6 +3280,7 @@ const MAIN_PRESET_COMPARISON_FIELDS = [
     'knockBackLevels',
     'knockBackConditionMode',
     'knockBackTakeStageRequired',
+    'nonSingleKnockBackTwoSteps',
     'gameMode',
     'doubleDeclarationOrdering',
 ];
@@ -3397,6 +3399,7 @@ function syncScoringPresetLabel() {
         let sp = scoringPresets[key];
         let ok = true;
         if (sp.endingCompensation !== undefined && !!cfg.endingCompensation !== sp.endingCompensation) ok = false;
+        if (sp.endingCompensationUnit !== undefined && Number(cfg.endingCompensationUnit) !== Number(sp.endingCompensationUnit)) ok = false;
         if (sp.stageThreshold !== undefined && cfg.stageThreshold !== sp.stageThreshold) ok = false;
         if (sp.levelThreshold !== undefined && cfg.levelThreshold !== sp.levelThreshold) ok = false;
         if (sp.levelUpLimitPerFrame !== undefined && cfg.levelUpLimitPerFrame !== sp.levelUpLimitPerFrame) ok = false;
@@ -3602,6 +3605,7 @@ function setRuleConfigFieldValue(field, rawValue) {
                 let sp = scoringPresets[rawValue];
                 // Apply all authoritative preset fields
                 if (sp.endingCompensation !== undefined) gSettingsDraftRuleConfig.endingCompensation = sp.endingCompensation;
+                if (sp.endingCompensationUnit !== undefined) gSettingsDraftRuleConfig.endingCompensationUnit = Number(sp.endingCompensationUnit);
                 if (sp.stageThreshold !== undefined) gSettingsDraftRuleConfig.stageThreshold = sp.stageThreshold;
                 if (sp.levelThreshold !== undefined) gSettingsDraftRuleConfig.levelThreshold = sp.levelThreshold;
                 if (sp.levelUpLimitPerFrame !== undefined) gSettingsDraftRuleConfig.levelUpLimitPerFrame = sp.levelUpLimitPerFrame;
@@ -3625,6 +3629,7 @@ function setRuleConfigFieldValue(field, rawValue) {
                 if (lp.knockBackLevels !== undefined) gSettingsDraftRuleConfig.knockBackLevels = Array.isArray(lp.knockBackLevels) ? [...lp.knockBackLevels] : [];
                 if (lp.knockBackConditionMode !== undefined) gSettingsDraftRuleConfig.knockBackConditionMode = lp.knockBackConditionMode;
                 if (lp.knockBackTakeStageRequired !== undefined) gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!lp.knockBackTakeStageRequired;
+                if (lp.nonSingleKnockBackTwoSteps !== undefined) gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps = !!lp.nonSingleKnockBackTwoSteps;
                 if (lp.gameMode !== undefined) gSettingsDraftRuleConfig.gameMode = lp.gameMode;
                 resetLevelsMatrixStateFromRuleConfig();
             }
@@ -3654,7 +3659,10 @@ function setRuleConfigFieldValue(field, rawValue) {
 
         if (field === 'failedMultiplayHandling') {
             gSettingsDraftRuleConfig.failedMultiplayHandling = rawValue;
-            gSettingsDraftRuleConfig.multiplayCompensation = (rawValue === 'compensation');
+            gSettingsDraftRuleConfig.multiplayCompensation = (
+                rawValue === 'compensation'
+                || rawValue === 'lian-zhong-compensation'
+            );
             return;
         }
 
@@ -3684,7 +3692,7 @@ function setRuleConfigFieldValue(field, rawValue) {
             return;
         }
 
-        if (['deckCount', 'multiplayCompensationAmount', 'stageThreshold', 'levelThreshold', 'startLevel'].includes(field)) {
+        if (['deckCount', 'multiplayCompensationAmount', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'startLevel'].includes(field)) {
             let numeric = Number(rawValue);
             if (!Number.isFinite(numeric)) {
                 numeric = Number(gSettingsDraftRuleConfig[field]);
@@ -3702,6 +3710,12 @@ function setRuleConfigFieldValue(field, rawValue) {
 
             if (field === 'multiplayCompensationAmount') {
                 if (!Number.isFinite(numeric)) numeric = 5;
+                if (numeric < 1) numeric = 1;
+                if (numeric > 10) numeric = 10;
+            }
+
+            if (field === 'endingCompensationUnit') {
+                if (!Number.isFinite(numeric)) numeric = 2;
                 if (numeric < 1) numeric = 1;
                 if (numeric > 10) numeric = 10;
             }
@@ -3754,12 +3768,23 @@ function setRuleConfigFieldValue(field, rawValue) {
 
         if (field === 'knockBackConditionMode') {
             gSettingsDraftRuleConfig.knockBackConditionMode = rawValue;
+            if (rawValue === 'singleT') {
+                gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps = false;
+            } else if (gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps === undefined || gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps === null) {
+                gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps = true;
+            }
             syncLevelsPresetLabel();
             return;
         }
 
         if (field === 'knockBackTakeStageRequired') {
             gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!rawValue;
+            syncLevelsPresetLabel();
+            return;
+        }
+
+        if (field === 'nonSingleKnockBackTwoSteps') {
+            gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps = !!rawValue;
             syncLevelsPresetLabel();
             return;
         }
@@ -4107,6 +4132,9 @@ function createKnockBackConditionRow(readOnly) {
     radioGroup.className = 'settings-radio-group levels-row-inline-group';
 
     let mode = gSettingsDraftRuleConfig.knockBackConditionMode || 'unlimited';
+    let nonSingleTwoStepValue = (gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps === undefined || gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps === null)
+        ? (mode !== 'singleT')
+        : !!gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps;
     const radioOptions = [
         { value: 'unlimited', text: t('settingsDialog.options.unlimited') },
         { value: 'singleT', text: t('settingsDialog.options.singleT') },
@@ -4155,6 +4183,26 @@ function createKnockBackConditionRow(readOnly) {
     checkboxLabel.appendChild(document.createTextNode(t('settingsDialog.options.takeStageRequired')));
     checkboxWrap.appendChild(checkboxLabel);
     row.appendChild(checkboxWrap);
+
+    let twoStepWrap = document.createElement('div');
+    twoStepWrap.className = 'settings-checkbox-group levels-row-inline-group';
+    let twoStepLabel = document.createElement('label');
+    twoStepLabel.className = 'settings-checkbox-option';
+    let twoStepCheckbox = document.createElement('input');
+    twoStepCheckbox.type = 'checkbox';
+    twoStepCheckbox.checked = nonSingleTwoStepValue;
+    twoStepCheckbox.disabled = !!readOnly || mode === 'singleT';
+    twoStepCheckbox.setAttribute('data-settings-field', 'nonSingleKnockBackTwoSteps');
+    if (!readOnly && mode !== 'singleT') {
+        twoStepCheckbox.addEventListener('change', () => {
+            setRuleConfigFieldValue('nonSingleKnockBackTwoSteps', twoStepCheckbox.checked);
+            renderSettingsDialog();
+        });
+    }
+    twoStepLabel.appendChild(twoStepCheckbox);
+    twoStepLabel.appendChild(document.createTextNode(t('settingsDialog.options.nonSingleKnockBackTwoSteps')));
+    twoStepWrap.appendChild(twoStepLabel);
+    row.appendChild(twoStepWrap);
 
     return row;
 }
@@ -4330,6 +4378,11 @@ function createSettingsFieldEl(field, readOnly) {
         if (field === 'baseTimeIncrement') {
             el.min = '1';
             el.max = '60';
+            el.step = '1';
+        }
+        if (field === 'endingCompensationUnit') {
+            el.min = '1';
+            el.max = '10';
             el.step = '1';
         }
         if (currentValue !== null && currentValue !== undefined && currentValue !== Infinity) {
@@ -4656,6 +4709,7 @@ function renderGeneralTabBody(container, readOnly) {
     const failOptions = [
         { value: 'default', key: 'failedMultiplayNormal' },
         { value: 'compensation', key: 'failedMultiplayCompensation' },
+        { value: 'lian-zhong-compensation', key: 'failedMultiplayLianZhongCompensation' },
     ];
     for (let opt of failOptions) {
         let op = document.createElement('option');
@@ -4735,6 +4789,9 @@ function renderScoringTabBody(container, readOnly) {
     let row2 = document.createElement('div');
     row2.className = 'scoring-row';
     row2.appendChild(createSettingsFieldEl('endingCompensation', readOnly));
+    if (!!getRuleConfigFieldValue('endingCompensation')) {
+        row2.appendChild(createSettingsFieldEl('endingCompensationUnit', readOnly));
+    }
     rows.appendChild(row2);
 
     // Row 3: stage threshold + level threshold + level-up limit (all in one row)
@@ -5150,6 +5207,9 @@ function showCountingDialog(result, frameResult, applied) {
     // must come from the same finalized score-breakdown object.
     let breakdown = result.scoreBreakdown || {
         counterScore: result.counterScore,
+        baseScoreBeforeSelfBaseHalf: (result.baseScoreBeforeSelfBaseHalf !== undefined ? result.baseScoreBeforeSelfBaseHalf : result.baseScore),
+        baseScoreAfterSelfBaseHalf: (result.baseScoreAfterSelfBaseHalf !== undefined ? result.baseScoreAfterSelfBaseHalf : result.baseScore),
+        baseScoreSelfBaseHalfApplied: !!result.baseScoreSelfBaseHalfApplied,
         baseScore: result.baseScore,
         endingCompensation: result.endingCompensation,
         multiplayCompensation: result.multiplayCompensation,
@@ -5181,8 +5241,14 @@ function showCountingDialog(result, frameResult, applied) {
     cdScore.innerHTML = '<div style="font-weight:bold;margin-bottom:0.5vh;">' + t('counting.scoreLabel') + '</div>';
     let deskScore = breakdown.counterScore;
     addScoreRow(cdScore, t('counting.deskScore'), deskScore);
+    if (breakdown.baseScoreBeforeSelfBaseHalf > 0 && breakdown.baseScoreSelfBaseHalfApplied) {
+        addScoreRow(cdScore, t('counting.baseScoreBeforeSelfBaseHalf'), breakdown.baseScoreBeforeSelfBaseHalf);
+    }
     if (breakdown.baseScore > 0) {
-        addScoreRow(cdScore, t('counting.baseScore'), breakdown.baseScore);
+        let baseScoreLabel = breakdown.baseScoreSelfBaseHalfApplied
+            ? t('counting.baseScoreAfterSelfBaseHalf')
+            : t('counting.baseScore');
+        addScoreRow(cdScore, baseScoreLabel, breakdown.baseScore);
     }
     if (result.endingCompensationActive) {
         addScoreRow(cdScore, t('counting.endingCompensation'), breakdown.endingCompensation);

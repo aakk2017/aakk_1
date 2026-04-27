@@ -34,6 +34,7 @@
     const SCORING_PRESETS = {
         'traditional': {
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: null,
@@ -41,6 +42,7 @@
         },
         'traditional-power': {
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: null,
@@ -48,6 +50,7 @@
         },
         '7-3-5': {
             endingCompensation: true,
+            endingCompensationUnit: 2,
             stageThreshold: 76,
             levelThreshold: 38,
             levelUpLimitPerFrame: 5,
@@ -55,6 +58,7 @@
         },
         '8-4-4': {
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: 4,
@@ -74,6 +78,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'high-school': {
@@ -85,6 +90,7 @@
             knockBackLevels: [9, 12],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'slow': {
@@ -96,6 +102,7 @@
             knockBackLevels: [9, 12],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'plain': {
@@ -107,6 +114,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'short': {
@@ -118,6 +126,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
     };
@@ -137,6 +146,7 @@
             scoringPreset: 'traditional',
             countingSystem: 'default',
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: null,
@@ -153,6 +163,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
             levelConfiguration: 'default',
 
@@ -173,6 +184,7 @@
             scoringPreset: 'traditional-power',
             countingSystem: 'default',
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: null,
@@ -189,6 +201,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'high-school': {
@@ -203,6 +216,7 @@
             scoringPreset: 'traditional-power',
             countingSystem: 'default',
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: null,
@@ -219,6 +233,7 @@
             knockBackLevels: [9, 12],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'Berkeley': {
@@ -233,6 +248,7 @@
             scoringPreset: 'traditional-power',
             countingSystem: 'default',
             endingCompensation: false,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 40,
             levelUpLimitPerFrame: null,
@@ -249,6 +265,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'experimental': {
@@ -262,6 +279,7 @@
             scoringPreset: '7-3-5',
             countingSystem: '7-3-5',
             endingCompensation: true,
+            endingCompensationUnit: 2,
             stageThreshold: 76,
             levelThreshold: 38,
             levelUpLimitPerFrame: 5,
@@ -278,6 +296,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
         'short-level rotate-pivot': {
@@ -293,6 +312,7 @@
             scoringPreset: 'traditional',
             countingSystem: 'default',
             endingCompensation: true,
+            endingCompensationUnit: 2,
             stageThreshold: 80,
             levelThreshold: 20,
             levelUpLimitPerFrame: null,
@@ -309,6 +329,7 @@
             knockBackLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
+            nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
     };
@@ -317,8 +338,8 @@
         tabs: {
             presets: ['presetName'],
             general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
-            scoring: ['scoringPreset', 'endingCompensation', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
-            levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'gameMode'],
+            scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
+            levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
             timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
         },
     };
@@ -350,12 +371,16 @@
         out.doubleDeclarationOrdering = out.allowOverbase ? 's-h-c-d' : 'all-suits-equal';
         out.allowCrossings = !!out.allowCrossings;
         out.endingCompensation = !!out.endingCompensation;
+        out.endingCompensationUnit = clampInt(out.endingCompensationUnit, 2, 1, 10);
         out.attackersSelfBaseHalfMultiplier = !!out.attackersSelfBaseHalfMultiplier;
 
         out.multiplayCompensationAmount = clampInt(out.multiplayCompensationAmount, 5, 1, 10);
         // General-tab skeleton policy: compensation mode is config-selectable,
         // but deep runtime semantics are implemented in later dedicated notes.
-        out.multiplayCompensation = (out.failedMultiplayHandling === 'compensation');
+        out.multiplayCompensation = (
+            out.failedMultiplayHandling === 'compensation'
+            || out.failedMultiplayHandling === 'lian-zhong-compensation'
+        );
         let dcMax = 100 * (out.deckCount || 2);
         out.stageThreshold = clampInt(out.stageThreshold, 80, 1, dcMax);
         out.levelThreshold = clampInt(out.levelThreshold, 40, 2, dcMax);
@@ -385,6 +410,15 @@
         out.knockBackLevels = normalizeLevelList(out.knockBackLevels);
 
         if (!out.knockBackConditionMode) out.knockBackConditionMode = 'unlimited';
+        if (out.nonSingleKnockBackTwoSteps === undefined || out.nonSingleKnockBackTwoSteps === null) {
+            out.nonSingleKnockBackTwoSteps = (out.knockBackConditionMode !== 'singleT');
+        } else {
+            out.nonSingleKnockBackTwoSteps = !!out.nonSingleKnockBackTwoSteps;
+        }
+        if (out.knockBackConditionMode === 'singleT') {
+            // single-T and non-single-two-step are incompatible in effective behavior
+            out.nonSingleKnockBackTwoSteps = false;
+        }
 
         // Legacy migration: if old config encoded semantic start as a literal start-level member,
         // treat it as semantic marker when explicit marker fields are absent.
@@ -431,7 +465,7 @@
         const enumFields = {
             pivotPassMode: ['winner-pivot', 'rotate-pivot'],
             overbaseRestrictions: ['none', 'default'],
-            failedMultiplayHandling: ['default', 'compensation'],
+            failedMultiplayHandling: ['default', 'compensation', 'lian-zhong-compensation'],
             scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
             countingSystem: ['default', '7-3-5'],
             baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
@@ -504,6 +538,13 @@
             matches = matches && !!cfg.mustStopStartMarker === !!preset.mustStopStartMarker;
             matches = matches && (cfg.knockBackConditionMode || 'unlimited') === (preset.knockBackConditionMode || 'unlimited');
             matches = matches && !!cfg.knockBackTakeStageRequired === !!preset.knockBackTakeStageRequired;
+            let cfgTwoStep = (cfg.nonSingleKnockBackTwoSteps === undefined || cfg.nonSingleKnockBackTwoSteps === null)
+                ? ((cfg.knockBackConditionMode || 'unlimited') !== 'singleT')
+                : !!cfg.nonSingleKnockBackTwoSteps;
+            let presetTwoStep = (preset.nonSingleKnockBackTwoSteps === undefined || preset.nonSingleKnockBackTwoSteps === null)
+                ? ((preset.knockBackConditionMode || 'unlimited') !== 'singleT')
+                : !!preset.nonSingleKnockBackTwoSteps;
+            matches = matches && cfgTwoStep === presetTwoStep;
             // Compare level lists as sets so ordering differences do not affect equality.
             if (matches) {
                 let sameSet = function(a, b) {
