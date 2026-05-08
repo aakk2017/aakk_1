@@ -30,7 +30,13 @@ const messages_en = {
     botDeclarationModeNormal: 'normal',
     botDeclarationModePassive: 'passive',
     showBase:       'Show Base',
+    pause:          'Pause',
+    agree:          'agree',
+    disagree:       'disagree',
     ready:          'Ready',
+    quit:           'quit',
+    cancel:         'Cancel',
+    confirmQuit:    'Confirm quit',
     leave:          'Leave',
   },
 
@@ -95,6 +101,7 @@ const messages_en = {
     botThinking:  '{playerName} thinking…',
     forehandControl: 'Mark exposed cards of {targetName} in led division (or skip)',
     gameOver:     'Game Over',
+    paused:       'Game paused',
   },
 
   // ── Desk / round info ──
@@ -129,6 +136,12 @@ const messages_en = {
     baseScoreBonus: ' (base +{baseScore})',
     levelAdvance:   '{players} advance {delta} level(s)',
     gameWon:        '{players} won the game!',
+    pauseRequested: '{playerName} requested a pause',
+    pauseRejected:  '{playerName} rejected the pause request',
+    pauseTimeout:   'Pause request timed out, game resumed',
+    pauseEntered:   'All players agreed, game paused',
+    pauseResumed:   'All players are ready, game resumed',
+    quitDuringPause:'{playerName} quit during pause. Game over.',
   },
 
   // ── Labels ──
@@ -382,6 +395,16 @@ const messages_en = {
     shotClockLabel: 'Clock',
   },
 
+  pause: {
+    waitingTitle: 'Waiting for agreement...',
+    waitingMessage: '{playerName} requested a pause',
+    pausedTitle: 'Paused',
+    pausedMessage: 'Waiting for everyone to click ready',
+    quitConfirm: 'Confirm quitting this game?',
+    quitReason: 'Player {playerName} quit during pause.',
+    countdown: '{seconds}s remaining',
+  },
+
   // ── Dealing phase (note 25) ──
   dealing: {
     dealtCount: '{count} dealt',
@@ -397,10 +420,8 @@ const messages_en = {
   counting: {
     baseLabel:       'Base',
     scoreLabel:      'Score Breakdown',
-    deskScore:       'Counter cards',
+    deskScore:       'Desk Score',
     baseScore:       'Base Score',
-    baseScoreBeforeSelfBaseHalf: 'Base Score (before self-base-half)',
-    baseScoreAfterSelfBaseHalf: 'Base Score (after self-base-half)',
     endingCompensation: 'Ending Compensation',
     multiplayCompensation: 'Multiplay Compensation',
     totalScore:      'Total',

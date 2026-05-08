@@ -76,6 +76,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [3, 8, 11],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -88,18 +89,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [],
             knockBackLevels: [9, 12],
-            knockBackConditionMode: 'unlimited',
-            knockBackTakeStageRequired: false,
-            nonSingleKnockBackTwoSteps: true,
-            gameMode: 'endless',
-        },
-        'slow': {
-            startLevel: 0,
-            mustDefendStartMarker: false,
-            mustDefendLevels: [9, 12],
-            mustStopStartMarker: true,
-            mustStopLevels: [3, 8, 11],
-            knockBackLevels: [9, 12],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -112,18 +102,20 @@
             mustStopStartMarker: false,
             mustStopLevels: [],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
             gameMode: 'endless',
         },
-        'short': {
-            startLevel: 5,
+        'skip-468': {
+            startLevel: 0,
             mustDefendStartMarker: false,
             mustDefendLevels: [],
             mustStopStartMarker: false,
-            mustStopLevels: [3, 8, 11],
+            mustStopLevels: [],
             knockBackLevels: [],
+            skipLevels: [2, 4, 6],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -161,6 +153,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [3, 8, 11],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -199,6 +192,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -231,6 +225,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [],
             knockBackLevels: [9, 12],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -263,6 +258,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [3, 8, 11],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -294,6 +290,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [3, 8, 11],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -327,6 +324,7 @@
             mustStopStartMarker: false,
             mustStopLevels: [],
             knockBackLevels: [],
+            skipLevels: [],
             knockBackConditionMode: 'unlimited',
             knockBackTakeStageRequired: false,
             nonSingleKnockBackTwoSteps: true,
@@ -339,7 +337,7 @@
             presets: ['presetName'],
             general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
             scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
-            levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
+            levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'skipLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
             timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
         },
     };
@@ -408,6 +406,7 @@
         out.mustDefendLevels = normalizeLevelList(out.mustDefendLevels);
         out.mustStopLevels = normalizeLevelList(out.mustStopLevels);
         out.knockBackLevels = normalizeLevelList(out.knockBackLevels);
+        out.skipLevels = normalizeLevelList(out.skipLevels);
 
         if (!out.knockBackConditionMode) out.knockBackConditionMode = 'unlimited';
         if (out.nonSingleKnockBackTwoSteps === undefined || out.nonSingleKnockBackTwoSteps === null) {
@@ -434,6 +433,33 @@
         // Mutual exclusion: must-defend and must-stop cannot contain the same level.
         let defendSet = new Set(out.mustDefendLevels);
         out.mustStopLevels = out.mustStopLevels.filter(x => !defendSet.has(x));
+
+        // Mutual exclusion: skip, must-defend, must-stop, and knock-back cannot contain the same level.
+        let skipSet = new Set(out.skipLevels);
+        out.mustDefendLevels = out.mustDefendLevels.filter(x => !skipSet.has(x));
+        out.mustStopLevels = out.mustStopLevels.filter(x => !skipSet.has(x));
+        out.knockBackLevels = out.knockBackLevels.filter(x => !skipSet.has(x));
+
+        // Prevent impossible all-skipped state from stale/external input.
+        // Keep 12 skips deterministically by dropping the lowest internal index.
+        if (skipSet.size >= 13) {
+            out.skipLevels = out.skipLevels.filter(x => x !== 0);
+            skipSet = new Set(out.skipLevels);
+        }
+
+        // If start level is in skip set, move to nearest non-skipped rank cyclically.
+        if (skipSet.has(out.startLevel)) {
+            let found = false;
+            for (let offset = 1; offset < 13; offset++) {
+                let candidate = (out.startLevel + offset) % 13;
+                if (!skipSet.has(candidate)) {
+                    out.startLevel = candidate;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) out.startLevel = 0;
+        }
 
         if (out.baseMultiplierScheme === 'unlimited') {
             out.baseMultiplierLimit = Infinity;
@@ -469,7 +495,7 @@
             scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
             countingSystem: ['default', '7-3-5'],
             baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
-            levelsPreset: ['', 'default', 'high-school', 'slow', 'plain', 'short'],
+            levelsPreset: ['', 'default', 'high-school', 'plain', 'skip-468'],
             knockBackConditionMode: ['unlimited', 'singleT'],
             gameMode: ['endless', 'pass-A'],
             timingPreset: ['', 'normal', '180+30'],
@@ -556,7 +582,8 @@
                 };
                 matches = sameSet(cfg.mustDefendLevels, preset.mustDefendLevels)
                     && sameSet(cfg.mustStopLevels, preset.mustStopLevels)
-                    && sameSet(cfg.knockBackLevels, preset.knockBackLevels);
+                    && sameSet(cfg.knockBackLevels, preset.knockBackLevels)
+                    && sameSet(cfg.skipLevels, preset.skipLevels);
             }
             if (matches) return presetName;
         }

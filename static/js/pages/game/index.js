@@ -29,6 +29,7 @@ const gLabelEast   = document.getElementById('label-east');
 const gLabelSouth  = document.getElementById('label-south');
 const gBtnNewGame  = document.getElementById('btn-new-game');
 const gBtnPlay     = document.getElementById('btn-play');
+const gBtnPause    = document.getElementById('btn-pause');
 const gGameActions = document.getElementById('game-actions');
 // gBtnDeclare removed
 const gDeclareMatrix = document.getElementById('declare-matrix');
@@ -75,6 +76,18 @@ const gBtnSettingsCancel = document.getElementById('btn-settings-cancel');
 const gBtnSettingsConfirm = document.getElementById('btn-settings-confirm');
 const gSettingsTabs = Array.from(document.querySelectorAll('#settings-tab-row .settings-tab'));
 const gSettingsTopLevelTabs = Array.from(document.querySelectorAll('#settings-toplevel-tabs .settings-toplevel-tab'));
+const gPauseOverlay = document.getElementById('pause-overlay');
+const gPauseDialog = document.getElementById('pause-dialog');
+const gPauseDialogTitle = document.getElementById('pause-dialog-title');
+const gPauseDialogMessage = document.getElementById('pause-dialog-message');
+const gPauseDialogCountdown = document.getElementById('pause-dialog-countdown');
+const gPauseAgreementHost = document.getElementById('pause-agreement-host');
+const gPauseHumanControls = document.getElementById('pause-human-controls');
+const gPausePrimaryControls = document.getElementById('pause-primary-controls');
+const gPauseQuitConfirm = document.getElementById('pause-quit-confirm');
+const gPauseQuitConfirmText = document.getElementById('pause-quit-confirm-text');
+const gBtnPauseQuitCancel = document.getElementById('btn-pause-quit-cancel');
+const gBtnPauseQuitConfirm = document.getElementById('btn-pause-quit-confirm');
 
 // ---------------------------------------------------------------------------
 // Test mode: human controls both South (0) and East (1)
@@ -145,6 +158,8 @@ let currentDeclaration = null;   // declaration made by human during dealing
 let gAutoStrain3rdTriggerCard = null; // 3rd undealt card used for auto-strain (note 44a)
 let gAutoStrain3rdTriggered = false;
 let dealingTimer     = null;   // setInterval handle for deal animation
+let gFrameIntermittentTimeout = null;
+let gFrameIntermittentEndsAt = 0;
 
 // Frame number within current game (starts at 1, increments per frame)
 let frameNumber = 0;
@@ -170,6 +185,35 @@ let gOverbaseDecision = null;
 let gDeclarationHistoryRows = [];
 let gDeclHistoryBox = null;
 let gDeclHistoryTbody = null;
+let gSeatsHoverLevelPositionBox = null;
+let gSeatsTopLeftBoxView = 'seats';
+
+function getDeclarationOrderAnchor() {
+    if (game && typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
+        return game.pivot;
+    }
+    let anchor = game && Number.isInteger(game.declarationOrderAnchor) ? game.declarationOrderAnchor : 0;
+    if (anchor < 0 || anchor >= NUM_PLAYERS) return 0;
+    return anchor;
+}
+
+function renderSeatsBoxFromGameState() {
+    if (!gSeatsDiv || !game) return;
+    if (typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
+        let humanRelPivot = (game.pivot + 4 - HUMAN_PLAYER) % NUM_PLAYERS;
+        let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
+        gSeatsDiv.setAttribute('pivot', pivotPosNames[humanRelPivot]);
+        return;
+    }
+    gSeatsDiv.setAttribute('pivot', 'undetermined');
+}
+
+function refreshTopLeftSeatAndLevelPositionBoxFromGameState() {
+    renderSeatsBoxFromGameState();
+    if (gSeatsTopLeftBoxView === 'level-position') {
+        renderSeatsHoverLevelPositionSquare();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Timing state (note 24)
@@ -210,6 +254,21 @@ let gNoDeclareClicked = new Set();
 
 // Callback to invoke when a timed window expires or is broken
 let gTimerExpireCallback = null;
+let gLiveTimerMeta = null;
+
+// Pause/resume unanimous-agreement protocol state (note 52)
+let pauseState = {
+    phase: 'idle', // idle | waitingPauseAgreements | paused | waitingQuitConfirm | finished
+    requesterSeat: null,
+    agreementBySeat: ['neutral', 'neutral', 'neutral', 'neutral'],
+    readyBySeat: ['neutral', 'neutral', 'neutral', 'neutral'],
+    waitingRemainingMs: 0,
+    waitingTimerId: null,
+    rejectFlashTimerId: null,
+    frozenSnapshot: null,
+    pendingResumePrompt: false,
+    quitRequesterSeat: null,
+};
 
 // ---------------------------------------------------------------------------
 // Card rendering
@@ -585,6 +644,7 @@ function toggleCardSelection(cardId, el) {
         return;
     }
     let allowCrossingSelection = isLocalCrossingSelectionMode();
+    if (isPauseDialogBlockingGameplay()) return;
     if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isHumanControlled(engineGetCurrentPlayer())) return;
     if (game.phase !== GamePhase.PLAYING && game.phase !== GamePhase.BASING) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked && !allowCrossingSelection) return;
@@ -767,10 +827,14 @@ function updateScoreDisplay() {
     if (game.phase === GamePhase.IDLE || game.phase === GamePhase.DEALING || game.phase === GamePhase.DECLARING || game.phase === GamePhase.BASING) {
         gScoreCont.style.borderColor = '#f8f8f8';
     } else {
-        // Hue 0->60 for score 0->40, same formula as recap: h = s * 3 / 2
-        const h = s * 3 / 2;
-        gScoreCont.style.borderColor = 'hsl(' + h + ', 100%, 50%)';
+        gScoreCont.style.borderColor = getScoreBorderColorForValue(s);
     }
+}
+
+function getScoreBorderColorForValue(score) {
+    // Hue 0->60 for score 0->40, same formula as recap: h = s * 3 / 2
+    const h = score * 3 / 2;
+    return 'hsl(' + h + ', 100%, 50%)';
 }
 
 // ---------------------------------------------------------------------------
@@ -794,6 +858,7 @@ function clearLog() {
 
 function updatePhaseDisplay(text) {
     gPhaseInfo.textContent = text;
+    refreshPauseButtonState();
 }
 
 function updateStatus(text) {
@@ -825,6 +890,542 @@ function showError(msg) {
     }
 }
 
+function isPauseDialogBlockingGameplay() {
+    return pauseState.phase === 'waitingPauseAgreements'
+        || pauseState.phase === 'paused'
+        || pauseState.phase === 'waitingQuitConfirm';
+}
+
+function canRequestPauseNow() {
+    if (!gBtnPause || !game) return false;
+    if (pauseState.phase !== 'idle') return false;
+    if (game.phase === GamePhase.COUNTING || game.phase === GamePhase.GAME_OVER) return false;
+    if (game.phase === GamePhase.IDLE && frameNumber <= 0) return false;
+    return true;
+}
+
+function refreshPauseButtonState() {
+    if (!gBtnPause) return;
+    gBtnPause.disabled = !canRequestPauseNow();
+}
+
+function seatToPauseBoxPosition(seat) {
+    if (seat === 0) return 'bottom';
+    if (seat === 1) return 'right';
+    if (seat === 2) return 'top';
+    return 'left';
+}
+
+function getPauseBoxStateMap(sourceBySeat) {
+    let mapped = {
+        top: 'neutral',
+        right: 'neutral',
+        bottom: 'neutral',
+        left: 'neutral',
+    };
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        mapped[seatToPauseBoxPosition(seat)] = sourceBySeat[seat] || 'neutral';
+    }
+    return mapped;
+}
+
+function renderPauseAgreementBox(host, sourceBySeat) {
+    if (!host) return;
+    host.innerHTML = '';
+
+    let box = document.createElement('div');
+    box.className = 'pause-agreement-box';
+
+    let square = document.createElement('div');
+    square.className = 'pause-agreement-square';
+    box.appendChild(square);
+
+    let diagonalSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    diagonalSvg.setAttribute('class', 'pause-agreement-diagonals');
+    diagonalSvg.setAttribute('viewBox', '0 0 100 100');
+    diagonalSvg.setAttribute('preserveAspectRatio', 'none');
+    diagonalSvg.setAttribute('aria-hidden', 'true');
+
+    let diagA = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    diagA.setAttribute('class', 'pause-agreement-diagonal');
+    diagA.setAttribute('x1', '0');
+    diagA.setAttribute('y1', '0');
+    diagA.setAttribute('x2', '100');
+    diagA.setAttribute('y2', '100');
+
+    let diagB = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    diagB.setAttribute('class', 'pause-agreement-diagonal');
+    diagB.setAttribute('x1', '100');
+    diagB.setAttribute('y1', '0');
+    diagB.setAttribute('x2', '0');
+    diagB.setAttribute('y2', '100');
+
+    diagonalSvg.appendChild(diagA);
+    diagonalSvg.appendChild(diagB);
+    square.appendChild(diagonalSvg);
+
+    let byPos = getPauseBoxStateMap(sourceBySeat);
+    let clipByPos = {
+        top: 'polygon(0 0, 100% 0, 50% 50%)',
+        right: 'polygon(100% 0, 100% 100%, 50% 50%)',
+        bottom: 'polygon(0 100%, 100% 100%, 50% 50%)',
+        left: 'polygon(0 0, 0 100%, 50% 50%)',
+    };
+    ['top', 'right', 'bottom', 'left'].forEach((pos) => {
+        let tri = document.createElement('div');
+        tri.className = 'pause-agreement-triangle';
+        tri.setAttribute('data-pos', pos);
+        tri.setAttribute('data-state', byPos[pos]);
+        tri.style.clipPath = clipByPos[pos];
+        tri.style.webkitClipPath = clipByPos[pos];
+        let markText = '';
+        if (byPos[pos] === 'agree' || byPos[pos] === 'ready') markText = '\u2713';
+        if (byPos[pos] === 'reject') markText = '\u00D7';
+        if (markText) {
+            let mark = document.createElement('span');
+            mark.className = 'pause-agreement-mark';
+            mark.textContent = markText;
+            tri.appendChild(mark);
+        }
+        square.appendChild(tri);
+    });
+
+    host.appendChild(box);
+}
+
+function hidePauseDialog() {
+    if (gPauseDialog) gPauseDialog.style.display = 'none';
+    if (gPauseOverlay) gPauseOverlay.style.display = 'none';
+    if (gPauseQuitConfirm) gPauseQuitConfirm.style.display = 'none';
+}
+
+function showPauseDialog() {
+    if (gPauseOverlay) gPauseOverlay.style.display = 'block';
+    if (gPauseDialog) gPauseDialog.style.display = 'block';
+}
+
+function clearPauseTimersOnly() {
+    if (pauseState.waitingTimerId) {
+        clearInterval(pauseState.waitingTimerId);
+        pauseState.waitingTimerId = null;
+    }
+    if (pauseState.rejectFlashTimerId) {
+        clearTimeout(pauseState.rejectFlashTimerId);
+        pauseState.rejectFlashTimerId = null;
+    }
+}
+
+function captureTimerSnapshotForPause() {
+    if (!gTimerInterval || !gLiveTimerMeta) return null;
+    return {
+        kind: gLiveTimerMeta.kind,
+        phase: gTimingPhase,
+        player: gLiveTimerMeta.player,
+        moveType: gLiveTimerMeta.moveType,
+        hasLegalOvercall: gLiveTimerMeta.hasLegalOvercall,
+        onExpire: gTimerExpireCallback,
+        shot: gShotClockRemaining,
+        bank: gBankTimeRemaining,
+        stage: gTimerStage,
+    };
+}
+
+function resumeTimerFromPauseSnapshot(snapshot) {
+    if (!snapshot) return;
+
+    if (snapshot.kind === 'callingWindow') {
+        clearTimers();
+        gTimingPhase = snapshot.phase;
+        gShotClockRemaining = snapshot.shot;
+        gTimerExpireCallback = snapshot.onExpire;
+        let digitEl = showCenterTimer(snapshot.shot);
+        gLiveTimerMeta = { kind: 'callingWindow' };
+        gTimerInterval = setInterval(() => {
+            if (isPauseDialogBlockingGameplay()) return;
+            gShotClockRemaining -= 0.1;
+            if (digitEl) digitEl.textContent = Math.max(0, Math.ceil(gShotClockRemaining));
+            if (gShotClockRemaining <= 0) {
+                clearTimers();
+                if (snapshot.onExpire) snapshot.onExpire();
+            }
+        }, 100);
+        return;
+    }
+
+    if (snapshot.kind === 'playerMove' || snapshot.kind === 'overcallDecision') {
+        clearTimers();
+        gTimingPhase = snapshot.phase;
+        gShotClockRemaining = Math.max(0, Number(snapshot.shot) || 0);
+        gBankTimeRemaining = Math.max(0, Number(snapshot.bank) || 0);
+        gTimerStage = snapshot.stage === 'bank' ? 'bank' : 'shot';
+        gTimerExpireCallback = snapshot.onExpire;
+        gLiveTimerMeta = {
+            kind: snapshot.kind,
+            player: snapshot.player,
+            moveType: snapshot.moveType,
+            hasLegalOvercall: snapshot.hasLegalOvercall,
+        };
+        showTimerOverlay(snapshot.player);
+        gTimerInterval = setInterval(() => {
+            if (isPauseDialogBlockingGameplay()) return;
+            if (gTimerStage === 'shot') {
+                gShotClockRemaining -= 0.1;
+                if (gShotClockRemaining <= 0) {
+                    gShotClockRemaining = 0;
+                    if (gBankTimeRemaining > 0) {
+                        gTimerStage = 'bank';
+                    } else {
+                        clearTimers();
+                        if (snapshot.onExpire) snapshot.onExpire();
+                        return;
+                    }
+                }
+            } else {
+                gBankTimeRemaining -= 0.1;
+                if (snapshot.player !== null && snapshot.player !== undefined) {
+                    game.playerBankTimes[snapshot.player] = Math.max(0, gBankTimeRemaining);
+                }
+                if (gBankTimeRemaining <= 0) {
+                    gBankTimeRemaining = 0;
+                    if (snapshot.player !== null && snapshot.player !== undefined) {
+                        game.playerBankTimes[snapshot.player] = 0;
+                    }
+                    clearTimers();
+                    if (snapshot.onExpire) snapshot.onExpire();
+                    return;
+                }
+            }
+            updateTimerDisplay();
+        }, 100);
+    }
+}
+
+function freezeGameForPauseProtocol() {
+    let snapshot = {
+        hadDealingTimer: !!dealingTimer,
+        timerSnapshot: captureTimerSnapshotForPause(),
+        gamePhase: game ? game.phase : null,
+        intermittentRemainingMs: gFrameIntermittentTimeout ? Math.max(0, gFrameIntermittentEndsAt - Date.now()) : 0,
+    };
+
+    if (dealingTimer) {
+        clearInterval(dealingTimer);
+        dealingTimer = null;
+    }
+    if (gFrameIntermittentTimeout) {
+        clearTimeout(gFrameIntermittentTimeout);
+        gFrameIntermittentTimeout = null;
+        gFrameIntermittentEndsAt = 0;
+    }
+
+    if (gTimerInterval) {
+        clearInterval(gTimerInterval);
+        gTimerInterval = null;
+    }
+
+    gBtnPlay.disabled = true;
+
+    pauseState.frozenSnapshot = snapshot;
+    pauseState.pendingResumePrompt = true;
+}
+
+function resumeGameAfterPauseProtocol() {
+    let snapshot = pauseState.frozenSnapshot;
+    pauseState.frozenSnapshot = null;
+
+    if (!snapshot || !game) return;
+
+    if (snapshot.intermittentRemainingMs > 0) {
+        runFrameIntermittent(snapshot.intermittentRemainingMs);
+        pauseState.pendingResumePrompt = false;
+        return;
+    }
+
+    if (snapshot.hadDealingTimer && game.phase === GamePhase.DEALING) {
+        runDealingPhase();
+        pauseState.pendingResumePrompt = false;
+        return;
+    }
+
+    if (snapshot.timerSnapshot) {
+        resumeTimerFromPauseSnapshot(snapshot.timerSnapshot);
+        pauseState.pendingResumePrompt = false;
+    }
+
+    if (!pauseState.pendingResumePrompt) return;
+    pauseState.pendingResumePrompt = false;
+
+    if (game.phase === GamePhase.PLAYING || game.phase === GamePhase.BASING) {
+        promptCurrentPlayer();
+        return;
+    }
+
+    if (game.phase === GamePhase.DECLARING && !gTimerInterval) {
+        runFinalDeclarationWindow();
+    }
+}
+
+function updatePauseWaitingCountdownUi() {
+    if (!gPauseDialogCountdown) return;
+    let sec = Math.max(0, Math.ceil(pauseState.waitingRemainingMs / 1000));
+    gPauseDialogCountdown.innerHTML = '';
+    let digit = document.createElement('span');
+    digit.className = 'timer-primary';
+    digit.textContent = String(sec);
+    gPauseDialogCountdown.appendChild(digit);
+}
+
+function renderPauseHumanAgreementControls() {
+    if (!gPauseHumanControls) return;
+    gPauseHumanControls.innerHTML = '';
+
+    if (pauseState.phase !== 'waitingPauseAgreements') return;
+
+    let seats = Array.from(HUMAN_PLAYERS).filter(seat => seat !== pauseState.requesterSeat);
+    for (let seat of seats) {
+        if (pauseState.agreementBySeat[seat] !== 'pending') continue;
+        let row = document.createElement('div');
+        row.className = 'pause-human-row';
+
+        let seatText = document.createElement('span');
+        seatText.className = 'pause-human-seat';
+        seatText.textContent = PLAYER_NAMES[seat];
+        row.appendChild(seatText);
+
+        let btnWrap = document.createElement('div');
+        btnWrap.className = 'pause-human-buttons';
+
+        let btnAgree = document.createElement('button');
+        btnAgree.className = 'pause-human-btn';
+        btnAgree.textContent = t('buttons.agree');
+        btnAgree.onclick = () => submitPauseAgreement(seat, 'agree');
+
+        let btnDisagree = document.createElement('button');
+        btnDisagree.className = 'pause-human-btn';
+        btnDisagree.setAttribute('data-kind', 'disagree');
+        btnDisagree.textContent = t('buttons.disagree');
+        btnDisagree.onclick = () => submitPauseAgreement(seat, 'reject');
+
+        btnWrap.appendChild(btnAgree);
+        btnWrap.appendChild(btnDisagree);
+        row.appendChild(btnWrap);
+        gPauseHumanControls.appendChild(row);
+    }
+}
+
+function renderPausePrimaryControls() {
+    if (!gPausePrimaryControls) return;
+    gPausePrimaryControls.innerHTML = '';
+
+    if (pauseState.phase === 'paused') {
+        let btnReady = document.createElement('button');
+        btnReady.className = 'button';
+        btnReady.textContent = t('buttons.ready');
+        btnReady.onclick = () => submitResumeReady(HUMAN_PLAYER);
+        gPausePrimaryControls.appendChild(btnReady);
+
+        let btnQuit = document.createElement('button');
+        btnQuit.className = 'button';
+        btnQuit.textContent = t('buttons.quit');
+        btnQuit.onclick = () => requestQuitDuringPause(HUMAN_PLAYER);
+        gPausePrimaryControls.appendChild(btnQuit);
+    }
+}
+
+function renderPauseDialogByState() {
+    if (!gPauseDialog) return;
+
+    if (pauseState.phase === 'idle' || pauseState.phase === 'finished') {
+        hidePauseDialog();
+        refreshPauseButtonState();
+        return;
+    }
+
+    showPauseDialog();
+
+    if (pauseState.phase === 'waitingPauseAgreements') {
+        gPauseDialogTitle.textContent = t('pause.waitingTitle');
+        gPauseDialogMessage.textContent = t('pause.waitingMessage', { playerName: PLAYER_NAMES[pauseState.requesterSeat] });
+        updatePauseWaitingCountdownUi();
+        renderPauseAgreementBox(gPauseAgreementHost, pauseState.agreementBySeat);
+        renderPauseHumanAgreementControls();
+        renderPausePrimaryControls();
+        if (gPauseQuitConfirm) gPauseQuitConfirm.style.display = 'none';
+    } else {
+        gPauseDialogTitle.textContent = t('pause.pausedTitle');
+        gPauseDialogMessage.textContent = t('pause.pausedMessage');
+        gPauseDialogCountdown.textContent = '';
+        renderPauseAgreementBox(gPauseAgreementHost, pauseState.readyBySeat);
+        if (gPauseHumanControls) gPauseHumanControls.innerHTML = '';
+        renderPausePrimaryControls();
+        if (gPauseQuitConfirm) {
+            gPauseQuitConfirm.style.display = (pauseState.phase === 'waitingQuitConfirm') ? 'block' : 'none';
+            if (gPauseQuitConfirmText) gPauseQuitConfirmText.textContent = t('pause.quitConfirm');
+        }
+    }
+
+    refreshPauseButtonState();
+}
+
+function clearPauseProtocolStateToIdle() {
+    clearPauseTimersOnly();
+    pauseState.phase = 'idle';
+    pauseState.requesterSeat = null;
+    pauseState.agreementBySeat = ['neutral', 'neutral', 'neutral', 'neutral'];
+    pauseState.readyBySeat = ['neutral', 'neutral', 'neutral', 'neutral'];
+    pauseState.waitingRemainingMs = 0;
+    pauseState.quitRequesterSeat = null;
+    renderPauseDialogByState();
+}
+
+function requestPause(requesterSeat) {
+    if (!canRequestPauseNow()) return;
+    appendLog(t('log.pauseRequested', { playerName: PLAYER_NAMES[requesterSeat] }));
+    receivePauseAgreementRequest(requesterSeat);
+}
+
+function receivePauseAgreementRequest(requesterSeat) {
+    pauseState.phase = 'waitingPauseAgreements';
+    pauseState.requesterSeat = requesterSeat;
+    pauseState.agreementBySeat = ['pending', 'pending', 'pending', 'pending'];
+    pauseState.readyBySeat = ['neutral', 'neutral', 'neutral', 'neutral'];
+    pauseState.agreementBySeat[requesterSeat] = 'agree';
+    pauseState.waitingRemainingMs = 10000;
+    clearPauseTimersOnly();
+    freezeGameForPauseProtocol();
+    renderPauseDialogByState();
+
+    pauseState.waitingTimerId = setInterval(() => {
+        if (pauseState.phase !== 'waitingPauseAgreements') return;
+        pauseState.waitingRemainingMs -= 100;
+        if (pauseState.waitingRemainingMs <= 0) {
+            pauseState.waitingRemainingMs = 0;
+            updatePauseWaitingCountdownUi();
+            resolvePauseRequest('timeout');
+            return;
+        }
+        updatePauseWaitingCountdownUi();
+    }, 100);
+
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        if (seat === requesterSeat || isHumanControlled(seat)) continue;
+        setTimeout(() => submitPauseAgreement(seat, 'agree'), 220);
+    }
+}
+
+function submitPauseAgreement(seat, response) {
+    if (pauseState.phase !== 'waitingPauseAgreements') return;
+    if (pauseState.agreementBySeat[seat] !== 'pending') return;
+
+    if (response === 'agree') {
+        pauseState.agreementBySeat[seat] = 'agree';
+        renderPauseDialogByState();
+        let allAgreed = pauseState.agreementBySeat.every(v => v === 'agree');
+        if (allAgreed) resolvePauseRequest('approved');
+        return;
+    }
+
+    pauseState.agreementBySeat[seat] = 'reject';
+    appendLog(t('log.pauseRejected', { playerName: PLAYER_NAMES[seat] }));
+    renderPauseDialogByState();
+    clearPauseTimersOnly();
+    pauseState.rejectFlashTimerId = setTimeout(() => {
+        resolvePauseRequest('rejected');
+    }, 1000);
+}
+
+function resolvePauseRequest(result) {
+    clearPauseTimersOnly();
+    if (pauseState.phase !== 'waitingPauseAgreements') return;
+
+    if (result === 'approved') {
+        enterPausedState();
+        return;
+    }
+
+    if (result === 'timeout') {
+        appendLog(t('log.pauseTimeout'));
+    }
+
+    clearPauseProtocolStateToIdle();
+    resumeGameAfterPauseProtocol();
+}
+
+function enterPausedState() {
+    pauseState.phase = 'paused';
+    pauseState.readyBySeat = ['pending', 'pending', 'pending', 'pending'];
+    appendLog(t('log.pauseEntered'));
+    updateStatus(t('status.paused'));
+    renderPauseDialogByState();
+
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        if (isHumanControlled(seat)) continue;
+        setTimeout(() => submitResumeReady(seat), 200);
+    }
+}
+
+function submitResumeReady(seat) {
+    if (pauseState.phase !== 'paused') return;
+    if (pauseState.readyBySeat[seat] !== 'pending') return;
+
+    pauseState.readyBySeat[seat] = 'ready';
+    renderPauseDialogByState();
+
+    let allReady = pauseState.readyBySeat.every(v => v === 'ready');
+    if (allReady) completeResume();
+}
+
+function completeResume() {
+    appendLog(t('log.pauseResumed'));
+    clearPauseProtocolStateToIdle();
+    resumeGameAfterPauseProtocol();
+}
+
+function requestQuitDuringPause(seat) {
+    if (pauseState.phase !== 'paused') return;
+    pauseState.phase = 'waitingQuitConfirm';
+    pauseState.quitRequesterSeat = seat;
+    renderPauseDialogByState();
+}
+
+function confirmQuitDuringPause(seat) {
+    if (pauseState.phase !== 'waitingQuitConfirm') return;
+    endGameByQuit(seat);
+}
+
+function endGameByQuit(seat) {
+    clearPauseTimersOnly();
+    clearTimers();
+    if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
+
+    pauseState.phase = 'finished';
+    pauseState.quitRequesterSeat = seat;
+    hidePauseDialog();
+
+    if (game) game.phase = GamePhase.GAME_OVER;
+    let reason = t('pause.quitReason', { playerName: PLAYER_NAMES[seat] });
+    updatePhaseDisplay(t('phase.gameOver'));
+    updateStatus(reason);
+    if (gDeskInfo) gDeskInfo.textContent = reason;
+    appendLog(t('log.quitDuringPause', { playerName: PLAYER_NAMES[seat] }));
+
+    gBtnPlay.disabled = true;
+    gBtnPlay.textContent = t('buttons.play');
+    refreshPauseButtonState();
+}
+
+window.pauseState = pauseState;
+window.requestPause = requestPause;
+window.receivePauseAgreementRequest = receivePauseAgreementRequest;
+window.submitPauseAgreement = submitPauseAgreement;
+window.resolvePauseRequest = resolvePauseRequest;
+window.enterPausedState = enterPausedState;
+window.submitResumeReady = submitResumeReady;
+window.completeResume = completeResume;
+window.requestQuitDuringPause = requestQuitDuringPause;
+window.confirmQuitDuringPause = confirmQuitDuringPause;
+window.endGameByQuit = endGameByQuit;
+
 // ---------------------------------------------------------------------------
 // Timing utilities (note 24)
 // ---------------------------------------------------------------------------
@@ -837,6 +1438,7 @@ function clearTimers() {
     gTimingPhase = null;
     gTimerStage = 'shot';
     gTimerExpireCallback = null;
+    gLiveTimerMeta = null;
     gNoDeclareClicked.clear();
     removeTimerOverlay();
     removeTimerCenter();
@@ -952,10 +1554,12 @@ function startCallingWindowTimer(phase, seconds, onExpire) {
     gTimingPhase = phase;
     gShotClockRemaining = seconds;
     gTimerExpireCallback = onExpire;
+    gLiveTimerMeta = { kind: 'callingWindow' };
 
     let digitEl = showCenterTimer(seconds);
 
     gTimerInterval = setInterval(() => {
+        if (isPauseDialogBlockingGameplay()) return;
         gShotClockRemaining -= 0.1;
         if (digitEl) digitEl.textContent = Math.max(0, Math.ceil(gShotClockRemaining));
         if (gShotClockRemaining <= 0) {
@@ -991,10 +1595,12 @@ function startPlayerMoveTimer(player, moveType, onTimeout) {
     gBankTimeRemaining = game.playerBankTimes[player];
     gTimerStage = (timingMode === 'bank-time-only') ? 'bank' : 'shot';
     gTimerExpireCallback = onTimeout;
+    gLiveTimerMeta = { kind: 'playerMove', player: player, moveType: moveType };
 
     showTimerOverlay(player);
 
     gTimerInterval = setInterval(() => {
+        if (isPauseDialogBlockingGameplay()) return;
         if (gTimerStage === 'shot') {
             gShotClockRemaining -= 0.1;
             if (gShotClockRemaining <= 0) {
@@ -1076,6 +1682,7 @@ function continueFCTimingUnit(player, onTimeout) {
         }
 
         gTimerInterval = setInterval(() => {
+            if (isPauseDialogBlockingGameplay()) return;
             gBankTimeRemaining -= 0.1;
             game.playerBankTimes[player] = Math.max(0, gBankTimeRemaining);
             if (gBankTimeRemaining <= 0) {
@@ -1150,6 +1757,7 @@ function canSeatSeeBaseInPlayingPhase(localSeat) {
  * Auto-play as bot when human player's time runs out.
  */
 function autoPlayAsBot(player) {
+    if (isPauseDialogBlockingGameplay()) return;
     if (game.phase === GamePhase.BASING && player === getActiveBaserPlayer()) {
         // Auto-base
         let baseCards = botMakeBase(player);
@@ -1199,6 +1807,8 @@ function startNewGame() {
 
     // Clean up any in-progress dealing timer
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
+    if (gFrameIntermittentTimeout) { clearTimeout(gFrameIntermittentTimeout); gFrameIntermittentTimeout = null; gFrameIntermittentEndsAt = 0; }
+    clearPauseProtocolStateToIdle();
     currentDeclaration = null;
     gAutoStrain3rdTriggerCard = null;
     gAutoStrain3rdTriggered = false;
@@ -1222,17 +1832,22 @@ function startNewGame() {
     hideCountingDialog();
     gBtnPlay.disabled = true;
     gBtnPlay.textContent = t('buttons.play');
+    refreshPauseButtonState();
 
     // Hide show-base button (§5)
     if (gBtnShowBase) gBtnShowBase.style.display = 'none';
     if (gBasePreview) gBasePreview.innerHTML = '';
 
     let level, pivot, playerLevels, isQiangzhuang;
+    let pendingCycleIndexBySide = null;
     if (pendingNextFrame) {
         // Continue session: use computed next-frame parameters
         level = pendingNextFrame.level;
         pivot = pendingNextFrame.pivot;
         playerLevels = pendingNextFrame.playerLevels;
+        pendingCycleIndexBySide = Array.isArray(pendingNextFrame.cycleIndexBySide)
+            ? [...pendingNextFrame.cycleIndexBySide]
+            : null;
         isQiangzhuang = false;
         pendingNextFrame = null;
         // Increment frame number within game
@@ -1244,7 +1859,7 @@ function startNewGame() {
         level = (gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.startLevel !== undefined)
             ? gResolvedGameSettings.ruleConfig.startLevel
             : 0;
-        pivot = Math.floor(Math.random() * NUM_PLAYERS);
+        pivot = UNDETERMINED_PIVOT;
         playerLevels = null;
         isQiangzhuang = true;
         // Reset frame number for new game
@@ -1268,18 +1883,16 @@ function startNewGame() {
     if (gHint1Div) gHint1Div.textContent = '';
     if (gHint2Div) updateAttackersStreakDisplay();
 
-    // Seat marks: frame 2+ shows pivot immediately; frame 1 starts undetermined
-    if (!isQiangzhuang) {
-        let humanRelPivot = (pivot + 4 - HUMAN_PLAYER) % 4;
-        let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
-        gSeatsDiv.setAttribute('pivot', pivotPosNames[humanRelPivot]);
-    } else {
-        gSeatsDiv.setAttribute('pivot', 'undetermined');
-    }
-
     gBtnNewGame.textContent = t('buttons.newGame');
-    engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig);
+    let declarationOrderAnchor = isQiangzhuang ? Math.floor(Math.random() * NUM_PLAYERS) : pivot;
+    engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig, declarationOrderAnchor);
+    if (pendingCycleIndexBySide && game && game.levelRuleState) {
+        game.levelRuleState.cycleIndexBySide = pendingCycleIndexBySide.map(v =>
+            (Number.isInteger(v) && v >= 0) ? v : 0
+        );
+    }
     game.displaySettings = { ...(gResolvedGameSettings.displaySettings || { placeholder: true }) };
+    refreshTopLeftSeatAndLevelPositionBoxFromGameState();
 
     // Reset won counters and refresh drawer only after authoritative new-frame state reset.
     wonCounterCards = [];
@@ -1288,11 +1901,13 @@ function startNewGame() {
     // Initialize persistent name bars (§3)
     initPersistentNamebars();
 
-    // Display level
-    gLevelDiv.textContent = numberToLevel[game.level];
+    // Display current denomination level as rank-only (note 51b).
+    gLevelDiv.textContent = levelDisplayLabel(game.level);
+    setSeatsTopLeftBoxView('seats');
 
     // Frame-start 2s intermittent (note 24 §3)
     runFrameIntermittent();
+    refreshPauseButtonState();
 }
 
 // ---------------------------------------------------------------------------
@@ -1303,10 +1918,11 @@ function startNewGame() {
  * Frame-start 2s non-interactive intermittent (note 24 §3).
  * Displays pivot/level info or qiangzhuang text, then starts dealing.
  */
-function runFrameIntermittent() {
+function runFrameIntermittent(remainingMs) {
     gTimingPhase = 'intermittent';
     gBtnPlay.disabled = true;
     gDeclareMatrix.style.display = 'none';
+    refreshPauseButtonState();
 
     // Central display text
     let displayText;
@@ -1319,11 +1935,15 @@ function runFrameIntermittent() {
 
     gDeskInfo.innerHTML = '<div class="timer-intermittent">' + displayText + '</div>';
 
-    setTimeout(() => {
+    let delayMs = Math.max(0, Number.isFinite(remainingMs) ? remainingMs : (getTimingConfigForPage().frameIntermittent * 1000));
+    gFrameIntermittentEndsAt = Date.now() + delayMs;
+    gFrameIntermittentTimeout = setTimeout(() => {
+        gFrameIntermittentTimeout = null;
+        gFrameIntermittentEndsAt = 0;
         gTimingPhase = null;
         gDeskInfo.innerHTML = '';
         runDealingPhase();
-    }, getTimingConfigForPage().frameIntermittent * 1000);
+    }, delayMs);
 }
 
 function clearBotDealCounts() {
@@ -1638,6 +2258,7 @@ function executeDeclaration(suit, count) {
 }
 
 function runDealingPhase() {
+    if (isPauseDialogBlockingGameplay()) return;
     updatePhaseDisplay(t('phase.dealing'));
     updateStatus(t('status.dealingHint'));
     gBtnPlay.disabled = true;
@@ -1664,7 +2285,7 @@ function runDealingPhase() {
 
         // Bots consider overcalling as they get cards
         for (let i = 0; i < NUM_PLAYERS; i++) {
-            let p = (game.pivot + i) % NUM_PLAYERS;
+            let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
             if (p === HUMAN_PLAYER) continue;
 
             let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
@@ -1724,6 +2345,7 @@ function runDealingPhase() {
  * Players may still declare/overcall. Breaks on highest-possible or unanimous "No declaration".
  */
 function runFinalDeclarationWindow() {
+    if (isPauseDialogBlockingGameplay()) return;
     updatePhaseDisplay(t('phase.declaring'));
     gDeclareMatrix.style.display = 'grid';
     updateDeclareMatrix();
@@ -1738,7 +2360,7 @@ function runFinalDeclarationWindow() {
 
     // Bots take their last chance to overcall during the window
     for (let i = 0; i < NUM_PLAYERS; i++) {
-        let p = (game.pivot + i) % NUM_PLAYERS;
+        let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
         if (isHumanControlled(p)) continue;
         let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
         if (decl) {
@@ -1777,6 +2399,7 @@ function runFinalDeclarationWindow() {
 // ---------------------------------------------------------------------------
 
 function resolveDeclaredPhase() {
+    if (isPauseDialogBlockingGameplay()) return;
     updatePhaseDisplay(t('phase.declaring'));
     updateStatus(t('status.declaring'));
     gDeclareMatrix.style.display = 'none';
@@ -1839,10 +2462,16 @@ function resolveDeclaredPhase() {
         recordAutoStrainHistoryRow();
     }
 
-    // Update pivot seat indicator
-    let humanRelPivot = (game.pivot + 4 - HUMAN_PLAYER) % 4;
-    let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
-    gSeatsDiv.setAttribute('pivot', pivotPosNames[humanRelPivot]);
+    if (typeof isPivotResolved === 'function' && !isPivotResolved(game.pivot)) {
+        if (game && game.isQiangzhuang) {
+            redealQiangzhuangNoDeclarationFrame();
+            return;
+        }
+        showError(t('errors.baseFailed'));
+        return;
+    }
+
+    refreshTopLeftSeatAndLevelPositionBoxFromGameState();
 
     clearBotDealCounts();
     renderAllHands();
@@ -1856,7 +2485,10 @@ function resolveDeclaredPhase() {
     }
 
     // Move to basing phase
-    enginePickUpBase();
+    if (!enginePickUpBase()) {
+        showError(t('errors.baseFailed'));
+        return;
+    }
     runBasingPhase();
 }
 
@@ -1865,6 +2497,7 @@ function resolveDeclaredPhase() {
 // ---------------------------------------------------------------------------
 
 function runBasingPhase() {
+    if (isPauseDialogBlockingGameplay()) return;
     let baser = getActiveBaserPlayer();
     updatePhaseDisplay(t('phase.basing'));
     renderResolvedStrainDisplay();
@@ -1940,9 +2573,11 @@ function startOvercallDecisionTimer(player, hasLegalOvercall, onTimeout) {
         gBankTimeRemaining = game.playerBankTimes[player];
         gTimerStage = 'shot';
         gTimerExpireCallback = onTimeout;
+        gLiveTimerMeta = { kind: 'overcallDecision', player: player, moveType: 'play', hasLegalOvercall: hasLegalOvercall };
         showTimerOverlay(player);
 
         gTimerInterval = setInterval(() => {
+            if (isPauseDialogBlockingGameplay()) return;
             gShotClockRemaining -= 0.1;
             if (gShotClockRemaining <= 0) {
                 gShotClockRemaining = 0;
@@ -1957,6 +2592,7 @@ function startOvercallDecisionTimer(player, hasLegalOvercall, onTimeout) {
 
     startPlayerMoveTimer(player, 'play', onTimeout);
     gTimingPhase = 'overcallDecision';
+    gLiveTimerMeta = { kind: 'overcallDecision', player: player, moveType: 'play', hasLegalOvercall: hasLegalOvercall };
 }
 
 function getCurrentDeclarationHolder() {
@@ -2980,6 +3616,11 @@ function commitForehandControl(mode) {
 }
 
 function promptCurrentPlayer() {
+    if (isPauseDialogBlockingGameplay()) {
+        updateStatus(t('status.paused'));
+        refreshPauseButtonState();
+        return;
+    }
     if (gCrossingState && gCrossingState.trickPlayBlocked) {
         driveCrossingProcesses();
         highlightActivePlayer(-1);
@@ -3163,6 +3804,7 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
 }
 
 function botTakeTurn(player) {
+    if (isPauseDialogBlockingGameplay()) return;
     let cards = botPlay(player);
     let result = enginePlayCards(player, cards);
 
@@ -3198,6 +3840,7 @@ function botTakeTurn(player) {
 }
 
 function humanPlayCards() {
+    if (isPauseDialogBlockingGameplay()) return;
     // During forehand control exercise, the main play button commits FC with must-play
     if (gFCInteraction) {
         commitForehandControl('must-play');
@@ -3220,7 +3863,7 @@ const SETTINGS_FIELDS_BY_TAB = {
     presets: ['presetName'],
     general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
     scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
-    levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
+    levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'skipLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
     timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
 };
 
@@ -3234,7 +3877,7 @@ const SETTINGS_SELECT_OPTIONS = {
     allowCrossings: ['false', 'true'],
     scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
     baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
-    levelsPreset: ['', 'default', 'high-school', 'slow', 'plain', 'short'],
+    levelsPreset: ['', 'default', 'high-school', 'plain', 'skip-468'],
     gameMode: ['endless', 'pass-A'],
     timingPreset: ['', 'normal', '180+30'],
     timingMode: ['shot + bank', 'bank-time-only'],
@@ -3344,6 +3987,194 @@ function levelDisplayLabel(level) {
     return String(level);
 }
 
+function normalizeCycleIndexForDisplay(cycleIndex) {
+    let numeric = Number(cycleIndex);
+    return Number.isInteger(numeric) && numeric >= 0 ? numeric : 0;
+}
+
+function getSideCycleIndex(cycleIndexBySide, sideIndex) {
+    if (!Array.isArray(cycleIndexBySide)) return 0;
+    return normalizeCycleIndexForDisplay(cycleIndexBySide[sideIndex]);
+}
+
+function renderLevelWithCycle(hostElement, level, cycleIndex) {
+    if (!hostElement) return;
+
+    hostElement.innerHTML = '';
+
+    let wrap = document.createElement('span');
+    wrap.className = 'level-with-cycle';
+
+    let rank = document.createElement('span');
+    rank.className = 'level-with-cycle-rank';
+    rank.textContent = levelDisplayLabel(level);
+    wrap.appendChild(rank);
+
+    let normalizedCycleIndex = normalizeCycleIndexForDisplay(cycleIndex);
+    if (normalizedCycleIndex >= 1) {
+        let sub = document.createElement('span');
+        sub.className = 'level-with-cycle-subscript';
+        sub.textContent = String(normalizedCycleIndex + 1);
+        wrap.appendChild(sub);
+    }
+
+    hostElement.appendChild(wrap);
+}
+
+function getPivotAndAllyPositions(pivotSeat) {
+    if (pivotSeat === 0) return { pivotPos: 'bottom', allyPos: 'top' };
+    if (pivotSeat === 1) return { pivotPos: 'right', allyPos: 'left' };
+    if (pivotSeat === 2) return { pivotPos: 'top', allyPos: 'bottom' };
+    return { pivotPos: 'left', allyPos: 'right' };
+}
+
+function isUndefinedPivot(pivotSeat) {
+    if (typeof isPivotResolved === 'function') return !isPivotResolved(pivotSeat);
+    if (pivotSeat === null || pivotSeat === undefined) return true;
+    return !Number.isInteger(Number(pivotSeat));
+}
+
+function renderLevelPositionSquare(host, options) {
+    if (!host) return;
+    host.innerHTML = '';
+
+    let box = document.createElement('div');
+    box.className = 'level-position-box' + (options.boxClassName ? (' ' + options.boxClassName) : '');
+    if (options.boxId) box.id = options.boxId;
+    
+    // Sizing and font-size are handled entirely by CSS using vh-based responsive variables.
+    // Do not set hard-coded pixel dimensions as inline styles.
+
+    let square = document.createElement('div');
+    square.className = 'level-position-square' + (options.squareClassName ? (' ' + options.squareClassName) : '');
+    if (options.squareId) square.id = options.squareId;
+
+    let axisLevelByPosition = {
+        top: Number(options.nsLevel),
+        bottom: Number(options.nsLevel),
+        left: Number(options.ewLevel),
+        right: Number(options.ewLevel),
+    };
+    let axisCycleByPosition = {
+        top: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 0),
+        bottom: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 0),
+        left: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 1),
+        right: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 1),
+    };
+
+    // Check if pivot is undefined
+    let pivotUndefined = isUndefinedPivot(options.pivotSeat);
+    let seat = Number(options.pivotSeat);
+    let pivotSeat = (!pivotUndefined && typeof isPivotResolved === 'function' && isPivotResolved(seat)) ? seat : undefined;
+    let markers = pivotUndefined ? { pivotPos: undefined, allyPos: undefined } : getPivotAndAllyPositions(pivotSeat);
+
+    ['top', 'right', 'bottom', 'left'].forEach((position) => {
+        let section = document.createElement('div');
+        section.className = 'level-position-triangle' + (options.triangleClassName ? (' ' + options.triangleClassName) : '');
+        section.setAttribute('data-pos', position);
+        
+        if (pivotUndefined) {
+            section.setAttribute('data-team', 'undefined');
+        } else {
+            if (position === markers.pivotPos) section.setAttribute('data-team', 'pivot');
+            else if (position === markers.allyPos) section.setAttribute('data-team', 'ally');
+            else section.setAttribute('data-team', 'other');
+        }
+        
+        renderLevelWithCycle(section, axisLevelByPosition[position], axisCycleByPosition[position]);
+        square.appendChild(section);
+    });
+
+    box.appendChild(square);
+    host.appendChild(box);
+}
+
+function ensureSeatsHoverLevelPositionBox() {
+    if (!gSeatsDiv) return;
+    if (gSeatsHoverLevelPositionBox) return;
+
+    let box = gSeatsDiv.querySelector('.seats-toggle-level-position-box');
+    if (!box) {
+        box = document.createElement('div');
+        box.className = 'seats-toggle-level-position-box level-position-box';
+        gSeatsDiv.appendChild(box);
+    }
+    gSeatsHoverLevelPositionBox = box;
+}
+
+function getCurrentFrameSideLevelAndCycleState() {
+    let levelFallback = (game && Number.isInteger(game.level)) ? game.level : 0;
+    let levels = (game && Array.isArray(game.playerLevels)) ? game.playerLevels : [levelFallback, levelFallback, levelFallback, levelFallback];
+    let cycleBySide = (game && game.levelRuleState && Array.isArray(game.levelRuleState.cycleIndexBySide))
+        ? game.levelRuleState.cycleIndexBySide
+        : [0, 0];
+    let pivotSeat = (game && typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) ? game.pivot : UNDETERMINED_PIVOT;
+
+    let nsLevel = Number.isInteger(Number(levels[0])) ? Number(levels[0]) : levelFallback;
+    let ewLevel = Number.isInteger(Number(levels[1])) ? Number(levels[1]) : levelFallback;
+
+    return {
+        nsLevel,
+        ewLevel,
+        nsCycleIndex: getSideCycleIndex(cycleBySide, 0),
+        ewCycleIndex: getSideCycleIndex(cycleBySide, 1),
+        pivotSeat,
+    };
+}
+
+function renderSeatsHoverLevelPositionSquare() {
+    ensureSeatsHoverLevelPositionBox();
+    if (!gSeatsHoverLevelPositionBox) return;
+
+    let state = getCurrentFrameSideLevelAndCycleState();
+    
+    // Compute box dimensions from the seats-box outer size
+    let boxRect = gSeatsHoverLevelPositionBox.getBoundingClientRect();
+    let boxWidthPx = boxRect.width > 0 ? boxRect.width : 15 * (window.innerHeight / 100); // fallback to 15vh in pixels
+    let boxHeightPx = boxRect.height > 0 ? boxRect.height : 15 * (window.innerHeight / 100);
+    
+    renderLevelPositionSquare(gSeatsHoverLevelPositionBox, {
+        boxId: 'seats-toggle-level-position-box-root',
+        boxClassName: 'seats-toggle-level-position-box-root',
+        boxWidthPx,
+        boxHeightPx,
+        squareId: 'seats-toggle-level-position-square',
+        squareClassName: 'seats-toggle-level-position-square',
+        triangleClassName: 'seats-toggle-level-position-triangle',
+        nsLevel: state.nsLevel,
+        ewLevel: state.ewLevel,
+        nsCycleIndex: state.nsCycleIndex,
+        ewCycleIndex: state.ewCycleIndex,
+        pivotSeat: state.pivotSeat,
+    });
+}
+
+function setSeatsTopLeftBoxView(view) {
+    if (!gSeatsDiv) return;
+    gSeatsTopLeftBoxView = (view === 'level-position') ? 'level-position' : 'seats';
+
+    let tableNumber = document.getElementById('div-table-number');
+    let pivotMark = gSeatsDiv.querySelector('.div-pivot-mark');
+    let showingLevelPosition = (gSeatsTopLeftBoxView === 'level-position');
+
+    gSeatsDiv.setAttribute('data-box-view', showingLevelPosition ? 'level-position' : 'seats');
+    if (tableNumber) tableNumber.style.display = showingLevelPosition ? 'none' : '';
+    if (pivotMark) pivotMark.style.display = showingLevelPosition ? 'none' : '';
+
+    ensureSeatsHoverLevelPositionBox();
+    if (gSeatsHoverLevelPositionBox) {
+        gSeatsHoverLevelPositionBox.style.display = showingLevelPosition ? 'block' : 'none';
+        if (showingLevelPosition) {
+            renderSeatsHoverLevelPositionSquare();
+        }
+    }
+}
+
+function toggleSeatsTopLeftBoxView() {
+    if (gSeatsTopLeftBoxView === 'level-position') setSeatsTopLeftBoxView('seats');
+    else setSeatsTopLeftBoxView('level-position');
+}
+
 function settingsOptionLabel(value) {
     const map = {
         'true': 'yes',
@@ -3370,8 +4201,7 @@ function settingsOptionLabel(value) {
         '7-3-5': 'sevenThreeFive',
         '8-4-4': 'eightFourFour',
         // levels preset values
-        'slow': 'slow',
-        'short': 'short',
+        'skip-468': 'skip468',
         // base multiplier schemes
         'limited': 'limited',
         'single-or-not': 'singleOrNot',
@@ -3517,12 +4347,14 @@ function buildLevelsMatrixStateFromRuleConfig(cfg) {
     let defend = normalizeLevelArrayForMatrix(cfg && cfg.mustDefendLevels);
     let stop = normalizeLevelArrayForMatrix(cfg && cfg.mustStopLevels);
     let knock = normalizeLevelArrayForMatrix(cfg && cfg.knockBackLevels);
+    let skip = normalizeLevelArrayForMatrix(cfg && cfg.skipLevels);
     return {
         mustDefendStartMarker: !!(cfg && cfg.mustDefendStartMarker),
         mustDefendLiteralLevels: defend,
         mustStopStartMarker: !!(cfg && cfg.mustStopStartMarker),
         mustStopLiteralLevels: stop,
         knockBackLiteralLevels: knock,
+        skipLiteralLevels: skip,
     };
 }
 
@@ -3537,15 +4369,26 @@ function levelsMatrixStateToRuleArrays() {
 
     let defend = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels);
     let stop = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustStopLiteralLevels);
+    let skip = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.skipLiteralLevels);
+    if (skip.length >= 13) {
+        skip = skip.filter(x => x !== 0);
+    }
 
     // Conflict on literal ranks
     let defendLiteralSet = new Set(normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels));
     stop = stop.filter(x => !defendLiteralSet.has(x));
 
+    // Remove skip levels from other level sets (already handled in UI, but ensure consistency)
+    let skipSet = new Set(skip);
+    defend = defend.filter(x => !skipSet.has(x));
+    stop = stop.filter(x => !skipSet.has(x));
+    let knock = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.knockBackLiteralLevels).filter(x => !skipSet.has(x));
+
     return {
         mustDefendLevels: [...new Set(defend)].sort((a, b) => a - b),
         mustStopLevels: [...new Set(stop)].sort((a, b) => a - b),
-        knockBackLevels: normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.knockBackLiteralLevels),
+        knockBackLevels: knock,
+        skipLevels: skip,
         mustDefendStartMarker: !!gLevelsMatrixDraftState.mustDefendStartMarker,
         mustStopStartMarker: !!gLevelsMatrixDraftState.mustStopStartMarker,
     };
@@ -3557,8 +4400,13 @@ function applyLevelsMatrixStateToRuleConfig() {
     gSettingsDraftRuleConfig.mustDefendLevels = mapped.mustDefendLevels;
     gSettingsDraftRuleConfig.mustStopLevels = mapped.mustStopLevels;
     gSettingsDraftRuleConfig.knockBackLevels = mapped.knockBackLevels;
+    gSettingsDraftRuleConfig.skipLevels = mapped.skipLevels;
     gSettingsDraftRuleConfig.mustDefendStartMarker = mapped.mustDefendStartMarker;
     gSettingsDraftRuleConfig.mustStopStartMarker = mapped.mustStopStartMarker;
+
+    let skipSet = new Set(mapped.skipLevels);
+    let relocated = relocateStartLevelAgainstSkip(gSettingsDraftRuleConfig.startLevel, skipSet);
+    gSettingsDraftRuleConfig.startLevel = relocated;
 }
 
 function resetLevelsMatrixStateFromRuleConfig() {
@@ -3627,6 +4475,7 @@ function setRuleConfigFieldValue(field, rawValue) {
                 if (lp.mustDefendLevels !== undefined) gSettingsDraftRuleConfig.mustDefendLevels = Array.isArray(lp.mustDefendLevels) ? [...lp.mustDefendLevels] : [];
                 if (lp.mustStopLevels !== undefined) gSettingsDraftRuleConfig.mustStopLevels = Array.isArray(lp.mustStopLevels) ? [...lp.mustStopLevels] : [];
                 if (lp.knockBackLevels !== undefined) gSettingsDraftRuleConfig.knockBackLevels = Array.isArray(lp.knockBackLevels) ? [...lp.knockBackLevels] : [];
+                if (lp.skipLevels !== undefined) gSettingsDraftRuleConfig.skipLevels = Array.isArray(lp.skipLevels) ? [...lp.skipLevels] : [];
                 if (lp.knockBackConditionMode !== undefined) gSettingsDraftRuleConfig.knockBackConditionMode = lp.knockBackConditionMode;
                 if (lp.knockBackTakeStageRequired !== undefined) gSettingsDraftRuleConfig.knockBackTakeStageRequired = !!lp.knockBackTakeStageRequired;
                 if (lp.nonSingleKnockBackTwoSteps !== undefined) gSettingsDraftRuleConfig.nonSingleKnockBackTwoSteps = !!lp.nonSingleKnockBackTwoSteps;
@@ -3840,6 +4689,7 @@ function createLevelsMatrixCell(opts) {
         levelKey,
         displayLabel,
         interactive,
+        disabled,
         counterLevel,
         selected,
         readOnly,
@@ -3857,7 +4707,7 @@ function createLevelsMatrixCell(opts) {
     cell.setAttribute('data-row-field', rowField);
     cell.setAttribute('data-level', String(levelKey));
     cell.setAttribute('aria-pressed', selected ? 'true' : 'false');
-    cell.disabled = !!readOnly || !interactive;
+    cell.disabled = !!readOnly || !interactive || !!disabled;
     cell.textContent = displayLabel;
 
     if (!readOnly && interactive) {
@@ -3867,6 +4717,27 @@ function createLevelsMatrixCell(opts) {
     }
 
     return cell;
+}
+
+function relocateStartLevelAgainstSkip(startLevel, skipSet) {
+    let current = Number(startLevel);
+    if (!Number.isInteger(current) || current < 0 || current > 12) current = 0;
+    if (!(skipSet instanceof Set) || skipSet.size === 0 || !skipSet.has(current)) return current;
+    for (let offset = 1; offset < 13; offset++) {
+        let candidate = (current + offset) % 13;
+        if (!skipSet.has(candidate)) return candidate;
+    }
+    return current;
+}
+
+function isLevelsCellDisabledBySkip(rowField, levelKey) {
+    if (!Number.isInteger(Number(levelKey))) return false;
+    if (!gLevelsMatrixDraftState) return false;
+    if (rowField === 'skipLevels') {
+        return false;
+    }
+    let skipSet = new Set(normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.skipLiteralLevels));
+    return skipSet.has(Number(levelKey));
 }
 
 function levelsMatrixToggleSemantic(rowName) {
@@ -3908,6 +4779,50 @@ function levelsMatrixToggleLiteral(rowName, level) {
     }
 }
 
+function levelsMatrixToggleLiteralWithMutualExclusion(rowName, level) {
+    ensureLevelsMatrixDraftState();
+    let n = Number(level);
+    if (!Number.isInteger(n) || n < 0 || n > 12) return;
+
+    let rowKey = rowName === 'skipLevels' ? 'skipLiteralLevels' : rowName;
+
+    let current = new Set(normalizeLevelArrayForMatrix(gLevelsMatrixDraftState[rowKey]));
+    let isSelecting = !current.has(n);
+
+    if (isSelecting) {
+        if (rowName === 'skipLevels') {
+            // Patched all-skipped behavior:
+            // accept this click, then deselect the lowest previously checked rank.
+            let previousChecked = [...current].sort((a, b) => a - b);
+            current.add(n);
+            if (current.size >= 13 && previousChecked.length > 0) {
+                current.delete(previousChecked[0]);
+            }
+        } else {
+            current.add(n);
+        }
+
+        if (rowName === 'skipLevels') {
+            // Mutual exclusion: clear same-column must-stop, must-defend, knock-back
+            gLevelsMatrixDraftState.mustDefendLiteralLevels = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustDefendLiteralLevels).filter(x => x !== n);
+            gLevelsMatrixDraftState.mustStopLiteralLevels = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.mustStopLiteralLevels).filter(x => x !== n);
+            gLevelsMatrixDraftState.knockBackLiteralLevels = normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.knockBackLiteralLevels).filter(x => x !== n);
+
+            // If start level is the skipped rank, relocate it
+            let startLevel = Number(getRuleConfigFieldValue('startLevel'));
+            let skipSet = new Set(current);
+            let relocated = relocateStartLevelAgainstSkip(startLevel, skipSet);
+            if (relocated !== startLevel) {
+                setRuleConfigFieldValue('startLevel', relocated);
+            }
+        }
+    } else {
+        current.delete(n);
+    }
+
+    gLevelsMatrixDraftState[rowKey] = [...current].sort((a, b) => a - b);
+}
+
 function createLevelsSpecialMatrix(readOnly) {
     let matrix = document.createElement('div');
     matrix.className = 'levels-special-matrix';
@@ -3924,7 +4839,11 @@ function createLevelsSpecialMatrix(readOnly) {
                 ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
             ],
             onClick: (levelKey) => {
-                setRuleConfigFieldValue('startLevel', Number(levelKey));
+                if (isLevelsCellDisabledBySkip('startLevel', levelKey)) return;
+                let attempted = Number(levelKey);
+                let skipSet = new Set(normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.skipLiteralLevels));
+                let relocated = relocateStartLevelAgainstSkip(attempted, skipSet);
+                setRuleConfigFieldValue('startLevel', relocated);
                 renderSettingsDialog();
             },
             isSelected: (levelKey) => Number(levelKey) === startLevel,
@@ -3937,6 +4856,7 @@ function createLevelsSpecialMatrix(readOnly) {
                 ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
             ],
             onClick: (levelKey) => {
+                if (isLevelsCellDisabledBySkip('mustDefendLevels', levelKey)) return;
                 if (levelKey === LEVEL_MATRIX_KEY_START_MARKER) {
                     levelsMatrixToggleSemantic('mustDefendLevels');
                 } else {
@@ -3959,6 +4879,7 @@ function createLevelsSpecialMatrix(readOnly) {
                 ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
             ],
             onClick: (levelKey) => {
+                if (isLevelsCellDisabledBySkip('mustStopLevels', levelKey)) return;
                 if (levelKey === LEVEL_MATRIX_KEY_START_MARKER) {
                     levelsMatrixToggleSemantic('mustStopLevels');
                 } else {
@@ -3981,6 +4902,7 @@ function createLevelsSpecialMatrix(readOnly) {
                 ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
             ],
             onClick: (levelKey) => {
+                if (isLevelsCellDisabledBySkip('knockBackLevels', levelKey)) return;
                 levelsMatrixToggleLiteral('knockBackLevels', levelKey);
                 applyLevelsMatrixStateToRuleConfig();
                 syncPresetCouplingStateAfterFieldEdit('knockBackLevels');
@@ -3989,6 +4911,24 @@ function createLevelsSpecialMatrix(readOnly) {
             isSelected: (levelKey) => {
                 if (levelKey === LEVEL_MATRIX_KEY_SPACER) return false;
                 return normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.knockBackLiteralLevels).includes(Number(levelKey));
+            },
+        },
+        {
+            field: 'skipLevels',
+            type: 'skip',
+            cells: [
+                { key: LEVEL_MATRIX_KEY_SPACER, label: '', interactive: false, counterLevel: false },
+                ...LEVEL_VALUE_OPTIONS.map(level => ({ key: level, label: levelDisplayLabel(level), interactive: true, counterLevel: LEVEL_MATRIX_COUNTER_LEVELS.has(level) })),
+            ],
+            onClick: (levelKey) => {
+                levelsMatrixToggleLiteralWithMutualExclusion('skipLevels', levelKey);
+                applyLevelsMatrixStateToRuleConfig();
+                syncPresetCouplingStateAfterFieldEdit('skipLevels');
+                renderSettingsDialog();
+            },
+            isSelected: (levelKey) => {
+                if (levelKey === LEVEL_MATRIX_KEY_SPACER) return false;
+                return normalizeLevelArrayForMatrix(gLevelsMatrixDraftState.skipLiteralLevels).includes(Number(levelKey));
             },
         },
     ];
@@ -4012,6 +4952,7 @@ function createLevelsSpecialMatrix(readOnly) {
                 levelKey: cellDef.key,
                 displayLabel: cellDef.label,
                 interactive: !!cellDef.interactive,
+                disabled: row.field !== 'skipLevels' && isLevelsCellDisabledBySkip(row.field, cellDef.key),
                 counterLevel: !!cellDef.counterLevel,
                 selected: row.isSelected(cellDef.key),
                 readOnly,
@@ -5027,6 +5968,7 @@ function onNewGameButtonClick() {
 }
 
 function humanPlayCardsCore(cp) {
+    if (isPauseDialogBlockingGameplay()) return;
     if (!isHumanControlled(cp)) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked) {
         trySubmitLocalCrossingSelection();
@@ -5098,6 +6040,7 @@ function humanPlayCardsCore(cp) {
 // ---------------------------------------------------------------------------
 
 function finishRound() {
+    if (isPauseDialogBlockingGameplay()) return;
     let result = engineEndRound();
     highlightActivePlayer(-1);
     gDeskSlots[result.winner].setAttribute('data-winner', 'true');
@@ -5155,6 +6098,7 @@ function finishRound() {
 // ---------------------------------------------------------------------------
 
 function finishGame() {
+    if (isPauseDialogBlockingGameplay()) return;
     let result = engineFinalize();
     updateScoreDisplay();
     updatePhaseDisplay(t('phase.gameOver'));
@@ -5187,7 +6131,10 @@ function finishGame() {
             pendingNextFrame = {
                 pivot: applied.nextPivot,
                 level: applied.nextLevel,
-                playerLevels: applied.newLevels
+                playerLevels: applied.newLevels,
+                cycleIndexBySide: Array.isArray(applied.newCycleIndexBySide)
+                    ? [...applied.newCycleIndexBySide]
+                    : null,
             };
             gBtnNewGame.textContent = t('buttons.nextFrame');
         }
@@ -5200,6 +6147,116 @@ function finishGame() {
 // ---------------------------------------------------------------------------
 // Counting-phase dialog (§7)
 // ---------------------------------------------------------------------------
+function numberToChineseNumeral(n) {
+    const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+    let value = Math.max(0, Math.floor(Number(n) || 0));
+    if (value < 10) return digits[value];
+    if (value < 20) return value === 10 ? '十' : ('十' + digits[value - 10]);
+    let tens = Math.floor(value / 10);
+    let ones = value % 10;
+    return digits[tens] + '十' + (ones === 0 ? '' : digits[ones]);
+}
+
+function getNaturalSideLabelByPlayer(player) {
+    return (player % 2 === 0) ? '南北' : '东西';
+}
+
+function countingDialogUsesLightName(gameConfig, levelDelta) {
+    if (levelDelta !== 2 && levelDelta !== 3) return false;
+    let stageThreshold = (gameConfig && gameConfig.stageThreshold != null) ? Number(gameConfig.stageThreshold) : 80;
+    let levelThreshold = (gameConfig && gameConfig.levelThreshold != null) ? Number(gameConfig.levelThreshold) : 40;
+    return (
+        (stageThreshold === 80 && levelThreshold === 40)
+        || (stageThreshold === 76 && levelThreshold === 38)
+    );
+}
+
+function getCountingDialogResultName(frameResult, gameConfig) {
+    if (!frameResult) return '';
+    if (frameResult.defenseHolds) {
+        if (countingDialogUsesLightName(gameConfig, frameResult.levelDelta) && frameResult.levelDelta === 3) return '大光';
+        if (countingDialogUsesLightName(gameConfig, frameResult.levelDelta) && frameResult.levelDelta === 2) return '小光';
+        return '下' + numberToChineseNumeral(frameResult.levelDelta);
+    }
+    if (frameResult.levelDelta === 0) return '上台';
+    return '上' + numberToChineseNumeral(frameResult.levelDelta);
+}
+
+function getCountingDialogResultDetail(frameResult) {
+    if (!frameResult || !Array.isArray(frameResult.advancingPlayers) || frameResult.advancingPlayers.length === 0) return '';
+    let sideLabel = getNaturalSideLabelByPlayer(frameResult.advancingPlayers[0]);
+    if (!frameResult.defenseHolds && frameResult.levelDelta === 0) return sideLabel + '上台';
+    return sideLabel + '升' + String(frameResult.levelDelta) + '级';
+}
+
+function renderCountingDialogBase(cdBase) {
+    cdBase.innerHTML = '<div id="cd-base-label" class="text">' + t('counting.baseLabel') + '</div>';
+    let cardsWrap = document.createElement('div');
+    cardsWrap.id = 'cd-base-cards';
+    cardsWrap.className = 'hand';
+    let sorted = Array.isArray(game.base) ? [...game.base] : [];
+    engineSortHand(sorted);
+    sorted.forEach((card, index) => {
+        let cardEl = gameCreateCardContainer(card);
+        cardEl.classList.add('cd-base-card');
+        cardEl.style.zIndex = String(index + 1);
+        cardsWrap.appendChild(cardEl);
+    });
+    cdBase.appendChild(cardsWrap);
+}
+
+function renderCountingDialogScoreCircle(totalScore) {
+    let host = document.getElementById('cd-score-circle');
+    if (!host) return;
+    host.innerHTML = '';
+    let circle = document.createElement('div');
+    circle.id = 'cd-score-circle-ring';
+    circle.style.borderColor = getScoreBorderColorForValue(totalScore);
+    let digits = String(totalScore).length;
+    if (digits >= 3) circle.setAttribute('data-digit-fit', 'three');
+    else circle.setAttribute('data-digit-fit', 'two');
+
+    let value = document.createElement('div');
+    value.id = 'cd-score-circle-value';
+    value.textContent = String(totalScore);
+    let scoreDigits = String(Math.max(0, Number(totalScore) || 0)).length;
+    value.setAttribute('data-score-digits', String(scoreDigits));
+    if (scoreDigits >= 3) value.setAttribute('data-score-digit-group', 'three-plus');
+    else value.setAttribute('data-score-digit-group', 'one-two');
+    circle.appendChild(value);
+    host.appendChild(circle);
+}
+
+function renderCountingDialogNextFrameSquare(applied) {
+    let host = document.getElementById('cd-next-frame');
+    if (!host) return;
+    if (!applied || !Array.isArray(applied.newLevels)) return;
+
+    let nsLevel = Number(applied.newLevels[0]);
+    let ewLevel = Number(applied.newLevels[1]);
+    let nextCycleIndexBySide = Array.isArray(applied.newCycleIndexBySide)
+        ? applied.newCycleIndexBySide
+        : (game && game.levelRuleState ? game.levelRuleState.cycleIndexBySide : [0, 0]);
+    
+    // Get next pivot, allowing it to be undefined
+    let nextPivot = (applied && typeof isPivotResolved === 'function' && isPivotResolved(applied.nextPivot))
+        ? applied.nextPivot
+        : UNDETERMINED_PIVOT;
+
+    renderLevelPositionSquare(host, {
+        boxId: 'cd-next-frame-box',
+        boxClassName: 'cd-next-frame-box',
+        squareId: 'cd-next-frame-square',
+        squareClassName: 'cd-next-frame-square',
+        triangleClassName: 'cd-next-frame-triangle',
+        nsLevel,
+        ewLevel,
+        nsCycleIndex: getSideCycleIndex(nextCycleIndexBySide, 0),
+        ewCycleIndex: getSideCycleIndex(nextCycleIndexBySide, 1),
+        pivotSeat: nextPivot,
+    });
+}
+
 function showCountingDialog(result, frameResult, applied) {
     if (!gCountingDialog) return;
 
@@ -5215,83 +6272,52 @@ function showCountingDialog(result, frameResult, applied) {
         multiplayCompensation: result.multiplayCompensation,
         totalScore: result.totalScore,
     };
+    let hasFailedMultiplayEvents = Array.isArray(game.multiplayCompensationEvents) && game.multiplayCompensationEvents.length > 0;
+    let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
+    let multiplayCompEnabled = (handling === 'compensation' || handling === 'lian-zhong-compensation' || !!(game.gameConfig && game.gameConfig.multiplayCompensation));
 
     // Size: match #desk-south width × 2× height
     let deskSouth = document.getElementById('desk-south');
     if (deskSouth) {
         let w = deskSouth.offsetWidth;
         let h = deskSouth.offsetHeight * 2;
-        gCountingDialog.style.width = w + 'px';
+        gCountingDialog.style.width = Math.round(w * 1.08) + 'px';
         gCountingDialog.style.height = h + 'px';
     }
 
-    // Row 1 left: base cards as corner-cards
     let cdBase = document.getElementById('cd-base');
-    cdBase.innerHTML = '<div id="cd-base-label">' + t('counting.baseLabel') + '</div>';
-    if (game.base) {
-        let sorted = [...game.base];
-        engineSortHand(sorted);
-        for (let c of sorted) {
-            cdBase.appendChild(createCornerCard(c));
-        }
-    }
+    renderCountingDialogBase(cdBase);
 
-    // Row 1 right: score breakdown
+    renderCountingDialogScoreCircle(breakdown.totalScore);
+
     let cdScore = document.getElementById('cd-score');
-    cdScore.innerHTML = '<div style="font-weight:bold;margin-bottom:0.5vh;">' + t('counting.scoreLabel') + '</div>';
+    cdScore.innerHTML = '<div class="cd-score-label text">' + t('counting.scoreLabel') + '</div>';
     let deskScore = breakdown.counterScore;
     addScoreRow(cdScore, t('counting.deskScore'), deskScore);
-    if (breakdown.baseScoreBeforeSelfBaseHalf > 0 && breakdown.baseScoreSelfBaseHalfApplied) {
-        addScoreRow(cdScore, t('counting.baseScoreBeforeSelfBaseHalf'), breakdown.baseScoreBeforeSelfBaseHalf);
-    }
-    if (breakdown.baseScore > 0) {
-        let baseScoreLabel = breakdown.baseScoreSelfBaseHalfApplied
-            ? t('counting.baseScoreAfterSelfBaseHalf')
-            : t('counting.baseScore');
+    if (result.attackersWonBase) {
+        let baseScoreLabel = t('counting.baseScore');
         addScoreRow(cdScore, baseScoreLabel, breakdown.baseScore);
     }
-    if (result.endingCompensationActive) {
+    if (result.attackersWonBase && breakdown.endingCompensation > 0) {
         addScoreRow(cdScore, t('counting.endingCompensation'), breakdown.endingCompensation);
     }
-    if (result.multiplayCompensationActive) {
+    if (multiplayCompEnabled && hasFailedMultiplayEvents) {
         addScoreRow(cdScore, t('counting.multiplayCompensation'), breakdown.multiplayCompensation);
     }
-    let totalDiv = document.createElement('div');
-    totalDiv.className = 'cd-score-row cd-score-total';
-    totalDiv.innerHTML = '<span>' + t('counting.totalScore') + '</span><span>' + breakdown.totalScore + '</span>';
-    cdScore.appendChild(totalDiv);
-
-    // Row 2 left: result summary
     let cdResultName = document.getElementById('cd-result-name');
-    cdResultName.textContent = result.result;
+    cdResultName.textContent = getCountingDialogResultName(frameResult, game.gameConfig || {});
     let cdLevels = document.getElementById('cd-result-levels');
-    cdLevels.innerHTML = '';
-    if (frameResult) {
-        let chLine = document.createElement('div');
-        if (frameResult.levelDelta > 0) {
-            chLine.textContent = t('counting.levelChange', { delta: frameResult.levelDelta });
-        } else {
-            chLine.textContent = t('counting.noLevelChange');
-        }
-        cdLevels.appendChild(chLine);
-        if (applied && applied.newLevels) {
-            // Use stable natural team labels (南北 = seats 0,2; 东西 = seats 1,3)
-            let nsLevel = applied.newLevels[0]; // South/North team
-            let ewLevel = applied.newLevels[1]; // East/West team
-            let teamLine = document.createElement('div');
-            teamLine.setAttribute('data-result-ns-level', String(nsLevel));
-            teamLine.setAttribute('data-result-ew-level', String(ewLevel));
-            teamLine.textContent = t('counting.teamLevels', {
-                nsLevel: numberToLevel[nsLevel] || nsLevel,
-                ewLevel: numberToLevel[ewLevel] || ewLevel
-            });
-            cdLevels.appendChild(teamLine);
-        }
-    }
+    cdLevels.textContent = getCountingDialogResultDetail(frameResult);
 
-    // Row 2 right: buttons (already in HTML)
+    gCountingOverlay.style.display = 'block';
+    gCountingDialog.style.display = 'block';
+
+    renderCountingDialogNextFrameSquare(applied);
+
     let btnReady = document.getElementById('cd-btn-ready');
+    let btnSave = document.getElementById('cd-btn-save');
     let btnLeave = document.getElementById('cd-btn-leave');
+    if (btnSave) btnSave.disabled = true;
     btnReady.onclick = () => {
         hideCountingDialog();
         startNewGame();
@@ -5308,14 +6334,12 @@ function showCountingDialog(result, frameResult, applied) {
         updateStatus(t('status.ready'));
     };
 
-    gCountingOverlay.style.display = 'block';
-    gCountingDialog.style.display = 'block';
 }
 
 function addScoreRow(parent, label, value) {
     let row = document.createElement('div');
     row.className = 'cd-score-row';
-    row.innerHTML = '<span>' + label + '</span><span>' + value + '</span>';
+    row.innerHTML = '<span class="text">' + label + '</span><span class="cd-score-row-value">' + value + '</span>';
     parent.appendChild(row);
 }
 
@@ -5333,6 +6357,21 @@ let pendingNextFrame = null;
 
 gBtnNewGame.addEventListener('click', onNewGameButtonClick);
 gBtnPlay.addEventListener('click', humanPlayCards);
+if (gBtnPause) {
+    gBtnPause.addEventListener('click', () => requestPause(HUMAN_PLAYER));
+}
+if (gBtnPauseQuitCancel) {
+    gBtnPauseQuitCancel.addEventListener('click', () => {
+        if (pauseState.phase !== 'waitingQuitConfirm') return;
+        pauseState.phase = 'paused';
+        renderPauseDialogByState();
+    });
+}
+if (gBtnPauseQuitConfirm) {
+    gBtnPauseQuitConfirm.addEventListener('click', () => {
+        confirmQuitDuringPause(pauseState.quitRequesterSeat !== null ? pauseState.quitRequesterSeat : HUMAN_PLAYER);
+    });
+}
 
 if (gBtnGameSettings) {
     gBtnGameSettings.addEventListener('click', onFooterSettingsClick);
@@ -5401,10 +6440,19 @@ window.addEventListener('dblclick', function(e) {
 // Initial state
 // ---------------------------------------------------------------------------
 ensureDeclarationHistoryHoverBox();
+ensureSeatsHoverLevelPositionBox();
 if (gDenomArea) {
     gDenomArea.addEventListener('mouseenter', renderDeclarationHistoryRows);
 }
+if (gSeatsDiv) {
+    gSeatsDiv.addEventListener('click', function(e) {
+        e.preventDefault();
+        toggleSeatsTopLeftBoxView();
+    });
+}
 ensureResolvedSettings();
+setSeatsTopLeftBoxView('seats');
 syncBotDeclarationModeSwitchUi();
 updatePhaseDisplay(t('phase.initial'));
 updateStatus(t('status.ready'));
+refreshPauseButtonState();

@@ -78,6 +78,7 @@
                 <div id="game-actions">
                     <button class="button game-btn" id="btn-new-game" data-i18n="buttons.newGame">新对局</button>
                     <button class="button game-btn" id="btn-play" disabled data-i18n="buttons.play">出牌</button>
+                    <button class="button game-btn" id="btn-pause" disabled data-i18n="buttons.pause">暂停</button>
                     <div id="fc-mode-selector" style="display:none;">
                         <label><input type="radio" name="fc-mode" value="must-play" checked> <span data-i18n="fc.mustPlay">必出</span></label>
                         <label><input type="radio" name="fc-mode" value="must-hold"> <span data-i18n="fc.mustHold">必留</span></label>
@@ -118,12 +119,15 @@
     <div id="counting-dialog">
         <div id="counting-dialog-inner">
             <div class="cd-cell" id="cd-base"><div id="cd-base-label">底牌</div></div>
+            <div class="cd-cell" id="cd-score-circle"></div>
             <div class="cd-cell" id="cd-score"></div>
-            <div class="cd-cell" id="cd-result"><div id="cd-result-name"></div><div id="cd-result-levels"></div></div>
             <div class="cd-cell" id="cd-buttons">
                 <button class="button" id="cd-btn-ready" data-i18n="buttons.ready">准备</button>
+                <button class="button" id="cd-btn-save" data-i18n="menus.save" disabled>保存</button>
                 <button class="button" id="cd-btn-leave" data-i18n="buttons.leave">离开</button>
             </div>
+            <div class="cd-cell" id="cd-next-frame"></div>
+            <div class="cd-cell" id="cd-result"><div id="cd-result-name"></div><div id="cd-result-levels"></div></div>
         </div>
     </div>
 
@@ -157,6 +161,24 @@
         <div id="settings-actions">
             <button class="button" id="btn-settings-cancel" data-i18n="settingsDialog.cancel">取消</button>
             <button class="button" id="btn-settings-confirm" data-i18n="settingsDialog.confirm">开始对局</button>
+        </div>
+    </div>
+
+    <!-- Pause / resume unanimous-agreement protocol (note 52) -->
+    <div id="pause-overlay"></div>
+    <div id="pause-dialog">
+        <div id="pause-dialog-title"></div>
+        <div id="pause-dialog-message"></div>
+        <div id="pause-dialog-countdown"></div>
+        <div id="pause-agreement-host"></div>
+        <div id="pause-human-controls"></div>
+        <div id="pause-primary-controls"></div>
+        <div id="pause-quit-confirm" style="display:none;">
+            <div id="pause-quit-confirm-text"></div>
+            <div id="pause-quit-confirm-actions">
+                <button class="button" id="btn-pause-quit-cancel" data-i18n="buttons.cancel">取消</button>
+                <button class="button" id="btn-pause-quit-confirm" data-i18n="buttons.confirmQuit">确认退出</button>
+            </div>
         </div>
     </div>
 

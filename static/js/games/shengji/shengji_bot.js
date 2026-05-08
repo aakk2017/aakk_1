@@ -16,6 +16,74 @@
 // Declaration
 // ---------------------------------------------------------------------------
 
+const BOT_DECLARATION_TIE_ORDER = Object.freeze(['4:4', '4:3', '3', '2', '1', '0']);
+
+function botGetDeclarationTieToken(declaration) {
+    if (!declaration) return '';
+    if (declaration.suit === 4) {
+        if (declaration.count >= 4) return '4:4';
+        return '4:3';
+    }
+    return String(declaration.suit);
+}
+
+function botGetDeclarationTieOrderScore(declaration) {
+    let token = botGetDeclarationTieToken(declaration);
+    let idx = BOT_DECLARATION_TIE_ORDER.indexOf(token);
+    if (idx < 0) return -1;
+    return BOT_DECLARATION_TIE_ORDER.length - idx;
+}
+
+function botGetDeclarationTrumpLength(hand, level, declaration) {
+    if (!declaration) return 0;
+    return engineCountTrumpIfStrain(hand, declaration.suit, level);
+}
+
+function botCompareDeclarationsOverbaseOff(a, b) {
+    if (!a && !b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    if (a.count !== b.count) return a.count - b.count;
+    return botGetDeclarationTieOrderScore(a) - botGetDeclarationTieOrderScore(b);
+}
+
+function botCompareCandidatesByPolicy(a, b) {
+    // Primary: longest resulting trump division.
+    if (a.trumpLength !== b.trumpLength) return a.trumpLength - b.trumpLength;
+    // Secondary: stronger declaration count (double > single, WW > VV).
+    if (a.declaration.count !== b.declaration.count) return a.declaration.count - b.declaration.count;
+    // Remaining tie: required fixed order WW -> VV -> s -> h -> c -> d.
+    let byTieOrder = botGetDeclarationTieOrderScore(a.declaration) - botGetDeclarationTieOrderScore(b.declaration);
+    if (byTieOrder !== 0) return byTieOrder;
+    // Stable deterministic fallback.
+    if (a.declaration.suit !== b.declaration.suit) return a.declaration.suit - b.declaration.suit;
+    return a.declaration.count - b.declaration.count;
+}
+
+function botPickBestCandidateByPolicy(candidates) {
+    if (!candidates || candidates.length === 0) return null;
+    let sorted = candidates.slice().sort((a, b) => {
+        let cmp = botCompareCandidatesByPolicy(a, b);
+        if (cmp !== 0) return -cmp;
+        return 0;
+    });
+    return sorted[0] || null;
+}
+
+function botIsPartnerSeat(a, b) {
+    return ((a + 2) % NUM_PLAYERS) === b;
+}
+
+function botBuildDecision(action, reason, player, declaration, candidateDebug) {
+    return {
+        action,
+        reason,
+        player,
+        declaration: declaration ? { suit: declaration.suit, count: declaration.count } : null,
+        candidateDebug: candidateDebug || [],
+    };
+}
+
 /**
  * Resolve effective declaration-ordering mode from current config.
  */
@@ -53,6 +121,14 @@ function botCompareDeclarations(a, b, orderingMode) {
     return 0;
 }
 
+function botCompareDeclarationsForLegality(a, b, phase = 'dealing') {
+    let isOverbaseOff = !!(game && game.gameConfig && !game.gameConfig.allowOverbase);
+    if (isOverbaseOff && phase !== 'basing-overcall') {
+        return botCompareDeclarationsOverbaseOff(a, b);
+    }
+    return botCompareDeclarations(a, b, botGetEffectiveDeclarationOrdering());
+}
+
 /**
  * Collect legal overcall options for player against current declaration.
  * 
@@ -77,13 +153,13 @@ function botGetLegalOvercallDeclarations(player, currentDeclaration, phase = 'de
             if (!samePlayerDiffSuit) {
                 if (bj >= 2) {
                     let cand = { suit: 4, count: 4 };
-                    if (botCompareDeclarations(cand, currentDeclaration, orderingMode) > 0) {
+                    if (botCompareDeclarationsForLegality(cand, currentDeclaration, phase) > 0) {
                         options.push(cand);
                     }
                 }
                 if (sj >= 2) {
                     let cand = { suit: 4, count: 3 };
-                    if (botCompareDeclarations(cand, currentDeclaration, orderingMode) > 0) {
+                    if (botCompareDeclarationsForLegality(cand, currentDeclaration, phase) > 0) {
                         options.push(cand);
                     }
                 }
@@ -106,26 +182,62 @@ function botGetLegalOvercallDeclarations(player, currentDeclaration, phase = 'de
         }
 
         let cand = { suit: suit, count: count };
-        if (botCompareDeclarations(cand, currentDeclaration, orderingMode) > 0) {
+        if (botCompareDeclarationsForLegality(cand, currentDeclaration, phase) > 0) {
             options.push(cand);
         }
     }
 
-    options.sort((a, b) => botCompareDeclarations(a, b, orderingMode));
+    options.sort((a, b) => {
+        let byLegality = botCompareDeclarationsForLegality(a, b, phase);
+        if (byLegality !== 0) return byLegality;
+        let byLegacy = botCompareDeclarations(a, b, orderingMode);
+        if (byLegacy !== 0) return byLegacy;
+        return botGetDeclarationTieOrderScore(a) - botGetDeclarationTieOrderScore(b);
+    });
     return options;
 }
 
-/**
- * Choose a declaration for a bot player.
- * Returns { suit, count } or null if no declaration.
- */
-function botChooseDeclaration(player, currentDeclaration = null, phase = 'dealing') {
-    if ((phase === 'dealing' || phase === 'finalDeclare')
-        && typeof window.isPassiveDeclarationBotMode === 'function'
-        && window.isPassiveDeclarationBotMode()) {
-        return null;
+function botEnumerateInitialSuitCandidatesOverbaseOff(player, hand, level) {
+    let out = [];
+    let handSize = hand.length;
+    for (let suit = 0; suit <= 3; suit++) {
+        let sameSuitLevelers = hand.filter(c => c.rank === level && c.suit === suit).length;
+        if (sameSuitLevelers <= 0) continue;
+        let trumpLength = engineCountTrumpIfStrain(hand, suit, level);
+        if (trumpLength < (handSize / 3)) continue;
+        let count = sameSuitLevelers >= 2 ? 2 : 1;
+        out.push({
+            declaration: { suit: suit, count: count },
+            trumpLength: trumpLength,
+            source: 'initial-suited',
+        });
+    }
+    return out;
+}
+
+function botEnumerateInitialNTSCandidatesOverbaseOff(hand, level) {
+    let sj = hand.filter(c => c.rank === 14).length;
+    let bj = hand.filter(c => c.rank === 15).length;
+    let naturalTrumpCount = engineCountTrumpIfStrain(hand, 4, level);
+    let holdsWWVV = sj >= 2 && bj >= 2;
+    let out = [];
+
+    if (naturalTrumpCount >= 4) {
+        if (holdsWWVV || bj >= 2) {
+            out.push({ declaration: { suit: 4, count: 4 }, trumpLength: naturalTrumpCount, source: 'initial-nts' });
+        } else if (sj >= 2) {
+            out.push({ declaration: { suit: 4, count: 3 }, trumpLength: naturalTrumpCount, source: 'initial-nts' });
+        }
     }
 
+    return {
+        candidates: out,
+        naturalTrumpCount: naturalTrumpCount,
+        holdsWWVV: holdsWWVV,
+    };
+}
+
+function botChooseDeclarationLegacy(player, currentDeclaration = null, phase = 'dealing') {
     let hand = game.hands[player];
     let level = game.level;
     let handSize = hand.length;
@@ -217,6 +329,103 @@ function botChooseDeclaration(player, currentDeclaration = null, phase = 'dealin
     });
     let best = candidates[0];
     return { suit: best.suit, count: best.count };
+}
+
+function botDecideDeclaration(player, currentDeclaration = null, phase = 'dealing') {
+    if ((phase === 'dealing' || phase === 'finalDeclare')
+        && typeof window.isPassiveDeclarationBotMode === 'function'
+        && window.isPassiveDeclarationBotMode()) {
+        return botBuildDecision('none', 'passive-mode', player, null, []);
+    }
+
+    // Preserve existing overbase behavior and basing-overcall behavior unchanged.
+    if ((game && game.gameConfig && game.gameConfig.allowOverbase) || phase === 'basing-overcall') {
+        let legacy = botChooseDeclarationLegacy(player, currentDeclaration, phase);
+        return botBuildDecision(legacy ? 'declare' : 'none', legacy ? 'legacy-policy' : 'no-legal-candidate', player, legacy, []);
+    }
+
+    let hand = game.hands[player] || [];
+    let level = game.level;
+    let handSize = hand.length;
+
+    if ((phase === 'dealing' || phase === 'finalDeclare') && handSize < 5) {
+        return botBuildDecision('none', 'before-5th-card', player, null, []);
+    }
+
+    // Case split mandated by note 53.
+    if (!currentDeclaration) {
+        let suitCandidates = botEnumerateInitialSuitCandidatesOverbaseOff(player, hand, level);
+        let ntsData = botEnumerateInitialNTSCandidatesOverbaseOff(hand, level);
+        let allCandidates = suitCandidates.concat(ntsData.candidates);
+        let best = botPickBestCandidateByPolicy(allCandidates);
+        let debug = allCandidates.map(c => ({
+            suit: c.declaration.suit,
+            count: c.declaration.count,
+            trumpLength: c.trumpLength,
+            tieToken: botGetDeclarationTieToken(c.declaration),
+            source: c.source,
+            naturalTrumpCount: ntsData.naturalTrumpCount,
+            holdsWWVV: ntsData.holdsWWVV,
+        }));
+        if (!best) return botBuildDecision('none', 'no-legal-candidate', player, null, debug);
+        let reason = best.source === 'initial-nts' ? 'initial-nts' : 'initial-suited';
+        return botBuildDecision('declare', reason, player, best.declaration, debug);
+    }
+
+    if (currentDeclaration.player === player) {
+        if (currentDeclaration.suit >= 0 && currentDeclaration.suit <= 3 && currentDeclaration.count === 1) {
+            let sameSuitLevelers = hand.filter(c => c.rank === level && c.suit === currentDeclaration.suit).length;
+            if (sameSuitLevelers >= 2) {
+                let legal = botGetLegalOvercallDeclarations(player, currentDeclaration, phase);
+                let sameSuitDouble = legal.find(c => c.suit === currentDeclaration.suit && c.count === 2);
+                if (sameSuitDouble) {
+                    return botBuildDecision('declare', 'self-upgrade', player, sameSuitDouble, [{
+                        suit: sameSuitDouble.suit,
+                        count: sameSuitDouble.count,
+                        trumpLength: botGetDeclarationTrumpLength(hand, level, sameSuitDouble),
+                        tieToken: botGetDeclarationTieToken(sameSuitDouble),
+                        source: 'self-upgrade',
+                    }]);
+                }
+            }
+        }
+        return botBuildDecision('none', 'no-legal-candidate', player, null, []);
+    }
+
+    if (botIsPartnerSeat(player, currentDeclaration.player)) {
+        return botBuildDecision('none', 'partner-last-no-overcall', player, null, []);
+    }
+
+    let legal = botGetLegalOvercallDeclarations(player, currentDeclaration, phase);
+    if (!legal.length) {
+        return botBuildDecision('none', 'no-legal-candidate', player, null, []);
+    }
+
+    let overcallCandidates = legal.map(d => ({
+        declaration: { suit: d.suit, count: d.count },
+        trumpLength: botGetDeclarationTrumpLength(hand, level, d),
+        source: 'opponent-overcall',
+    }));
+    let bestOvercall = botPickBestCandidateByPolicy(overcallCandidates);
+    let debug = overcallCandidates.map(c => ({
+        suit: c.declaration.suit,
+        count: c.declaration.count,
+        trumpLength: c.trumpLength,
+        tieToken: botGetDeclarationTieToken(c.declaration),
+        source: c.source,
+    }));
+    if (!bestOvercall) return botBuildDecision('none', 'no-legal-candidate', player, null, debug);
+
+    return botBuildDecision('declare', 'opponent-overcall', player, bestOvercall.declaration, debug);
+}
+
+/**
+ * Choose a declaration for a bot player.
+ * Returns { suit, count } or null if no declaration.
+ */
+function botChooseDeclaration(player, currentDeclaration = null, phase = 'dealing') {
+    let decision = botDecideDeclaration(player, currentDeclaration, phase);
+    return decision && decision.action === 'declare' ? decision.declaration : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -521,8 +730,9 @@ function botFindTopEstablishedSingles(divCards, unseenMap) {
         }
     }
 
-    // A single is top/established if its order > maxUnseenOrder
-    return singles.filter(c => c.order > maxUnseenOrder);
+    // A single is top/established if there is no strictly higher unseen card.
+    // Equal-order unseen copies do not disqualify it.
+    return singles.filter(c => c.order >= maxUnseenOrder);
 }
 
 /**
@@ -689,6 +899,219 @@ function botMultiplayTieBreak(a, b) {
     return aMinId - bMinId;
 }
 
+function botRelativeSeatDistance(leader, seat) {
+    return (seat - leader + NUM_PLAYERS) % NUM_PLAYERS;
+}
+
+function botGetDeclarationKnownCopy(declaration) {
+    if (!declaration) return 0;
+    let suit = Number(declaration.suit);
+    let count = Number(declaration.count);
+    if (suit === 4) {
+        return count >= 4 ? 2 : 1;
+    }
+    return count >= 2 ? 2 : 1;
+}
+
+function botGetDeclarationKnownElement(declaration) {
+    if (!declaration || !Array.isArray(game.deck)) return null;
+    let suit = Number(declaration.suit);
+    let copy = botGetDeclarationKnownCopy(declaration);
+    if (copy <= 0) return null;
+
+    let sampleCards = [];
+    if (suit === 4) {
+        let jokers = game.deck.filter(c => c.division === 4 && typeof c.isJoker === 'function' && c.isJoker())
+            .sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+        if (jokers.length === 0) return null;
+
+        let target = (copy >= 2) ? jokers[0] : jokers[jokers.length - 1];
+        sampleCards = game.deck.filter(c => c.suit === target.suit && c.rank === target.rank && c.division === target.division)
+            .sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+    } else {
+        sampleCards = game.deck.filter(c => c.suit === suit && c.rank === game.level)
+            .sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+    }
+
+    if (sampleCards.length === 0) return null;
+    let chosen = sampleCards.slice(0, copy);
+    let top = chosen[0];
+
+    return {
+        seat: Number(declaration.player),
+        source: 'declaration',
+        copy: copy,
+        span: 1,
+        division: top.division,
+        order: top.order,
+        cardIds: chosen.map(c => c.cardId),
+    };
+}
+
+function botBuildKnownElementsForSeat(seat) {
+    let elements = [];
+
+    let exposedByDiv = game.exposedCards && game.exposedCards[seat] ? game.exposedCards[seat] : null;
+    if (exposedByDiv) {
+        for (let div in exposedByDiv) {
+            let cards = Array.isArray(exposedByDiv[div]) ? exposedByDiv[div] : [];
+            let division = Number(div);
+            for (let c of cards) {
+                elements.push({
+                    seat,
+                    source: 'exposedCards',
+                    copy: 1,
+                    span: 1,
+                    division,
+                    order: c.order,
+                    cardIds: [c.cardId],
+                });
+            }
+            let structured = botFindAllStructuredElements(cards, division);
+            for (let s of structured) {
+                elements.push({
+                    seat,
+                    source: 'exposedCards',
+                    copy: s.copy,
+                    span: s.span,
+                    division: s.division,
+                    order: s.order,
+                    cardIds: s.cards.map(c => c.cardId).sort((a, b) => a - b),
+                });
+            }
+        }
+    }
+
+    if (Array.isArray(game.declarations)) {
+        for (let d of game.declarations) {
+            if (!d || Number(d.player) !== seat) continue;
+            let known = botGetDeclarationKnownElement(d);
+            if (!known) continue;
+            elements.push(known);
+        }
+    }
+
+    return elements;
+}
+
+function botFindKnownBlockerForElement(leader, ledElement) {
+    let blockers = [];
+
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        if (seat === leader) continue;
+        let knownElements = botBuildKnownElementsForSeat(seat);
+        for (let k of knownElements) {
+            if (k.division !== ledElement.division) continue;
+            let reason = null;
+
+            if (ledElement.copy === 1 && ledElement.span === 1) {
+                if (k.copy === 1 && k.order > ledElement.order) {
+                    reason = 'known-higher-single';
+                }
+            } else if (ledElement.copy === 2 && ledElement.span === 1) {
+                if (k.copy === 2 && k.order > ledElement.order) {
+                    reason = 'known-higher-pair';
+                }
+            } else if (ledElement.copy === 2 && ledElement.span > 1) {
+                if (k.copy === 2 && k.span >= ledElement.span && k.order > ledElement.order) {
+                    reason = 'known-higher-tractor';
+                }
+            }
+
+            if (reason) {
+                blockers.push({
+                    seat,
+                    source: k.source,
+                    copy: k.copy,
+                    span: k.span,
+                    division: k.division,
+                    order: k.order,
+                    cardIds: (k.cardIds || []).slice().sort((a, b) => a - b),
+                    reason,
+                });
+            }
+        }
+    }
+
+    let reasonPriority = {
+        'known-higher-tractor': 0,
+        'known-higher-pair': 1,
+        'known-higher-single': 2,
+    };
+
+    blockers.sort((a, b) => {
+        let da = botRelativeSeatDistance(leader, a.seat);
+        let db = botRelativeSeatDistance(leader, b.seat);
+        if (da !== db) return da - db;
+        let pa = reasonPriority[a.reason] ?? 99;
+        let pb = reasonPriority[b.reason] ?? 99;
+        if (pa !== pb) return pa - pb;
+        if (a.order !== b.order) return b.order - a.order;
+        let aKey = (a.cardIds || []).join(',');
+        let bKey = (b.cardIds || []).join(',');
+        if (aKey < bKey) return -1;
+        if (aKey > bKey) return 1;
+        return 0;
+    });
+
+    return blockers.length > 0 ? blockers[0] : null;
+}
+
+function botIsKnownFakeMultiplay(leader, candidateCards) {
+    let resolved = engineResolveLead(candidateCards || []);
+    if (!resolved || resolved.elements.length <= 1) {
+        return {
+            isMultiplay: false,
+            isKnownFake: false,
+            blockedElement: null,
+            blocker: null,
+            reason: null,
+        };
+    }
+
+    for (let element of resolved.elements) {
+        let blocker = botFindKnownBlockerForElement(leader, element);
+        if (blocker) {
+            return {
+                isMultiplay: true,
+                isKnownFake: true,
+                blockedElement: {
+                    copy: element.copy,
+                    span: element.span,
+                    division: element.division,
+                    order: element.order,
+                },
+                blocker,
+                reason: blocker.reason,
+            };
+        }
+    }
+
+    return {
+        isMultiplay: true,
+        isKnownFake: false,
+        blockedElement: null,
+        blocker: null,
+        reason: null,
+    };
+}
+
+function botFilterSafeLeadCandidates(leader, candidates) {
+    let safeCandidates = [];
+    let diagnostics = [];
+    for (let candidate of candidates) {
+        let diag = botIsKnownFakeMultiplay(leader, candidate.cards || []);
+        diagnostics.push({
+            cardIds: (candidate.cards || []).map(c => c.cardId).sort((a, b) => a - b),
+            diagnosis: diag,
+        });
+        if (!(diag.isMultiplay && diag.isKnownFake)) {
+            safeCandidates.push(candidate);
+        }
+    }
+    return { safeCandidates, diagnostics };
+}
+
 /**
  * Choose cards to lead (Note 28 priority order).
  *
@@ -734,7 +1157,10 @@ function botChooseLead(player) {
             }
             if (case1Candidates.length > 0) {
                 case1Candidates.sort(botMultiplayTieBreak);
-                return case1Candidates[0].cards;
+                let filtered = botFilterSafeLeadCandidates(player, case1Candidates);
+                if (filtered.safeCandidates.length > 0) {
+                    return filtered.safeCandidates[0].cards;
+                }
             }
             
             // --- Case 2: Good-structure core from non-levelers ---
@@ -759,7 +1185,10 @@ function botChooseLead(player) {
             }
             if (case2Candidates.length > 0) {
                 case2Candidates.sort(botMultiplayTieBreak);
-                return case2Candidates[0].cards;
+                let filtered = botFilterSafeLeadCandidates(player, case2Candidates);
+                if (filtered.safeCandidates.length > 0) {
+                    return filtered.safeCandidates[0].cards;
+                }
             }
             
             // --- Case 3: Others-showed-out full division (non-levelers only) ---
@@ -776,7 +1205,10 @@ function botChooseLead(player) {
             }
             if (case3Candidates.length > 0) {
                 case3Candidates.sort(botMultiplayTieBreak);
-                return case3Candidates[0].cards;
+                let filtered = botFilterSafeLeadCandidates(player, case3Candidates);
+                if (filtered.safeCandidates.length > 0) {
+                    return filtered.safeCandidates[0].cards;
+                }
             }
             
             // --- Case 4: Good singles from non-levelers ---
@@ -792,7 +1224,10 @@ function botChooseLead(player) {
             }
             if (case4Candidates.length > 0) {
                 case4Candidates.sort(botMultiplayTieBreak);
-                return case4Candidates[0].cards;
+                let filtered = botFilterSafeLeadCandidates(player, case4Candidates);
+                if (filtered.safeCandidates.length > 0) {
+                    return filtered.safeCandidates[0].cards;
+                }
             }
             
             // Fallback: lead any single non-leveler (worst case, holding only levelers was false)
@@ -827,7 +1262,10 @@ function botChooseLead(player) {
     }
     if (case1Candidates.length > 0) {
         case1Candidates.sort(botMultiplayTieBreak);
-        return case1Candidates[0].cards;
+        let filtered = botFilterSafeLeadCandidates(player, case1Candidates);
+        if (filtered.safeCandidates.length > 0) {
+            return filtered.safeCandidates[0].cards;
+        }
     }
 
     // --- Case 2: Good-structure core + good singles appended if present ---
@@ -861,7 +1299,10 @@ function botChooseLead(player) {
     }
     if (case2Candidates.length > 0) {
         case2Candidates.sort(botMultiplayTieBreak);
-        return case2Candidates[0].cards;
+        let filtered = botFilterSafeLeadCandidates(player, case2Candidates);
+        if (filtered.safeCandidates.length > 0) {
+            return filtered.safeCandidates[0].cards;
+        }
     }
 
     // --- Case 3: Others-showed-out full division single-only ---
@@ -880,7 +1321,10 @@ function botChooseLead(player) {
     }
     if (case3Candidates.length > 0) {
         case3Candidates.sort(botMultiplayTieBreak);
-        return case3Candidates[0].cards;
+        let filtered = botFilterSafeLeadCandidates(player, case3Candidates);
+        if (filtered.safeCandidates.length > 0) {
+            return filtered.safeCandidates[0].cards;
+        }
     }
 
     // --- Case 4: A few good singles ---
@@ -896,7 +1340,10 @@ function botChooseLead(player) {
     }
     if (case4Candidates.length > 0) {
         case4Candidates.sort(botMultiplayTieBreak);
-        return case4Candidates[0].cards;
+        let filtered = botFilterSafeLeadCandidates(player, case4Candidates);
+        if (filtered.safeCandidates.length > 0) {
+            return filtered.safeCandidates[0].cards;
+        }
     }
 
     // --- Fallback: no multiplay applies ---

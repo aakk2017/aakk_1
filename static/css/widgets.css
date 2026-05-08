@@ -51,10 +51,12 @@ body {
     /* background-color: #666; */
 }
 #div-seats {
-    width: 15vh;
-    height: 15vh;
+    --seats-box-size: 15vh;
+    --seats-border-size: 3vh;
+    width: var(--seats-box-size);
+    height: var(--seats-box-size);
     box-sizing: border-box;
-    border: 3vh solid #f8f8f8;
+    border: var(--seats-border-size) solid #f8f8f8;
     border-radius: var(--radius);
     outline: 1px solid black;
     margin: auto 1vh;

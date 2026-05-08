@@ -30,7 +30,13 @@ const messages_zhCN = {
     botDeclarationModeNormal: '常规',
     botDeclarationModePassive: '被动',
     showBase:       '查看底牌',
+    pause:          '暂停',
+    agree:          '同意',
+    disagree:       '拒绝',
     ready:          '准备',
+    quit:           '退出',
+    cancel:         '取消',
+    confirmQuit:    '确认退出',
     leave:          '离开',
   },
 
@@ -95,6 +101,7 @@ const messages_zhCN = {
     botThinking:  '{playerName} 思考中…',
     forehandControl: '选择 {targetName} 的标记牌（仅限当前门曝光牌，可不选）',
     gameOver:     '对局结束',
+    paused:       '对局已暂停',
   },
 
   // ── Desk / round info ──
@@ -129,6 +136,12 @@ const messages_zhCN = {
     baseScoreBonus: ' (底分 +{baseScore})',
     levelAdvance:   '{players} 升 {delta} 级',
     gameWon:        '{players} 通关！',
+    pauseRequested: '{playerName} 发起了暂停请求',
+    pauseRejected:  '{playerName} 拒绝了暂停请求',
+    pauseTimeout:   '暂停请求超时，已恢复对局',
+    pauseEntered:   '所有玩家同意，进入暂停',
+    pauseResumed:   '所有玩家准备完成，恢复对局',
+    quitDuringPause:'{playerName} 在暂停中退出，游戏结束。',
   },
 
   // ── Labels ──
@@ -288,6 +301,7 @@ const messages_zhCN = {
       mustDefendLevels: '必打',
       mustStopLevels: '必停',
       knockBackLevels: '勾级',
+      skipLevels: '跳过',
       knockBackCondition: '勾回条件',
       gameMode: '循环方式',
       timingPreset: '预设计时方案',
@@ -336,8 +350,7 @@ const messages_zhCN = {
       eightFourFour: '8-4-4',
       noPreset: '(无)',
       // 级别预设
-      slow: '慢打',
-      short: '短打',
+      skip468: '跳468',
       singleT: '单T抠底',
       takeStageRequired: '需要上台',
       nonSingleKnockBackTwoSteps: '双抠退两步',
@@ -382,6 +395,16 @@ const messages_zhCN = {
     shotClockLabel: '步时',
   },
 
+  pause: {
+    waitingTitle: '等待同意...',
+    waitingMessage: '{playerName} 请求暂停',
+    pausedTitle: '暂停中',
+    pausedMessage: '等待所有玩家点击准备后恢复',
+    quitConfirm: '确认退出当前对局？',
+    quitReason: '{playerName} 在暂停中退出，游戏结束。',
+    countdown: '剩余 {seconds} 秒',
+  },
+
   // ── Dealing phase (note 25) ──
   dealing: {
     dealtCount: '{count}张',
@@ -397,10 +420,8 @@ const messages_zhCN = {
   counting: {
     baseLabel:       '底牌',
     scoreLabel:      '得分明细',
-    deskScore:       '分牌',
+    deskScore:       '桌面分',
     baseScore:       '底分',
-    baseScoreBeforeSelfBaseHalf: '底分（折半前）',
-    baseScoreAfterSelfBaseHalf: '底分（折半后）',
     endingCompensation: '终盘补分',
     multiplayCompensation: '甩牌补分',
     totalScore:      '总分',

@@ -125,6 +125,15 @@ const PLAYER_NAMES = [t('players.south'), t('players.east'), t('players.north'),
 // Position text relative to South
 const POSITION_LABELS = [t('positions.south'), t('positions.east'), t('positions.north'), t('positions.west')];
 
+const UNDETERMINED_PIVOT = -1;
+
+function isPivotResolved(pivotSeat) {
+    return Number.isInteger(pivotSeat) && pivotSeat >= 0 && pivotSeat < NUM_PLAYERS;
+}
+
+window.UNDETERMINED_PIVOT = UNDETERMINED_PIVOT;
+window.isPivotResolved = isPivotResolved;
+
 // ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
@@ -132,7 +141,8 @@ let game = {
     phase:          GamePhase.IDLE,
     level:          0,       // rank index: 0→'2', 1→'3', … 12→'A'
     strain:         -1,      // -1 undetermined, 0–3 suited, 4 nts
-    pivot:          0,       // pivot player position
+    pivot:          UNDETERMINED_PIVOT,
+    declarationOrderAnchor: 0,
 
     deck:           [],
     hands:          [[], [], [], []],
@@ -895,17 +905,21 @@ function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allB
         }
     }
 
-    // Increment ForehandControlChanceState
+    // Increment ForehandControlChanceState only in default mode
+    let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
+    let useForehandControl = handling === 'default';
+    
     let forehand = (failer + NUM_PLAYERS - 1) % NUM_PLAYERS;
-    if (!game.fcChances[failer]) game.fcChances[failer] = { forehand: forehand, count: 0 };
-    game.fcChances[failer].count++;
+    if (useForehandControl) {
+        if (!game.fcChances[failer]) game.fcChances[failer] = { forehand: forehand, count: 0 };
+        game.fcChances[failer].count++;
+    }
 
     // Failed-multiplay compensation runtime semantics (note 39c/39d/48c):
     // compensation applies in supported compensation modes.
     // - compensation: revokedCardCount * amount
     // - lian-zhong-compensation: intendedLeadCardCount * 5
     // Sign: negative when the failing side is the attackers; positive when the failing side is the defenders.
-    let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
     let compensationEnabled =
         (handling === 'compensation')
         || (handling === 'lian-zhong-compensation')
@@ -1632,6 +1646,11 @@ function engineGetCurrentPlayer() {
 }
 
 function engineSetTeams() {
+    if (!isPivotResolved(game.pivot)) {
+        game.defendingTeam = [];
+        game.attackingTeam = [];
+        return;
+    }
     game.defendingTeam = [game.pivot, (game.pivot + 2) % NUM_PLAYERS];
     game.attackingTeam = [];
     for (let i = 0; i < NUM_PLAYERS; i++) {
@@ -1664,11 +1683,14 @@ function engineResetFailedMultiplayCompensationState() {
 /** Start a new game — shuffles deck but does NOT deal.
  *  The page calls engineDealNextBatch() to animate dealing one round at a time.
  */
-function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRuleConfig) {
+function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRuleConfig, declarationOrderAnchor) {
     game.phase          = GamePhase.DEALING;
     game.level          = level;
     game.strain         = -1;
-    game.pivot          = pivot;
+    game.pivot          = isPivotResolved(pivot) ? pivot : UNDETERMINED_PIVOT;
+    game.declarationOrderAnchor = Number.isInteger(declarationOrderAnchor) && declarationOrderAnchor >= 0 && declarationOrderAnchor < NUM_PLAYERS
+        ? declarationOrderAnchor
+        : (isPivotResolved(game.pivot) ? game.pivot : 0);
     game.frameScore     = 0;
     game.currentRound   = 0;
     game.roundHistory   = [];
@@ -1684,6 +1706,8 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     game.fcPending      = null;
     game.forehandControl = null;
     game.isQiangzhuang  = (isQiangzhuang !== false); // true by default, false only for later frames
+    game.defendingTeam  = [];
+    game.attackingTeam  = [];
 
     // Per-player levels: use provided or initialize all to 0
     if (playerLevels) {
@@ -1777,14 +1801,17 @@ function engineIsHighestPossibleDeclaration(declaration) {
 
 /** Pivot picks up base */
 function enginePickUpBase() {
+    if (!isPivotResolved(game.pivot)) return false;
     game.hands[game.pivot] = game.hands[game.pivot].concat(game.base);
     game.base = [];
     engineSortHand(game.hands[game.pivot]);
     game.currentBaser = game.pivot;
     game.phase = GamePhase.BASING;
+    return true;
 }
 
 function engineInitPlayingStateFromCommittedBase() {
+    if (!isPivotResolved(game.pivot)) return false;
     engineSetTeams();
     game.currentLeader    = game.pivot;
     game.currentRound     = 1;
@@ -1792,6 +1819,7 @@ function engineInitPlayingStateFromCommittedBase() {
     game.roundPlayed      = [null, null, null, null];
     game.leadInfo         = null;
     game.phase            = GamePhase.PLAYING;
+    return true;
 }
 
 function engineGetPlayingEntryCardinalityState() {
@@ -1818,6 +1846,7 @@ function engineSetBase(selectedCards, options) {
     if (selectedCards.length !== BASE_SIZE) return false;
     // Use currentBaser if set (overbase case), else fall back to game.pivot (normal case).
     let activeBaser = (game.currentBaser !== null && game.currentBaser !== undefined) ? game.currentBaser : game.pivot;
+    if (!isPivotResolved(activeBaser)) return false;
     let hand = game.hands[activeBaser];
     if (!selectedCards.every(c => hand.some(h => h.cardId === c.cardId))) return false;
 
@@ -1835,8 +1864,7 @@ function engineSetBase(selectedCards, options) {
         return true;
     }
 
-    engineInitPlayingStateFromCommittedBase();
-    return true;
+    return engineInitPlayingStateFromCommittedBase();
 }
 
 function engineCommitBasingToPlaying() {
@@ -1844,8 +1872,7 @@ function engineCommitBasingToPlaying() {
     if (game.phase !== GamePhase.BASING) return false;
     let cardinality = engineGetPlayingEntryCardinalityState();
     if (!cardinality.isValid) return false;
-    engineInitPlayingStateFromCommittedBase();
-    return true;
+    return engineInitPlayingStateFromCommittedBase();
 }
 
 function engineApplyOverbaseDeclaration(player, declaration) {
@@ -2104,6 +2131,7 @@ function engineFinalize() {
     return {
         totalScore: finalScore,
         counterScore,
+        attackersWonBase,
         baseScoreBeforeSelfBaseHalf,
         baseScoreAfterSelfBaseHalf,
         baseScoreSelfBaseHalfApplied,
@@ -2463,6 +2491,8 @@ function engineComputeFrameResult(finalScore) {
 function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
     let newLevels = engineCanonicalizeSideLevels(playerLevels);
     let startLevel = engineGetConfiguredStartLevel();
+    let cfg = game.gameConfig || {};
+    let skipLevels = Array.isArray(cfg.skipLevels) ? new Set(cfg.skipLevels) : new Set();
     let processedSides = {};
 
     for (let p of advancingPlayers) {
@@ -2474,24 +2504,41 @@ function engineAdvanceLevels(playerLevels, advancingPlayers, delta) {
         let sideAnchor = sidePlayers[0];
         let current = newLevels[sideAnchor];
         let currentAbs = engineGetCycleAwareAbsoluteLevel(sideAnchor, current);
-        let targetAbs = currentAbs + delta;
 
         // If currently at an uncleared blocker, cannot advance past it.
-        let startOccurrence = targetAbs > currentAbs
+        let startOccurrence = delta > 0
             ? engineGetBlockingOccurrenceForPlayerInCycle(sideAnchor, current, engineGetPlayerCycleIndex(sideAnchor))
             : null;
         if (startOccurrence) {
-            targetAbs = currentAbs;
+            continue;  // Cannot advance, stay in place
         }
 
-        for (let abs = currentAbs + 1; abs <= targetAbs; abs++) {
-            let cycleIndex = Math.floor(abs / 13);
-            let level = engineCycleOffsetToLevel(abs % 13, startLevel);
+        // Count non-skipped steps, skipping over skipped ranks
+        let targetAbs = currentAbs;
+        let stepsAllowed = Math.abs(delta);
+        let direction = delta > 0 ? 1 : -1;
+
+        while (stepsAllowed > 0) {
+            let nextAbs = targetAbs + direction;
+            let cycleIndex = Math.floor(nextAbs / 13);
+            let level = engineCycleOffsetToLevel(nextAbs % 13, startLevel);
+
+            // Skip over skipped levels without counting them as a step
+            if (skipLevels.has(level)) {
+                targetAbs = nextAbs;
+                continue;
+            }
+
+            // Land on the next level
+            targetAbs = nextAbs;
+
+            // Check for blocking occurrence (must-stop/must-defend/knock-back)
             let occurrence = engineGetBlockingOccurrenceForPlayerInCycle(sideAnchor, level, cycleIndex);
             if (occurrence) {
-                targetAbs = abs;
-                break;
+                break;  // Landed on blocker; do not pass it
             }
+
+            stepsAllowed--;
         }
 
         let nextCycleIndex = Math.floor(targetAbs / 13);
@@ -2605,8 +2652,13 @@ function engineApplyFrameResult(frameResult) {
         gameWon = winners.length > 0;
     }
 
+    let newCycleIndexBySide = (game.levelRuleState && Array.isArray(game.levelRuleState.cycleIndexBySide))
+        ? game.levelRuleState.cycleIndexBySide.map(v => (Number.isInteger(v) && v >= 0 ? v : 0))
+        : [0, 0];
+
     return {
         newLevels: newLevels,
+        newCycleIndexBySide,
         nextPivot: frameResult.nextPivot,
         nextLevel: nextLevel,
         knockBackTriggered,

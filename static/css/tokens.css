@@ -72,6 +72,18 @@
     src: url('../fonts/Roboto/Roboto-VariableFont_wdth\,wght.ttf') format('truetype');
 }
 @font-face {
+    /* condensed numeric face for 3-digit score in counting dialog */
+    font-family: 'Roboto Condensed';
+    font-style: normal;
+    src: url('../fonts/Roboto_Condensed/static/RobotoCondensed-Regular.ttf') format('truetype');
+}
+@font-face {
+    /* for timers and counting score — normal monospace */
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    src: url('../fonts/JetBrains_Mono/JetBrainsMono-VariableFont_wght.ttf') format('truetype');
+}
+@font-face {
     /* for timers — italic monospace */
     font-family: 'JetBrains Mono';
     font-style: italic;
