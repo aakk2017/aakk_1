@@ -19,6 +19,16 @@ const numberToNaturalPositionText4 = [t('natural.east'), t('natural.north'), t('
 // Relative position names from reference player's perspective
 const numberToRelativePositionText4 = [t('relative.self'), t('relative.afterhand'), t('relative.opposite'), t('relative.forehand')];
 
+// Note 57: explicit six-system position taxonomy used by live engine/page mapping.
+const ShengjiPositionSystems = Object.freeze({
+    naturalPosition: Object.freeze(['south', 'east', 'north', 'west', 'southwest', 'southeast', 'dummy']),
+    actorSeat: Object.freeze([0, 1, 2, 3]),
+    framePosition: Object.freeze(['pivot', 'successor', 'dummy', 'predecessor']),
+    referencePosition: Object.freeze(['self', 'afterhand', 'opposite', 'forehand']),
+    roundPosition: Object.freeze(['leader', 'second', 'third', 'fourth']),
+    displayPosition: Object.freeze(['bottom', 'right', 'top', 'left', 'center']),
+});
+
 /**
  * ShengjiType enumeration for move classifications
  * Describes the type of action or move in Shengji

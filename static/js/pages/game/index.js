@@ -14,12 +14,31 @@
 // ---------------------------------------------------------------------------
 const gShand   = document.getElementById('shand');
 
-const gDeskSlots = [
-    document.getElementById('desk-south'),
-    document.getElementById('desk-east'),
-    document.getElementById('desk-north'),
-    document.getElementById('desk-west')
-];
+const gDeskSlotsByScreenSlot = {
+    bottom: document.getElementById('desk-south'),
+    right: document.getElementById('desk-east'),
+    top: document.getElementById('desk-north'),
+    left: document.getElementById('desk-west')
+};
+const LEGACY_DESK_ID_TO_SCREEN_SLOT = {
+    south: 'bottom',
+    east: 'right',
+    north: 'top',
+    west: 'left'
+};
+const gDeskSlots = new Proxy([
+    gDeskSlotsByScreenSlot.bottom,
+    gDeskSlotsByScreenSlot.right,
+    gDeskSlotsByScreenSlot.top,
+    gDeskSlotsByScreenSlot.left
+], {
+    get(target, prop, receiver) {
+        if (typeof prop === 'string' && /^[0-9]+$/.test(prop)) {
+            return getDeskSlotForSeat(Number(prop));
+        }
+        return Reflect.get(target, prop, receiver);
+    }
+});
 
 const gDeskCenter  = document.getElementById('desk-center');
 const gDeskInfo    = document.getElementById('desk-center-info');
@@ -47,6 +66,7 @@ const gScoreCont   = document.getElementById('div-score-container');
 const gLevelDiv    = document.getElementById('div-denomination-level');
 const gStrainDiv   = document.getElementById('div-denomination-strain');
 const gDenomArea   = document.getElementById('div-denomination-area');
+const gGameTopInfo = document.getElementById('game-top-info');
 const gSeatsDiv    = document.getElementById('div-seats');
 const gDeclareSp   = document.getElementById('span-declaration');
 const gDeclMethodSp= document.getElementById('span-declare-method');
@@ -93,12 +113,84 @@ const gBtnPauseQuitConfirm = document.getElementById('btn-pause-quit-confirm');
 // Test mode: human controls both South (0) and East (1)
 // ---------------------------------------------------------------------------
 let TEST_MODE = false;
-let HUMAN_PLAYERS = TEST_MODE ? new Set([0, 1]) : new Set([0]);
-function isHumanControlled(player) { return HUMAN_PLAYERS.has(player); }
+let HUMAN_CONTROLLED_SEATS = TEST_MODE ? new Set([0, 1]) : new Set([0]);
+function isHumanControlled(player) { return HUMAN_CONTROLLED_SEATS.has(player); }
+
+function getControllerSeatForActorSeat(actorSeat) {
+    let seat = Number(actorSeat);
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return seat;
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled) {
+        let dummySeat = Number(game.threePlayer.dummySeat);
+        if (seat === dummySeat && typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
+            return Number(game.pivot);
+        }
+    }
+    return seat;
+}
+
+function getControllerActorSeatForActorSeat(actorSeat) {
+    return getControllerSeatForActorSeat(actorSeat);
+}
+
+function isActorControlledByHuman(actorSeat) {
+    return isHumanControlled(getControllerSeatForActorSeat(actorSeat));
+}
+
+function getPlayableHandForActorSeat(actorSeat) {
+    let seat = Number(actorSeat);
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return [];
+    return (game && Array.isArray(game.hands) && Array.isArray(game.hands[seat])) ? game.hands[seat] : [];
+}
+
+function getReferencePositionForActorSeat(actorSeat, referenceActorSeat) {
+    let actor = Number(actorSeat);
+    let reference = Number(referenceActorSeat);
+    if (!Number.isInteger(actor) || !Number.isInteger(reference) || actor < 0 || actor >= NUM_PLAYERS || reference < 0 || reference >= NUM_PLAYERS) {
+        return null;
+    }
+    const refNames = ['reference', 'afterhand', 'opposite', 'forehand'];
+    return refNames[(actor - reference + NUM_PLAYERS) % NUM_PLAYERS] || null;
+}
+
+function getDisplayPositionForReferencePosition(referencePosition, displayDirection = 'ccw') {
+    const ccwMap = {
+        reference: 'bottom',
+        afterhand: 'right',
+        opposite: 'top',
+        forehand: 'left',
+    };
+    const cwMap = {
+        reference: 'bottom',
+        afterhand: 'left',
+        opposite: 'top',
+        forehand: 'right',
+    };
+    let map = displayDirection === 'cw' ? cwMap : ccwMap;
+    return map[referencePosition] || null;
+}
+
+function getSelectionSurfaceForActorSeat(actorSeat) {
+    let seat = Number(actorSeat);
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return null;
+
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled && Number(game.threePlayer.dummySeat) === seat) {
+        let displayPos = (typeof engineGetDisplayPositionForFrameSeat === 'function')
+            ? engineGetDisplayPositionForFrameSeat(2, HUMAN_PLAYER)
+            : null;
+        if (displayPos === 'top') {
+            return { kind: 'dummy-top-hand', container: gGameTopInfo };
+        }
+        if (displayPos === 'left' || displayPos === 'right') {
+            return { kind: 'dummy-side-panel', container: getDummySideControlContainer(displayPos) };
+        }
+    }
+
+    return { kind: 'bottom-hand', container: gShand };
+}
 
 function toggleTestMode() {
     TEST_MODE = !TEST_MODE;
-    HUMAN_PLAYERS = TEST_MODE ? new Set([0, 1]) : new Set([0]);
+    HUMAN_CONTROLLED_SEATS = TEST_MODE ? new Set([0, 1]) : new Set([0]);
     const btn = document.getElementById('btn-toggle-test');
     if (btn) btn.textContent = t(TEST_MODE ? 'buttons.testModeOn' : 'buttons.testModeOff');
 }
@@ -193,8 +285,45 @@ function getDeclarationOrderAnchor() {
         return game.pivot;
     }
     let anchor = game && Number.isInteger(game.declarationOrderAnchor) ? game.declarationOrderAnchor : 0;
-    if (anchor < 0 || anchor >= NUM_PLAYERS) return 0;
+    if (anchor < 0 || anchor >= NUM_PLAYERS) anchor = 0;
+    if (isThreePlayerQzDeclarationPhase()) {
+        if (isSeatEligibleForQzDeclaration(anchor)) return anchor;
+        let eligible = getQzDeclarationEligibleSeats();
+        if (eligible.length > 0) return eligible[0];
+    }
     return anchor;
+}
+
+function isThreePlayerQzDeclarationPhase() {
+    return !!(game
+        && game.tableFormat === 'threePlayerDummyAlly'
+        && game.threePlayer
+        && game.threePlayer.enabled
+        && game.isQiangzhuang
+        && typeof isPivotResolved === 'function'
+        && !isPivotResolved(game.pivot));
+}
+
+function getQzDeclarationEligibleSeats() {
+    if (!isThreePlayerQzDeclarationPhase()) {
+        return [0, 1, 2, 3];
+    }
+    let seats = Array.isArray(game.threePlayer.declarationEligibleSeats)
+        ? game.threePlayer.declarationEligibleSeats.slice()
+        : [1, 2, 3];
+    return seats.filter(seat => Number.isInteger(seat) && seat >= 0 && seat < NUM_PLAYERS);
+}
+
+function isSeatEligibleForQzDeclaration(seat) {
+    if (!isThreePlayerQzDeclarationPhase()) return true;
+    return getQzDeclarationEligibleSeats().includes(Number(seat));
+}
+
+function getDeclarationParticipantSeats() {
+    if (isThreePlayerQzDeclarationPhase()) {
+        return getQzDeclarationEligibleSeats();
+    }
+    return [0, 1, 2, 3];
 }
 
 function renderSeatsBoxFromGameState() {
@@ -213,6 +342,100 @@ function refreshTopLeftSeatAndLevelPositionBoxFromGameState() {
     if (gSeatsTopLeftBoxView === 'level-position') {
         renderSeatsHoverLevelPositionSquare();
     }
+}
+
+function getDefaultUserNaturalPositionForTableFormat(tableFormat) {
+    if (typeof shengjiGetDefaultUserNaturalPosition === 'function') {
+        return shengjiGetDefaultUserNaturalPosition(tableFormat);
+    }
+    return tableFormat === 'threePlayerDummyAlly' ? 'north' : 'east';
+}
+
+function getUserNaturalPositionOptionsForTableFormat(tableFormat) {
+    if (typeof shengjiGetUserNaturalPositionOptions === 'function') {
+        return shengjiGetUserNaturalPositionOptions(tableFormat);
+    }
+    return tableFormat === 'threePlayerDummyAlly'
+        ? ['north', 'southwest', 'southeast']
+        : ['east', 'north', 'west', 'south'];
+}
+
+function getCurrentUserNaturalPosition() {
+    let displaySettings = (game && game.displaySettings) ? game.displaySettings : gSettingsDraftDisplaySettings;
+    let tableFormat = (game && game.tableFormat) || (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal4P';
+    let value = displaySettings && displaySettings.userNaturalPosition;
+    return (typeof shengjiNormalizeUserNaturalPosition === 'function')
+        ? shengjiNormalizeUserNaturalPosition(tableFormat, value)
+        : (value || getDefaultUserNaturalPositionForTableFormat(tableFormat));
+}
+
+function getScreenSlotNameForSeat(seat, referenceSeat = HUMAN_PLAYER) {
+    if (game
+        && game.tableFormat === 'threePlayerDummyAlly'
+        && game.threePlayer
+        && game.threePlayer.enabled
+        && typeof isPivotResolved === 'function'
+        && isPivotResolved(game.pivot)
+        && typeof engineGetDisplayPositionForFrameSeat === 'function') {
+        let byFrame = game.threePlayer.actorSeatByFrameSeat || [];
+        let frameSeat = byFrame.indexOf(Number(seat));
+        if (frameSeat >= 0) {
+            let mapped = engineGetDisplayPositionForFrameSeat(frameSeat, referenceSeat);
+            if (mapped === 'center') return 'bottom';
+            if (mapped === 'left' || mapped === 'right' || mapped === 'top' || mapped === 'bottom') {
+                return mapped;
+            }
+        }
+    }
+    let referencePosition = getReferencePositionForActorSeat(seat, referenceSeat);
+    return getDisplayPositionForReferencePosition(referencePosition, 'ccw');
+}
+
+function getDeskSlotByScreenSlot(screenSlot) {
+    return (gDeskSlotsByScreenSlot && gDeskSlotsByScreenSlot[screenSlot]) || null;
+}
+
+function getDeskSlotForSeat(seat, referenceSeat = HUMAN_PLAYER) {
+    let screenSlot = getScreenSlotNameForSeat(seat, referenceSeat);
+    return screenSlot ? getDeskSlotByScreenSlot(screenSlot) : null;
+}
+
+function syncHumanControlledSeatFromDisplaySettings() {
+    let tableFormat = (game && game.tableFormat) || (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal4P';
+    let userNaturalPosition = getCurrentUserNaturalPosition();
+    let resolvedHumanSeat = 0;
+
+    if (tableFormat === 'threePlayerDummyAlly' && game && game.threePlayer && game.threePlayer.enabled) {
+        if (typeof engineGetControllerSeatFromNaturalPosition === 'function') {
+            let controllerSeat = engineGetControllerSeatFromNaturalPosition(userNaturalPosition);
+            if (Number.isInteger(controllerSeat)) {
+                resolvedHumanSeat = controllerSeat;
+            } else {
+                const fallbackByNaturalPosition = { north: 2, southwest: 3, southeast: 1 };
+                if (fallbackByNaturalPosition[userNaturalPosition] !== undefined) {
+                    resolvedHumanSeat = fallbackByNaturalPosition[userNaturalPosition];
+                }
+            }
+        }
+    } else {
+        const seatByNaturalPosition = { south: 0, east: 1, north: 2, west: 3 };
+        if (seatByNaturalPosition[userNaturalPosition] !== undefined) {
+            resolvedHumanSeat = seatByNaturalPosition[userNaturalPosition];
+        }
+    }
+
+    HUMAN_PLAYER = resolvedHumanSeat;
+    HUMAN_CONTROLLED_SEATS = TEST_MODE ? new Set([HUMAN_PLAYER, (HUMAN_PLAYER + 1) % NUM_PLAYERS]) : new Set([HUMAN_PLAYER]);
+    activeHumanPlayer = HUMAN_PLAYER;
+
+    if (typeof refreshDeskPresentationFromGameState === 'function') {
+        refreshDeskPresentationFromGameState();
+    }
+}
+
+function refreshDeskPresentationFromGameState() {
+    initDeskLabels();
+    initPersistentNamebars();
 }
 
 // ---------------------------------------------------------------------------
@@ -401,12 +624,12 @@ function initPersistentNamebars() {
 
         let posArea = document.createElement('div');
         posArea.className = 'game-position-area';
-        posArea.textContent = POSITION_LABELS[p];
+        posArea.textContent = getSeatPositionLabelForDisplay(p);
         nb.appendChild(posArea);
 
         let nameArea = document.createElement('div');
         nameArea.className = 'name-area';
-        let pName = PLAYER_NAMES[p].replace(/^[\u4e1c\u5357\u897f\u5317]\s*\(?/, '').replace(/\)?$/, '');
+        let pName = getSeatNameForDisplay(p).replace(/^[\u4e1c\u5357\u897f\u5317]\s*\(?/, '').replace(/\)?$/, '');
         nameArea.textContent = pName;
         nb.appendChild(nameArea);
 
@@ -561,6 +784,8 @@ function hideLocalCrossingActionButtons() {
 
 function renderAllHands() {
     renderHand(activeHumanPlayer);
+    // Render dummy hand in 3PDA mode
+    renderDummyHandDisplay();
 }
 
 function renderHand(player) {
@@ -601,7 +826,7 @@ function renderHand(player) {
         cc.addEventListener('click', () => toggleCardSelection(card.cardId, cc));
         cc.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            if (game.phase === GamePhase.PLAYING && isHumanControlled(engineGetCurrentPlayer())) {
+            if (game.phase === GamePhase.PLAYING && isActorControlledByHuman(engineGetCurrentPlayer())) {
                 clearSelection();
                 updatePlayButton();
             }
@@ -626,6 +851,223 @@ function renderHand(player) {
     el.insertBefore(handRow, existingNb);
 }
 
+/**
+ * Render dummy hand display for 3PDA mode.
+ * If dummy is at top: one-row display always visible.
+ * If dummy is at left/right: 5-row panel with click-to-toggle.
+ */
+function renderDummyHandDisplay() {
+    if (!game || !game.threePlayer || !game.threePlayer.enabled) {
+        clearTopDummyHandDisplay();
+        clearDummySideControlSurfaces();
+        for (let i = 0; i < gDeskSlots.length; i++) {
+            gDeskSlots[i].removeAttribute('data-3pda-dummy');
+            gDeskSlots[i].removeAttribute('data-3pda-dummy-pos');
+        }
+        return;
+    }
+
+    if (typeof engineSyncThreePlayerFrameStateFromPivot === 'function') {
+        engineSyncThreePlayerFrameStateFromPivot();
+    }
+
+    if (!canHumanSeeDummyHand()) {
+        clearTopDummyHandDisplay();
+        clearDummySideControlSurfaces();
+        for (let i = 0; i < gDeskSlots.length; i++) {
+            gDeskSlots[i].removeAttribute('data-3pda-dummy');
+            gDeskSlots[i].removeAttribute('data-3pda-dummy-pos');
+        }
+        return;
+    }
+
+    if (game.phase === GamePhase.PLAYING && !document.querySelector('#shand .hand, #shand .display-hand')) {
+        renderHand(activeHumanPlayer);
+    }
+
+    let dummySeat = game.threePlayer.dummySeat;
+    if (!Number.isInteger(dummySeat)) return;
+    
+    let dummyHand = game.hands[dummySeat];
+    if (!dummyHand) return;
+    
+    // Determine dummy's display position from dummy frame seat (2) relative to human reference seat.
+    let refPlayer = HUMAN_PLAYER;
+    let displayPos = engineGetDisplayPositionForFrameSeat(2, refPlayer);
+    
+    // Sort hand for display
+    let sorted = [...dummyHand];
+    engineSortHand(sorted);
+    
+    if (displayPos === 'top') {
+        // One-row display: always visible in simple row format
+        clearDummySideControlSurfaces();
+        renderDummyOneRowDisplay(dummySeat, sorted);
+    } else if (displayPos === 'left' || displayPos === 'right') {
+        // 5-row panel display: clickable toggle
+        renderDummySidePanelDisplay(dummySeat, sorted, displayPos);
+    } else {
+        clearDummySideControlSurfaces();
+        gDeskSlots[dummySeat].removeAttribute('data-3pda-dummy');
+        gDeskSlots[dummySeat].removeAttribute('data-3pda-dummy-pos');
+    }
+}
+
+function canHumanSeeDummyHand() {
+    if (!game || !game.threePlayer || !game.threePlayer.enabled) return false;
+    let visibility = game.threePlayer.dummyVisibility || 'hidden';
+    if (visibility === 'public') return true;
+    if (visibility === 'pivotPrivate') {
+        return (typeof isPivotResolved === 'function' && isPivotResolved(game.pivot) && Number(game.pivot) === HUMAN_PLAYER);
+    }
+    return false;
+}
+
+function setDummyVisibilityByPhase(visibility) {
+    if (!game || !game.threePlayer || !game.threePlayer.enabled) return;
+    if (!visibility || game.threePlayer.dummyVisibility === visibility) return;
+    game.threePlayer.dummyVisibility = visibility;
+    renderDummyHandDisplay();
+}
+
+function renderDummyOneRowDisplay(dummySeat, sortedHand) {
+    clearTopDummyHandDisplay();
+    let slot = gDeskSlots[dummySeat];
+    if (!slot || !gGameTopInfo) return;
+    
+    // Mark as one-row dummy display
+    slot.setAttribute('data-3pda-dummy', 'one-row');
+    slot.removeAttribute('data-3pda-dummy-pos');
+    
+    // Keep desk slot dedicated to desk-played cards; top dummy hand lives in top info.
+    // Render one-row display
+    let row = document.createElement('div');
+    row.className = 'hand display-hand display-hand-top dummy-top-hand-row dummy-hand-one-row';
+    row.setAttribute('data-dummy-top-hand', 'true');
+    row.style.display = 'flex';
+    row.style.flexDirection = 'row';
+    row.style.flexWrap = 'nowrap';
+    
+    for (let card of sortedHand) {
+        let cc = gameCreateCardContainer(card);
+        let currentActor = engineGetCurrentPlayer();
+        if (game.phase === GamePhase.PLAYING && Number(currentActor) === Number(dummySeat) && isActorControlledByHuman(dummySeat)) {
+            cc.addEventListener('click', () => toggleCardSelection(card.cardId, cc));
+            if (selectedCardIds.has(card.cardId)) {
+                cc.setAttribute('card-selected', 'true');
+            }
+        }
+        row.appendChild(cc);
+    }
+    
+    gGameTopInfo.appendChild(row);
+}
+
+function getDummySideControlContainer(displayPos) {
+    if (displayPos === 'left') return gDeskSlotsByScreenSlot.left;
+    if (displayPos === 'right') return gDeskSlotsByScreenSlot.right;
+    return null;
+}
+
+function ensureDummySideControlHost(displayPos) {
+    let parent = getDummySideControlContainer(displayPos);
+    if (!parent) return null;
+    let host = parent.querySelector('.dummy-side-controls[data-display-pos="' + displayPos + '"]');
+    if (!host) {
+        host = document.createElement('div');
+        host.className = 'dummy-side-controls';
+        host.setAttribute('data-display-pos', displayPos);
+        parent.appendChild(host);
+    }
+    return host;
+}
+
+function clearDummySideControlSurfaces() {
+    if (gDeskSlotsByScreenSlot.left) gDeskSlotsByScreenSlot.left.querySelectorAll('.dummy-side-controls').forEach(el => el.remove());
+    if (gDeskSlotsByScreenSlot.right) gDeskSlotsByScreenSlot.right.querySelectorAll('.dummy-side-controls').forEach(el => el.remove());
+}
+
+function renderDummySidePanelDisplay(dummySeat, sortedHand, displayPos) {
+    clearTopDummyHandDisplay();
+    let slot = gDeskSlots[dummySeat];
+    if (!slot) return;
+    clearDummySideControlSurfaces();
+    let host = ensureDummySideControlHost(displayPos);
+    if (!host) return;
+    
+    // Mark as side panel dummy display
+    slot.setAttribute('data-3pda-dummy', 'side-panel');
+    slot.setAttribute('data-3pda-dummy-pos', displayPos);
+    
+    // Create toggle button
+    let toggleBtn = document.createElement('button');
+    toggleBtn.className = 'dummy-toggle-btn';
+    toggleBtn.type = 'button';
+    host.appendChild(toggleBtn);
+
+    let currentActor = engineGetCurrentPlayer();
+    let mustOpenForInput = game.phase === GamePhase.PLAYING
+        && Number(currentActor) === Number(dummySeat)
+        && isActorControlledByHuman(dummySeat);
+    if (mustOpenForInput) {
+        game.threePlayer.dummyHandPanelOpen = true;
+    }
+
+    let panelOpen = game.threePlayer.dummyHandPanelOpen;
+    toggleBtn.textContent = panelOpen ? t('settingsDialog.options.hideDummy') : t('settingsDialog.options.showDummy');
+    toggleBtn.disabled = !!mustOpenForInput;
+    toggleBtn.addEventListener('click', () => {
+        game.threePlayer.dummyHandPanelOpen = !game.threePlayer.dummyHandPanelOpen;
+        renderDummyHandDisplay();
+    });
+    
+    // If panel open, render 5-row layout
+    if (panelOpen) {
+        let panel = document.createElement('div');
+        panel.className = 'dummy-panel dummy-panel-5row';
+        
+        // Render 5 rows
+        const cardsPerRow = Math.ceil(sortedHand.length / 5);
+        for (let i = 0; i < 5; i++) {
+            let row = document.createElement('div');
+            row.className = 'hand dummy-panel-row';
+            
+            for (let j = 0; j < cardsPerRow && i * cardsPerRow + j < sortedHand.length; j++) {
+                let card = sortedHand[i * cardsPerRow + j];
+                let cc = gameCreateCardContainer(card);
+
+                if (game.phase === GamePhase.PLAYING && Number(currentActor) === Number(dummySeat) && isActorControlledByHuman(dummySeat)) {
+                    cc.addEventListener('click', () => toggleCardSelection(card.cardId, cc));
+                    if (selectedCardIds.has(card.cardId)) {
+                        cc.setAttribute('card-selected', 'true');
+                    }
+                }
+                
+                // Highlight cards that are on desk
+                if (game.roundState && game.roundState.played && game.roundState.played[dummySeat]) {
+                    for (let playedCard of game.roundState.played[dummySeat]) {
+                        if (playedCard.cardId === card.cardId) {
+                            cc.setAttribute('data-on-desk', 'true');
+                            break;
+                        }
+                    }
+                }
+                
+                row.appendChild(cc);
+            }
+            
+            panel.appendChild(row);
+        }
+
+        host.appendChild(panel);
+    }
+}
+
+function clearTopDummyHandDisplay() {
+    if (!gGameTopInfo) return;
+    gGameTopInfo.querySelectorAll('.dummy-top-hand-row[data-dummy-top-hand="true"], .dummy-hand-one-row[data-dummy-top-hand="true"]').forEach(el => el.remove());
+}
+
 // ---------------------------------------------------------------------------
 // Card selection
 // ---------------------------------------------------------------------------
@@ -645,7 +1087,7 @@ function toggleCardSelection(cardId, el) {
     }
     let allowCrossingSelection = isLocalCrossingSelectionMode();
     if (isPauseDialogBlockingGameplay()) return;
-    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isHumanControlled(engineGetCurrentPlayer())) return;
+    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isActorControlledByHuman(engineGetCurrentPlayer())) return;
     if (game.phase !== GamePhase.PLAYING && game.phase !== GamePhase.BASING) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked && !allowCrossingSelection) return;
 
@@ -702,7 +1144,7 @@ function updatePlayButton() {
     if (game.phase === GamePhase.BASING) {
         gBtnPlay.disabled = (selectedCardIds.size !== BASE_SIZE);
         gBtnPlay.textContent = t('buttons.baseProgress', { current: selectedCardIds.size, total: BASE_SIZE });
-    } else if (game.phase === GamePhase.PLAYING && isHumanControlled(engineGetCurrentPlayer())) {
+    } else if (game.phase === GamePhase.PLAYING && isActorControlledByHuman(engineGetCurrentPlayer())) {
         gBtnPlay.disabled = (selectedCardIds.size === 0);
         gBtnPlay.textContent = t('buttons.play');
     } else {
@@ -721,34 +1163,40 @@ function updatePlayButton() {
  * Called once per game start (labels remain until next game).
  */
 function initDeskLabels() {
-    // Players: 0=South(human), 1=East, 2=North, 3=West
-    if (gLabelNorth) gLabelNorth.textContent = PLAYER_NAMES[2];
-    if (gLabelWest)  gLabelWest.textContent  = PLAYER_NAMES[3];
-    if (gLabelEast)  gLabelEast.textContent  = PLAYER_NAMES[1];
-    if (gLabelSouth) gLabelSouth.textContent = PLAYER_NAMES[0];
+    // Labels follow the current reference seat so screen slots stay decoupled from natural positions.
+    if (gLabelSouth) gLabelSouth.textContent = getSeatPositionLabelForDisplay(HUMAN_PLAYER);
+    if (gLabelEast)  gLabelEast.textContent  = getSeatPositionLabelForDisplay((HUMAN_PLAYER + 1) % NUM_PLAYERS);
+    if (gLabelNorth) gLabelNorth.textContent = getSeatPositionLabelForDisplay((HUMAN_PLAYER + 2) % NUM_PLAYERS);
+    if (gLabelWest)  gLabelWest.textContent  = getSeatPositionLabelForDisplay((HUMAN_PLAYER + 3) % NUM_PLAYERS);
 }
 
 function clearDesk() {
+    clearDummySideControlSurfaces();
     for (let i = 0; i < gDeskSlots.length; i++) {
         let slot = gDeskSlots[i];
         // Remove cards, transient namebar, and basing-pass markers, but keep persistent .desk-namebar
-        slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar), .basing-pass-marker').forEach(el => el.remove());
+        slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar), .basing-pass-marker, .dummy-panel, .dummy-toggle-btn').forEach(el => el.remove());
         slot.removeAttribute('data-active');
         slot.removeAttribute('data-winner');
         slot.removeAttribute('data-has-exposed');
+        slot.removeAttribute('data-3pda-dummy');
+        slot.removeAttribute('data-3pda-dummy-pos');
     }
     if (gDeskInfo) gDeskInfo.textContent = '';
     resetAllNamebars();
 }
 
 function clearDeskForOvercallDecisionStep() {
+    clearDummySideControlSurfaces();
     for (let i = 0; i < gDeskSlots.length; i++) {
         let slot = gDeskSlots[i];
         // Keep PASS markers across sequential decisions; only clear card-like artifacts.
-        slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
+        slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar), .dummy-panel, .dummy-toggle-btn').forEach(el => el.remove());
         slot.removeAttribute('data-active');
         slot.removeAttribute('data-winner');
         slot.removeAttribute('data-has-exposed');
+        slot.removeAttribute('data-3pda-dummy');
+        slot.removeAttribute('data-3pda-dummy-pos');
     }
     if (gDeskInfo) gDeskInfo.textContent = '';
     resetAllNamebars();
@@ -765,7 +1213,7 @@ function showBasingPassMarker(player) {
 function renderDeskCards(player, cards) {
     let slot = gDeskSlots[player];
     // Remove previous cards (not persistent namebar)
-    slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
+    slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar), .dummy-panel').forEach(el => el.remove());
 
     // §6: Auto-sort played cards before display
     let sorted = [...cards];
@@ -783,6 +1231,10 @@ function renderDeskCards(player, cards) {
         // Update persistent namebar width to match cards (§3.3)
         updateNamebarWidth(player, sorted.length);
         updateNamebarStatus(player, 'played');
+    }
+
+    if (game && game.threePlayer && game.threePlayer.enabled) {
+        renderDummyHandDisplay();
     }
 }
 
@@ -1181,7 +1633,7 @@ function renderPauseHumanAgreementControls() {
 
     if (pauseState.phase !== 'waitingPauseAgreements') return;
 
-    let seats = Array.from(HUMAN_PLAYERS).filter(seat => seat !== pauseState.requesterSeat);
+    let seats = Array.from(HUMAN_CONTROLLED_SEATS).filter(seat => seat !== pauseState.requesterSeat);
     for (let seat of seats) {
         if (pauseState.agreementBySeat[seat] !== 'pending') continue;
         let row = document.createElement('div');
@@ -1718,11 +2170,12 @@ function showNoDeclareButton(onAllDeclined) {
         gNoDeclareClicked.add(HUMAN_PLAYER);
         gBtnNoDeclare.disabled = true;
         gBtnNoDeclare.style.opacity = '0.4';
+        let participants = getDeclarationParticipantSeats();
         // Bots auto-decline (they've already had their chance)
-        for (let i = 0; i < NUM_PLAYERS; i++) {
+        for (let i of participants) {
             if (!isHumanControlled(i)) gNoDeclareClicked.add(i);
         }
-        if (gNoDeclareClicked.size >= NUM_PLAYERS) {
+        if (gNoDeclareClicked.size >= participants.length) {
             onAllDeclined();
         }
     };
@@ -1826,7 +2279,6 @@ function startNewGame() {
     clearLog();
     clearSelection();
     clearDesk();
-    initDeskLabels();
     clearBotDealCounts();
     gDeclareMatrix.style.display = 'none';
     hideCountingDialog();
@@ -1884,14 +2336,16 @@ function startNewGame() {
     if (gHint2Div) updateAttackersStreakDisplay();
 
     gBtnNewGame.textContent = t('buttons.newGame');
+    game.displaySettings = { ...(gResolvedGameSettings.displaySettings || { placeholder: true }) };
     let declarationOrderAnchor = isQiangzhuang ? Math.floor(Math.random() * NUM_PLAYERS) : pivot;
     engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig, declarationOrderAnchor);
+    syncHumanControlledSeatFromDisplaySettings();
+    initDeskLabels();
     if (pendingCycleIndexBySide && game && game.levelRuleState) {
         game.levelRuleState.cycleIndexBySide = pendingCycleIndexBySide.map(v =>
             (Number.isInteger(v) && v >= 0) ? v : 0
         );
     }
-    game.displaySettings = { ...(gResolvedGameSettings.displaySettings || { placeholder: true }) };
     refreshTopLeftSeatAndLevelPositionBoxFromGameState();
 
     // Reset won counters and refresh drawer only after authoritative new-frame state reset.
@@ -1929,7 +2383,7 @@ function runFrameIntermittent(remainingMs) {
     if (game.isQiangzhuang) {
         displayText = t('timing.intermittentQiangzhuang');
     } else {
-        let pivotPosition = POSITION_LABELS[game.pivot];
+        let pivotPosition = getSeatPositionLabelForDisplay(game.pivot);
         displayText = t('timing.intermittentNormal', { position: pivotPosition, level: numberToLevel[game.level] });
     }
 
@@ -1964,6 +2418,25 @@ function getDenominationHtml(suit, count) {
 }
 
 function getNaturalPositionShort(player) {
+    if (isThreePlayerQzDeclarationPhase() && typeof engineGetNaturalPositionForActorSeat === 'function') {
+        let natural = engineGetNaturalPositionForActorSeat(player);
+        if (!natural) {
+            return getLocale() === 'en' ? 'Ay' : t('settingsDialog.natural3PDA.dummy');
+        }
+        const short3PdaZh = {
+            north: t('settingsDialog.natural3PDA.north'),
+            southwest: t('settingsDialog.natural3PDA.southwest'),
+            southeast: t('settingsDialog.natural3PDA.southeast'),
+        };
+        const short3PdaEn = {
+            north: 'N',
+            southwest: 'Sw',
+            southeast: 'Se',
+        };
+        return getLocale() === 'en'
+            ? (short3PdaEn[natural] || '')
+            : (short3PdaZh[natural] || '');
+    }
     let locale = getLocale();
     if (locale === 'en') {
         // Runtime player order: 0=S, 1=E, 2=N, 3=W
@@ -2166,6 +2639,20 @@ function renderResolvedStrainDisplay() {
 }
 
 function updateDeclareMatrix() {
+    if (!isSeatEligibleForQzDeclaration(HUMAN_PLAYER)) {
+        for (let suit = 0; suit <= 4; suit++) {
+            if (gDeclBtnsSingle[suit]) {
+                gDeclBtnsSingle[suit].disabled = true;
+                gDeclBtnsSingle[suit].onclick = null;
+            }
+            if (gDeclBtnsDouble[suit]) {
+                gDeclBtnsDouble[suit].disabled = true;
+                gDeclBtnsDouble[suit].onclick = null;
+            }
+        }
+        return;
+    }
+
     let hand  = game.hands[HUMAN_PLAYER];
     let level = game.level;
     let currentCount = currentDeclaration ? currentDeclaration.count : 0;
@@ -2236,16 +2723,18 @@ function updateDeclareMatrix() {
 }
 
 function executeDeclaration(suit, count) {
+    if (!isSeatEligibleForQzDeclaration(HUMAN_PLAYER)) return;
+
     currentDeclaration = { player: HUMAN_PLAYER, suit, count };
 
     // Preview in UI corner
     let suitName = suit === 4 ? (count >= 4 ? 'w' : 'v') : numberToSuitName[suit];
     gDenomArea.setAttribute('strain', suitName);
     gStrainDiv.innerHTML   = getDenominationHtml(suit, count);
-    gDeclareSp.textContent = POSITION_LABELS[HUMAN_PLAYER];
+    gDeclareSp.textContent = getSeatPositionLabelForDisplay(HUMAN_PLAYER);
     let methodText = t('labels.declareMethod');
     gDeclMethodSp.textContent = methodText;
-    appendLog(t('log.declare', { playerName: PLAYER_NAMES[HUMAN_PLAYER], strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+    appendLog(t('log.declare', { playerName: getDeclarationActorLabelForLog(HUMAN_PLAYER), strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
 
     showDeclaredCardsOnDesk(HUMAN_PLAYER, suit, count);
     recordDealingDeclarationHistory(HUMAN_PLAYER, suit, count);
@@ -2287,6 +2776,7 @@ function runDealingPhase() {
         for (let i = 0; i < NUM_PLAYERS; i++) {
             let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
             if (p === HUMAN_PLAYER) continue;
+            if (!isSeatEligibleForQzDeclaration(p)) continue;
 
             let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
             if (decl) {
@@ -2297,9 +2787,9 @@ function runDealingPhase() {
                     let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
                     gDenomArea.setAttribute('strain', suitName);
                     gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
-                    gDeclareSp.textContent = POSITION_LABELS[p];
+                    gDeclareSp.textContent = getSeatPositionLabelForDisplay(p);
                     gDeclMethodSp.textContent = t('labels.declareMethod');
-                    appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+                    appendLog(t('log.declare', { playerName: getDeclarationActorLabelForLog(p), strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
                     showDeclaredCardsOnDesk(p, decl.suit, decl.count);
                     recordDealingDeclarationHistory(p, decl.suit, decl.count);
                 }
@@ -2307,7 +2797,7 @@ function runDealingPhase() {
         }
 
         // Sort human-controlled players' hands for readability as cards arrive
-        for (let hp of HUMAN_PLAYERS) {
+        for (let hp of HUMAN_CONTROLLED_SEATS) {
             engineSortHand(game.hands[hp]);
         }
         renderHand(activeHumanPlayer);
@@ -2361,6 +2851,7 @@ function runFinalDeclarationWindow() {
     // Bots take their last chance to overcall during the window
     for (let i = 0; i < NUM_PLAYERS; i++) {
         let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
+        if (!isSeatEligibleForQzDeclaration(p)) continue;
         if (isHumanControlled(p)) continue;
         let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
         if (decl) {
@@ -2370,9 +2861,9 @@ function runFinalDeclarationWindow() {
                 let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
                 gDenomArea.setAttribute('strain', suitName);
                 gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
-                gDeclareSp.textContent = POSITION_LABELS[p];
+                gDeclareSp.textContent = getSeatPositionLabelForDisplay(p);
                 gDeclMethodSp.textContent = t('labels.declareMethod');
-                appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+                appendLog(t('log.declare', { playerName: getDeclarationActorLabelForLog(p), strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
                 showDeclaredCardsOnDesk(p, decl.suit, decl.count);
                 recordDealingDeclarationHistory(p, decl.suit, decl.count);
 
@@ -2414,16 +2905,19 @@ function resolveDeclaredPhase() {
         if (game.isQiangzhuang) {
             game.pivot = bestDeclaration.player;
         }
+        if (typeof engineSyncThreePlayerFrameStateFromPivot === 'function') {
+            engineSyncThreePlayerFrameStateFromPivot();
+        }
         game.declarations.push(bestDeclaration);
 
         gDenomArea.setAttribute('strain', suitName);
         gStrainDiv.innerHTML = getDenominationHtml(bestDeclaration.suit, bestDeclaration.count);
-        gDeclareSp.textContent    = POSITION_LABELS[bestDeclaration.player];
+        gDeclareSp.textContent    = getSeatPositionLabelForDisplay(bestDeclaration.player);
         gDeclMethodSp.textContent = t('labels.declareMethod');
 
         // Only log if they did it at the very end
         if (bestDeclaration.player !== HUMAN_PLAYER && (!currentDeclaration || bestDeclaration.count !== currentDeclaration.count)) {
-            appendLog(t('log.declare', { playerName: PLAYER_NAMES[bestDeclaration.player], strain: bestDeclaration.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+            appendLog(t('log.declare', { playerName: getDeclarationActorLabelForLog(bestDeclaration.player), strain: bestDeclaration.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
             showDeclaredCardsOnDesk(bestDeclaration.player, bestDeclaration.suit, bestDeclaration.count);
         }
     } else if (game && game.isQiangzhuang) {
@@ -2498,6 +2992,7 @@ function resolveDeclaredPhase() {
 
 function runBasingPhase() {
     if (isPauseDialogBlockingGameplay()) return;
+    setDummyVisibilityByPhase('pivotPrivate');
     let baser = getActiveBaserPlayer();
     updatePhaseDisplay(t('phase.basing'));
     renderResolvedStrainDisplay();
@@ -2669,9 +3164,9 @@ function applyOvercallDecision(player, decl) {
     let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
     gDenomArea.setAttribute('strain', suitName);
     gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
-    gDeclareSp.textContent = POSITION_LABELS[player];
+    gDeclareSp.textContent = getSeatPositionLabelForDisplay(player);
     gDeclMethodSp.textContent = t('labels.declareMethod');
-    appendLog(t('log.declare', { playerName: PLAYER_NAMES[player], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+    appendLog(t('log.declare', { playerName: getDeclarationActorLabelForLog(player), strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
     // note 41h / 41ha: restriction is only active when the overbaseRestrictions setting is 'default'.
     let restrictionSettingEnabled = !!(game && game.gameConfig && game.gameConfig.overbaseRestrictions === 'default');
     let isNonOverbase = !!(restrictionSettingEnabled
@@ -3260,6 +3755,7 @@ function maybeFinalizeCrossingProcesses() {
     gCrossingState.localAction = null;
     clearSelection();
     hideLocalCrossingActionButtons();
+    setDummyVisibilityByPhase('pivotPrivate');
     game.currentLeader = game.pivot;
     game.currentTurnIndex = 0;
     appendLog(t('log.crossingAllDone'));
@@ -3433,6 +3929,8 @@ function startPlayingPhase() {
         appendLog('Cannot enter playing phase: invalid hand/base card counts.');
         return;
     }
+    // Keep dummy private until the first lead boundary.
+    setDummyVisibilityByPhase('pivotPrivate');
     updatePhaseDisplay(t('phase.playing'));
     renderResolvedStrainDisplay();
     gBtnPlay.textContent = t('buttons.play');
@@ -3633,6 +4131,8 @@ function promptCurrentPlayer() {
     let cp = engineGetCurrentPlayer();
     let isLeading = (game.currentTurnIndex === 0);
 
+    maybeRevealDummyAtFirstLeadBoundary(cp, isLeading);
+
     // Check if forehand control needs to be exercised before this player follows
     // At most one FC exercise per follow event — skip if already active
     if (!isLeading && !game.forehandControl) {
@@ -3657,9 +4157,10 @@ function promptCurrentPlayer() {
 
     highlightActivePlayer(cp);
 
-    if (isHumanControlled(cp)) {
+    if (isActorControlledByHuman(cp)) {
+        let controllerSeat = getControllerSeatForActorSeat(cp);
         // Switch displayed hand to the active human player
-        activeHumanPlayer = cp;
+        activeHumanPlayer = controllerSeat;
         clearSelection();
 
         if (isLeading) {
@@ -3715,7 +4216,10 @@ function promptCurrentPlayer() {
             }
         }
         
-        renderHand(cp);
+        if (!(game && game.threePlayer && game.threePlayer.enabled && Number(cp) === Number(game.threePlayer.dummySeat))) {
+            renderHand(controllerSeat);
+        }
+        renderDummyHandDisplay();
         updatePlayButton();
 
         if (shouldClearCrossingResolvedMarkers) {
@@ -3724,7 +4228,7 @@ function promptCurrentPlayer() {
         }
 
         // Start play-card shot clock (note 24 §10.2)
-        startPlayerMoveTimer(cp, 'play', () => {
+        startPlayerMoveTimer(controllerSeat, 'play', () => {
             autoPlayAsBot(cp);
         });
     } else {
@@ -3738,6 +4242,16 @@ function promptCurrentPlayer() {
         // Bot plays after a delay
         setTimeout(() => botTakeTurn(cp), BOT_DELAY);
     }
+}
+
+function maybeRevealDummyAtFirstLeadBoundary(currentPlayer, isLeading) {
+    if (!game || !game.threePlayer || !game.threePlayer.enabled) return;
+    if (!isLeading) return;
+    if (game.currentRound !== 1) return;
+    if (typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
+        if (Number(currentPlayer) !== Number(game.pivot)) return;
+    }
+    setDummyVisibilityByPhase('public');
 }
 
 /**
@@ -3860,8 +4374,9 @@ function humanPlayCards() {
 // ---------------------------------------------------------------------------
 
 const SETTINGS_FIELDS_BY_TAB = {
-    presets: ['presetName'],
-    general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
+    presets: ['presetName', 'tableFormat', 'pivotPassMode'],
+    display: [],
+    general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings'],
     scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
     levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'skipLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
     timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
@@ -3869,6 +4384,7 @@ const SETTINGS_FIELDS_BY_TAB = {
 
 const SETTINGS_SELECT_OPTIONS = {
     presetName: () => Object.keys(window.shengjiSettingsPresets || { 'default': {} }),
+    tableFormat: ['normal4P', 'threePlayerDummyAlly'],
     autoStrain: ['false', 'true'],
     pivotPassMode: ['winner-pivot', 'rotate-pivot'],
     allowOverbase: ['false', 'true'],
@@ -3897,7 +4413,6 @@ const MAIN_PRESET_BUILTIN_NAMES = PRESET_RULE_RADIO_OPTIONS.map(opt => opt.value
 const MAIN_PRESET_COMPARISON_FIELDS = [
     'deckCount',
     'autoStrain',
-    'pivotPassMode',
     'allowOverbase',
     'overbaseRestrictions',
     'allowCrossings',
@@ -3997,10 +4512,15 @@ function getSideCycleIndex(cycleIndexBySide, sideIndex) {
     return normalizeCycleIndexForDisplay(cycleIndexBySide[sideIndex]);
 }
 
-function renderLevelWithCycle(hostElement, level, cycleIndex) {
+function renderLevelWithCycle(hostElement, level, cycleIndex, isBlank) {
     if (!hostElement) return;
 
     hostElement.innerHTML = '';
+
+    // If isBlank is true (for 3PDA dummy), leave the element empty
+    if (isBlank) {
+        return;
+    }
 
     let wrap = document.createElement('span');
     wrap.className = 'level-with-cycle';
@@ -4021,11 +4541,46 @@ function renderLevelWithCycle(hostElement, level, cycleIndex) {
     hostElement.appendChild(wrap);
 }
 
-function getPivotAndAllyPositions(pivotSeat) {
-    if (pivotSeat === 0) return { pivotPos: 'bottom', allyPos: 'top' };
-    if (pivotSeat === 1) return { pivotPos: 'right', allyPos: 'left' };
-    if (pivotSeat === 2) return { pivotPos: 'top', allyPos: 'bottom' };
-    return { pivotPos: 'left', allyPos: 'right' };
+function getPivotAndAllyPositions(pivotSeat, referenceSeat = HUMAN_PLAYER) {
+    let pivot = Number(pivotSeat);
+    if (!Number.isInteger(pivot) || pivot < 0 || pivot >= NUM_PLAYERS) {
+        return { pivotPos: undefined, allyPos: undefined };
+    }
+    let allySeat = pivot;
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled && typeof engineGetActorSeatForFramePosition === 'function') {
+        let allyActorSeat = engineGetActorSeatForFramePosition('ally');
+        if (Number.isInteger(allyActorSeat) && allyActorSeat >= 0 && allyActorSeat < NUM_PLAYERS) {
+            allySeat = allyActorSeat;
+        }
+    } else {
+        allySeat = (pivot + 2) % NUM_PLAYERS;
+    }
+
+    if (!(game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled)) {
+        let pivotRef = getReferencePositionForActorSeat(pivot, referenceSeat);
+        let allyRef = getReferencePositionForActorSeat(allySeat, referenceSeat);
+        return {
+            pivotPos: getDisplayPositionForReferencePosition(pivotRef, 'cw'),
+            allyPos: getDisplayPositionForReferencePosition(allyRef, 'cw'),
+        };
+    }
+
+    return {
+        pivotPos: getScreenSlotNameForSeat(pivot, referenceSeat),
+        allyPos: getScreenSlotNameForSeat(allySeat, referenceSeat),
+    };
+}
+
+/**
+ * Get dummy position in 3PDA mode (where dummy appears in position-level box).
+ * In 3PDA, dummy is always at frame seat 2 (ally/successor in frame cycle).
+ * Given pivot seat, calculate which position (top/right/bottom/left) the dummy occupies.
+ */
+function getDummyPositionIn3PDA(referenceSeat = HUMAN_PLAYER) {
+    if (!game || !game.threePlayer || !game.threePlayer.enabled) return null;
+    let dummySeat = Number(game.threePlayer.dummySeat);
+    if (!Number.isInteger(dummySeat) || dummySeat < 0 || dummySeat >= NUM_PLAYERS) return null;
+    return getScreenSlotNameForSeat(dummySeat, referenceSeat);
 }
 
 function isUndefinedPivot(pivotSeat) {
@@ -4066,7 +4621,11 @@ function renderLevelPositionSquare(host, options) {
     let pivotUndefined = isUndefinedPivot(options.pivotSeat);
     let seat = Number(options.pivotSeat);
     let pivotSeat = (!pivotUndefined && typeof isPivotResolved === 'function' && isPivotResolved(seat)) ? seat : undefined;
-    let markers = pivotUndefined ? { pivotPos: undefined, allyPos: undefined } : getPivotAndAllyPositions(pivotSeat);
+    let markers = pivotUndefined ? { pivotPos: undefined, allyPos: undefined } : getPivotAndAllyPositions(pivotSeat, HUMAN_PLAYER);
+
+    // Determine if in 3PDA mode and which position the dummy occupies
+    let is3PDA = game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled;
+    let dummyPosition = is3PDA ? getDummyPositionIn3PDA(HUMAN_PLAYER) : null;
 
     ['top', 'right', 'bottom', 'left'].forEach((position) => {
         let section = document.createElement('div');
@@ -4076,12 +4635,27 @@ function renderLevelPositionSquare(host, options) {
         if (pivotUndefined) {
             section.setAttribute('data-team', 'undefined');
         } else {
-            if (position === markers.pivotPos) section.setAttribute('data-team', 'pivot');
-            else if (position === markers.allyPos) section.setAttribute('data-team', 'ally');
-            else section.setAttribute('data-team', 'other');
+            if (position === markers.pivotPos) {
+                section.setAttribute('data-team', 'pivot');
+                section.setAttribute('data-is-pivot', 'true');
+            } else if (is3PDA) {
+                if (position === markers.allyPos) {
+                    section.setAttribute('data-team', 'ally');
+                    section.setAttribute('data-is-ally', 'true');
+                } else {
+                    section.setAttribute('data-team', 'other');
+                }
+            } else {
+                section.setAttribute('data-team', (position === 'top' || position === 'bottom') ? 'ns' : 'ew');
+                if (position === markers.allyPos) {
+                    section.setAttribute('data-is-ally', 'true');
+                }
+            }
         }
         
-        renderLevelWithCycle(section, axisLevelByPosition[position], axisCycleByPosition[position]);
+        // In 3PDA mode, render the dummy position as blank (no level text)
+        let isBlank = is3PDA && position === dummyPosition;
+        renderLevelWithCycle(section, axisLevelByPosition[position], axisCycleByPosition[position], isBlank);
         square.appendChild(section);
     });
 
@@ -4170,6 +4744,48 @@ function setSeatsTopLeftBoxView(view) {
     }
 }
 
+function getSeatOptionLabel(value, tableFormat) {
+    const isZh = (typeof getLocale === 'function') ? String(getLocale()).indexOf('zh') === 0 : true;
+    if (tableFormat === 'threePlayerDummyAlly') {
+        const map = isZh ? {
+            north: '子',
+            southwest: '申',
+            southeast: '辰',
+        } : {
+            north: 'North',
+            southwest: 'Southwest',
+            southeast: 'Southeast',
+        };
+        return map[value] || String(value);
+    }
+    const map = isZh ? {
+        east: '东',
+        north: '北',
+        west: '西',
+        south: '南',
+    } : {
+        east: 'East',
+        north: 'North',
+        west: 'West',
+        south: 'South',
+    };
+    return map[value] || String(value);
+}
+
+function setDisplaySettingFieldValue(field, rawValue) {
+    if (!gSettingsDraftDisplaySettings) {
+        gSettingsDraftDisplaySettings = { placeholder: true, theme: 'default', cardSize: 'default' };
+    }
+    if (field === 'userNaturalPosition') {
+        let tableFormat = gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat ? gSettingsDraftRuleConfig.tableFormat : 'normal4P';
+        gSettingsDraftDisplaySettings.userNaturalPosition = (typeof shengjiNormalizeUserNaturalPosition === 'function')
+            ? shengjiNormalizeUserNaturalPosition(tableFormat, rawValue)
+            : rawValue;
+        return;
+    }
+    gSettingsDraftDisplaySettings[field] = rawValue;
+}
+
 function toggleSeatsTopLeftBoxView() {
     if (gSeatsTopLeftBoxView === 'level-position') setSeatsTopLeftBoxView('seats');
     else setSeatsTopLeftBoxView('level-position');
@@ -4185,6 +4801,8 @@ function settingsOptionLabel(value) {
         'none': 'none',
         '': 'noPreset',
         'default': 'default',
+        'normal4P': 'normal4P',
+        'threePlayerDummyAlly': 'threePlayerDummyAlly',
         'experimental': 'experimental',
         'plain': 'plain',
         'high-school': 'highSchool',
@@ -4210,6 +4828,55 @@ function settingsOptionLabel(value) {
     };
     let key = map[String(value)] || String(value);
     return t('settingsDialog.options.' + key);
+}
+
+function get3PdaNaturalPositionLabel(naturalPosition) {
+    const labels = {
+        north: t('settingsDialog.natural3PDA.north'),
+        southwest: t('settingsDialog.natural3PDA.southwest'),
+        southeast: t('settingsDialog.natural3PDA.southeast'),
+        dummy: t('settingsDialog.natural3PDA.dummy'),
+    };
+    return labels[naturalPosition] || naturalPosition;
+}
+
+function getSeatPositionLabelForDisplay(seat) {
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled) {
+        let dummySeat = game.threePlayer.dummySeat;
+        if (Number(seat) === Number(dummySeat)) {
+            return get3PdaNaturalPositionLabel('dummy');
+        }
+        if (typeof engineGetNaturalPositionForActorSeat === 'function') {
+            let naturalPosition = engineGetNaturalPositionForActorSeat(seat);
+            if (naturalPosition) {
+                return get3PdaNaturalPositionLabel(naturalPosition);
+            }
+        }
+    }
+    return POSITION_LABELS[seat] || '';
+}
+
+function getSeatNameForDisplay(seat) {
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled) {
+        let dummySeat = game.threePlayer.dummySeat;
+        if (Number(seat) === Number(dummySeat)) {
+            return get3PdaNaturalPositionLabel('dummy');
+        }
+    }
+    if (Number(seat) === Number(HUMAN_PLAYER)) {
+        return getLocale() === 'en' ? 'You' : '你';
+    }
+    if (seat >= 0 && seat < NUM_PLAYERS) {
+        return 'Bot';
+    }
+    return PLAYER_NAMES[seat] || '';
+}
+
+function getDeclarationActorLabelForLog(seat) {
+    if (isThreePlayerQzDeclarationPhase()) {
+        return getSeatPositionLabelForDisplay(seat);
+    }
+    return PLAYER_NAMES[seat] || '';
 }
 
 function getRuleConfigFieldValue(field) {
@@ -4425,6 +5092,10 @@ function setRuleConfigFieldValue(field, rawValue) {
                 return;
             }
             if (typeof shengjiResolveGameRuleConfig === 'function' && window.shengjiSettingsPresets && window.shengjiSettingsPresets[rawValue]) {
+                let previousTableFormat = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal4P';
+                let previousPivotPassMode = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.pivotPassMode) || 'winner-pivot';
+                let previousUserNaturalPosition = gSettingsDraftDisplaySettings && gSettingsDraftDisplaySettings.userNaturalPosition;
+                let isOrdinaryPreset = rawValue !== 'short-level rotate-pivot';
                 gMainPresetSyncGuard = true;
                 let previousTiming = {
                     timingMode: gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingMode,
@@ -4435,6 +5106,19 @@ function setRuleConfigFieldValue(field, rawValue) {
                 gSettingsDraftRuleConfig.timingMode = previousTiming.timingMode;
                 gSettingsDraftRuleConfig.timingPreset = previousTiming.timingPreset;
                 gSettingsDraftRuleConfig.timing = { ...previousTiming.timing };
+                if (isOrdinaryPreset) {
+                    gSettingsDraftRuleConfig.tableFormat = previousTableFormat;
+                    if (previousTableFormat === 'threePlayerDummyAlly') {
+                        gSettingsDraftRuleConfig.pivotPassMode = 'rotate-pivot';
+                    } else {
+                        gSettingsDraftRuleConfig.pivotPassMode = previousPivotPassMode;
+                    }
+                    if (gSettingsDraftDisplaySettings) {
+                        gSettingsDraftDisplaySettings.userNaturalPosition = (typeof shengjiNormalizeUserNaturalPosition === 'function')
+                            ? shengjiNormalizeUserNaturalPosition(previousTableFormat, previousUserNaturalPosition)
+                            : previousUserNaturalPosition;
+                    }
+                }
                 // Recompute scoring sub-preset by exact scoring-bundle match, rather than keeping a stale preset string.
                 syncScoringPresetLabel();
                 resetLevelsMatrixStateFromRuleConfig();
@@ -4503,6 +5187,21 @@ function setRuleConfigFieldValue(field, rawValue) {
         if (field === 'timingMode') {
             gSettingsDraftRuleConfig.timingMode = rawValue;
             syncTimingPresetLabel();
+            return;
+        }
+
+        if (field === 'tableFormat') {
+            gSettingsDraftRuleConfig.tableFormat = rawValue;
+            // When 3PDA is selected, force rotate-pivot mode
+            if (rawValue === 'threePlayerDummyAlly') {
+                gSettingsDraftRuleConfig.pivotPassMode = 'rotate-pivot';
+            }
+            if (gSettingsDraftDisplaySettings) {
+                let currentUserPos = gSettingsDraftDisplaySettings.userNaturalPosition;
+                gSettingsDraftDisplaySettings.userNaturalPosition = (typeof shengjiNormalizeUserNaturalPosition === 'function')
+                    ? shengjiNormalizeUserNaturalPosition(rawValue, currentUserPos)
+                    : currentUserPos;
+            }
             return;
         }
 
@@ -5449,6 +6148,7 @@ function createPivotPassModeRadioSelector(currentValue, readOnly) {
         { value: 'rotate-pivot', label: t('settingsDialog.options.rotatePivot') },
     ];
     let current = String(currentValue || 'winner-pivot');
+    let isThreePlayerDummyAlly = gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat === 'threePlayerDummyAlly';
     for (let opt of opts) {
         let radioLabel = document.createElement('label');
         radioLabel.className = 'settings-radio-option';
@@ -5457,7 +6157,9 @@ function createPivotPassModeRadioSelector(currentValue, readOnly) {
         radio.name = 'pivotPassMode';
         radio.value = opt.value;
         radio.checked = (opt.value === current);
-        radio.disabled = !!readOnly;
+        // Disable winner-pivot option if 3PDA is selected
+        let shouldDisable = !!readOnly || (opt.value === 'winner-pivot' && isThreePlayerDummyAlly);
+        radio.disabled = shouldDisable;
         if (!readOnly) {
             radio.addEventListener('change', () => {
                 if (radio.checked) {
@@ -5699,19 +6401,6 @@ function renderGeneralTabBody(container, readOnly) {
 
     rows.appendChild(row5);
 
-    // Row 6: pivot-pass mode radios (last row).
-    let row6 = document.createElement('div');
-    row6.className = 'general-row';
-    let pivotPassField = document.createElement('div');
-    pivotPassField.className = 'settings-field';
-    pivotPassField.setAttribute('data-settings-field', 'pivotPassMode');
-    let pivotPassLabel = document.createElement('label');
-    pivotPassLabel.textContent = t('settingsDialog.fields.pivotPassMode');
-    pivotPassField.appendChild(pivotPassLabel);
-    pivotPassField.appendChild(createPivotPassModeRadioSelector(getRuleConfigFieldValue('pivotPassMode'), readOnly));
-    row6.appendChild(pivotPassField);
-    rows.appendChild(row6);
-
     container.appendChild(rows);
 }
 
@@ -5830,6 +6519,62 @@ function renderPresetsTabBody(container, readOnly) {
     row.appendChild(createSettingsFieldEl('presetName', readOnly));
     rows.appendChild(row);
 
+    let row2 = document.createElement('div');
+    row2.className = 'preset-row';
+    row2.appendChild(createSettingsFieldEl('tableFormat', readOnly));
+    rows.appendChild(row2);
+
+    let row3 = document.createElement('div');
+    row3.className = 'preset-row';
+    let pivotPassField = document.createElement('div');
+    pivotPassField.className = 'settings-field';
+    pivotPassField.setAttribute('data-settings-field', 'pivotPassMode');
+    let pivotPassLabel = document.createElement('label');
+    pivotPassLabel.textContent = t('settingsDialog.fields.pivotPassMode');
+    pivotPassField.appendChild(pivotPassLabel);
+    pivotPassField.appendChild(createPivotPassModeRadioSelector(getRuleConfigFieldValue('pivotPassMode'), readOnly));
+    row3.appendChild(pivotPassField);
+    rows.appendChild(row3);
+
+    container.appendChild(rows);
+}
+
+function renderSeatTabBody(container, readOnly) {
+    let rows = document.createElement('div');
+    rows.className = 'seat-tab-rows';
+
+    let row = document.createElement('div');
+    row.className = 'seat-row';
+
+    let field = document.createElement('div');
+    field.className = 'settings-field';
+    field.setAttribute('data-settings-field', 'userNaturalPosition');
+    let label = document.createElement('label');
+    label.textContent = t('settingsDialog.fields.userNaturalPosition');
+    field.appendChild(label);
+
+    let select = document.createElement('select');
+    select.setAttribute('data-settings-field', 'userNaturalPosition');
+    let tableFormat = gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat ? gSettingsDraftRuleConfig.tableFormat : 'normal4P';
+    let currentValue = getCurrentUserNaturalPosition();
+    for (let opt of getUserNaturalPositionOptionsForTableFormat(tableFormat)) {
+        let option = document.createElement('option');
+        option.value = opt;
+        option.textContent = getSeatOptionLabel(opt, tableFormat);
+        select.appendChild(option);
+    }
+    select.value = currentValue;
+    select.disabled = !!readOnly;
+    if (!readOnly) {
+        select.addEventListener('change', () => {
+            setDisplaySettingFieldValue('userNaturalPosition', select.value);
+            renderSettingsDialog();
+        });
+    }
+    field.appendChild(select);
+    row.appendChild(field);
+    rows.appendChild(row);
+
     container.appendChild(rows);
 }
 
@@ -5852,15 +6597,24 @@ function renderSettingsDialog() {
 
     // Non-game top-level tabs: show placeholder, hide game-settings panels
     let isGameTab = (gSettingsTopLevelTab === 'game');
+    let isSeatTab = (gSettingsTopLevelTab === 'seat');
+    let isCustomTab = (!isGameTab && !isSeatTab);
     if (gSettingsTabRow)   gSettingsTabRow.style.display   = isGameTab ? '' : 'none';
-    if (gSettingsBody)     gSettingsBody.style.display     = isGameTab ? '' : 'none';
+    if (gSettingsBody)     gSettingsBody.style.display     = (isGameTab || isSeatTab) ? '' : 'none';
     if (gSettingsDisplayPlaceholder) gSettingsDisplayPlaceholder.style.display = isGameTab ? '' : 'none';
     if (gSettingsPlaceholderPanel) {
-        gSettingsPlaceholderPanel.style.display = isGameTab ? 'none' : 'block';
-        if (!isGameTab) {
+        gSettingsPlaceholderPanel.style.display = isCustomTab ? 'block' : 'none';
+        if (isCustomTab) {
             gSettingsPlaceholderPanel.textContent = t('settingsDialog.placeholders.' + gSettingsTopLevelTab);
             return;
         }
+    }
+
+    if (isSeatTab) {
+        gSettingsBody.className = readOnly ? 'settings-readonly' : '';
+        gSettingsBody.innerHTML = '';
+        renderSeatTabBody(gSettingsBody, readOnly);
+        return;
     }
 
     // Second-level tab active states
@@ -5883,7 +6637,7 @@ function renderSettingsDialog() {
         renderLevelsTabBody(gSettingsBody, readOnly);
     } else if (gSettingsActiveTab === 'timing') {
         renderTimingTabBody(gSettingsBody, readOnly);
-    } else {
+    } else if (!isSeatTab) {
         let grid = document.createElement('div');
         grid.className = 'settings-grid';
         let fields = SETTINGS_FIELDS_BY_TAB[gSettingsActiveTab] || [];
@@ -5892,6 +6646,7 @@ function renderSettingsDialog() {
         }
         gSettingsBody.appendChild(grid);
     }
+
 }
 
 function openSettingsDialog(mode) {
@@ -5969,7 +6724,8 @@ function onNewGameButtonClick() {
 
 function humanPlayCardsCore(cp) {
     if (isPauseDialogBlockingGameplay()) return;
-    if (!isHumanControlled(cp)) return;
+    if (!isActorControlledByHuman(cp)) return;
+    let controllerSeat = getControllerSeatForActorSeat(cp);
     if (gCrossingState && gCrossingState.trickPlayBlocked) {
         trySubmitLocalCrossingSelection();
         return;
@@ -5988,8 +6744,8 @@ function humanPlayCardsCore(cp) {
             showError(t('errors.baseFailed'));
             return;
         }
-        stopPlayerMoveTimer(cp);
-        applyBaseTimeIncrementAfterBaseCompletion(cp);
+        stopPlayerMoveTimer(controllerSeat);
+        applyBaseTimeIncrementAfterBaseCompletion(controllerSeat);
         clearSelection();
         gAutoStrain3rdTriggerCard = null;
         clearDesk();
@@ -6006,7 +6762,7 @@ function humanPlayCardsCore(cp) {
         return;
     }
 
-    stopPlayerMoveTimer(cp);
+    stopPlayerMoveTimer(controllerSeat);
     clearSelection();
 
     if (result.failedMultiplay) {
@@ -6087,6 +6843,10 @@ function finishRound() {
             // Restore exposed-card previews that clearDesk() wiped
             for (let p = 0; p < NUM_PLAYERS; p++) {
                 if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+            }
+            // Restore dummy hand display after desk clear (3PDA: dummy panel removed by clearDesk)
+            if (game && game.threePlayer && game.threePlayer.enabled) {
+                renderDummyHandDisplay();
             }
             promptCurrentPlayer();
         }, BOT_DELAY * 2);
@@ -6276,11 +7036,11 @@ function showCountingDialog(result, frameResult, applied) {
     let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
     let multiplayCompEnabled = (handling === 'compensation' || handling === 'lian-zhong-compensation' || !!(game.gameConfig && game.gameConfig.multiplayCompensation));
 
-    // Size: match #desk-south width × 2× height
-    let deskSouth = document.getElementById('desk-south');
-    if (deskSouth) {
-        let w = deskSouth.offsetWidth;
-        let h = deskSouth.offsetHeight * 2;
+    // Size: match the bottom screen slot width × 2× height.
+    let deskBottom = getDeskSlotByScreenSlot('bottom');
+    if (deskBottom) {
+        let w = deskBottom.offsetWidth;
+        let h = deskBottom.offsetHeight * 2;
         gCountingDialog.style.width = Math.round(w * 1.08) + 'px';
         gCountingDialog.style.height = h + 'px';
     }
@@ -6430,7 +7190,7 @@ window.addEventListener('keydown', function (e) {
 // Double click out of cards -> play
 window.addEventListener('dblclick', function(e) {
     if (e.target.closest('.card, .card-container, button')) return;
-    if (game && game.phase === GamePhase.PLAYING && isHumanControlled(engineGetCurrentPlayer()) && !gBtnPlay.disabled) {
+    if (game && game.phase === GamePhase.PLAYING && isActorControlledByHuman(engineGetCurrentPlayer()) && !gBtnPlay.disabled) {
         e.preventDefault();
         humanPlayCards();
     }

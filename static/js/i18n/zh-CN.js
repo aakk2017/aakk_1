@@ -262,6 +262,7 @@ const messages_zhCN = {
     displayPlaceholder: '显示设置（预留）：结构已保留，后续可加入局内可编辑显示项。',
     tabs: {
       presets: '预设',
+      display: '显示',
       general: '总体',
       scoring: '计分',
       levels: '级设',
@@ -269,6 +270,7 @@ const messages_zhCN = {
     },
     topLevelTabs: {
       game: '游戏设置',
+      seat: '座位',
       display: '显示',
       file: '文件',
       accounts: '账号',
@@ -280,6 +282,8 @@ const messages_zhCN = {
     },
     fields: {
       presetName: '预设规则',
+      tableFormat: '牌桌形式',
+      userNaturalPosition: '座位',
       deckCount: '副数',
       autoStrain: '无人亮主时的名目',
       pivotPassMode: '递庄模式',
@@ -325,6 +329,10 @@ const messages_zhCN = {
       no: '否',
       nts: '无主',
       thirdInitBase: '第三张底牌',
+      normal4P: '普通四人',
+      threePlayerDummyAlly: '三人明手',
+      showDummy: '显示明手',
+      hideDummy: '收起明手',
       winnerPivot: '赢庄',
       rotatePivot: '轮庄',
       unlimited: '无限',
@@ -359,6 +367,12 @@ const messages_zhCN = {
       singleOrNot: '两分（单/非单）',
       exponential: '指数',
       power: '幂',
+    },
+    natural3PDA: {
+      north: '子',
+      southwest: '申',
+      southeast: '辰',
+      dummy: '明',
     },
     timingPresetHints: {
       normal: '步时5秒，扣底步时45秒，局时60秒',

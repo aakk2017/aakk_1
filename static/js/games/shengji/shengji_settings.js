@@ -125,6 +125,7 @@
 
     const PRESETS = {
         'default': {
+            tableFormat: 'normal4P',
             deckCount: 2,
             autoStrain: false,
             pivotPassMode: 'winner-pivot',
@@ -167,6 +168,7 @@
             doubleDeclarationOrdering: null,
         },
         'plain': {
+            tableFormat: 'normal4P',
             deckCount: 2,
             autoStrain: false,
             pivotPassMode: 'winner-pivot',
@@ -199,6 +201,7 @@
             gameMode: 'endless',
         },
         'high-school': {
+            tableFormat: 'normal4P',
             deckCount: 2,
             autoStrain: true,
             pivotPassMode: 'winner-pivot',
@@ -232,6 +235,7 @@
             gameMode: 'endless',
         },
         'Berkeley': {
+            tableFormat: 'normal4P',
             deckCount: 2,
             autoStrain: true,
             pivotPassMode: 'winner-pivot',
@@ -265,6 +269,7 @@
             gameMode: 'endless',
         },
         'experimental': {
+            tableFormat: 'normal4P',
             deckCount: 2,
             autoStrain: false,
             pivotPassMode: 'winner-pivot',
@@ -297,6 +302,7 @@
             gameMode: 'endless',
         },
         'short-level rotate-pivot': {
+            tableFormat: 'normal4P',
             deckCount: 2,
             autoStrain: false,
             pivotPassMode: 'rotate-pivot',
@@ -332,9 +338,28 @@
         },
     };
 
+    const USER_NATURAL_POSITION_OPTIONS = {
+        normal4P: ['east', 'north', 'west', 'south'],
+        threePlayerDummyAlly: ['north', 'southwest', 'southeast'],
+    };
+
+    function getDefaultUserNaturalPositionForTableFormat(tableFormat) {
+        return (tableFormat === 'threePlayerDummyAlly') ? 'north' : 'east';
+    }
+
+    function getUserNaturalPositionOptionsForTableFormat(tableFormat) {
+        return [...(USER_NATURAL_POSITION_OPTIONS[tableFormat] || USER_NATURAL_POSITION_OPTIONS.normal4P)];
+    }
+
+    function normalizeUserNaturalPositionForTableFormat(tableFormat, value) {
+        let options = USER_NATURAL_POSITION_OPTIONS[tableFormat] || USER_NATURAL_POSITION_OPTIONS.normal4P;
+        return options.includes(value) ? value : getDefaultUserNaturalPositionForTableFormat(tableFormat);
+    }
+
     const SCHEMA = {
         tabs: {
-            presets: ['presetName'],
+            presets: ['presetName', 'tableFormat'],
+            display: [],
             general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
             scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
             levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'skipLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
@@ -363,6 +388,11 @@
 
     function normalizeRuleConfig(cfg) {
         let out = { ...cfg };
+        // Validate tableFormat
+        const VALID_TABLE_FORMATS = ['normal4P', 'threePlayerDummyAlly'];
+        if (!out.tableFormat || !VALID_TABLE_FORMATS.includes(out.tableFormat)) {
+            out.tableFormat = 'normal4P';
+        }
         out.deckCount = clampInt(out.deckCount, 2, 1, 4);
         out.autoStrain = !!out.autoStrain;
         out.allowOverbase = !!out.allowOverbase;
@@ -489,6 +519,7 @@
         };
 
         const enumFields = {
+            tableFormat: ['normal4P', 'threePlayerDummyAlly'],
             pivotPassMode: ['winner-pivot', 'rotate-pivot'],
             overbaseRestrictions: ['none', 'default'],
             failedMultiplayHandling: ['default', 'compensation', 'lian-zhong-compensation'],
@@ -521,7 +552,21 @@
         }
 
         let overrides = (input && input.overrides) ? input.overrides : {};
+        
+        // Preset independence: only 'short-level rotate-pivot' forces pivotPassMode
+        // All other presets leave pivotPassMode as an independent setting
+        let preservePivotPassMode = false;
+        if (input && input.pivotPassMode && presetName !== 'short-level rotate-pivot') {
+            preservePivotPassMode = true;
+        }
+        
         let merged = { ...base, ...overrides };
+        
+        // Restore pivotPassMode if this is not 'short-level rotate-pivot'
+        if (preservePivotPassMode) {
+            merged.pivotPassMode = input.pivotPassMode;
+        }
+        
         merged.timing = { ...base.timing, ...(overrides.timing || {}) };
 
         let normalized = normalizeRuleConfig(merged);
@@ -535,10 +580,15 @@
             placeholder: true,
             theme: 'default',
             cardSize: 'default',
+            userNaturalPosition: getDefaultUserNaturalPositionForTableFormat(ruleConfig.tableFormat),
         };
         if (input && input.displayOverrides) {
             displaySettings = { ...displaySettings, ...input.displayOverrides };
         }
+        displaySettings.userNaturalPosition = normalizeUserNaturalPositionForTableFormat(
+            ruleConfig.tableFormat,
+            displaySettings.userNaturalPosition
+        );
         return {
             presetName: ruleConfig.presetName,
             ruleConfig,
@@ -551,6 +601,9 @@
     window.shengjiScoringPresets = SCORING_PRESETS;
     window.shengjiLevelsPresets = LEVELS_PRESETS;
     window.shengjiTimingPresets = TIMING_PRESETS;
+    window.shengjiGetDefaultUserNaturalPosition = getDefaultUserNaturalPositionForTableFormat;
+    window.shengjiGetUserNaturalPositionOptions = getUserNaturalPositionOptionsForTableFormat;
+    window.shengjiNormalizeUserNaturalPosition = normalizeUserNaturalPositionForTableFormat;
     
     // Helper: determine which levels preset (if any) matches the current config
     window.shengjiDetectLevelsPreset = function(cfg) {

@@ -262,6 +262,7 @@ const messages_en = {
     displayPlaceholder: 'Display settings (reserved): structure ready, in-game editable options can be added later.',
     tabs: {
       presets: 'Presets',
+      display: 'Display',
       general: 'General',
       scoring: 'Scoring',
       levels: 'Levels',
@@ -269,6 +270,7 @@ const messages_en = {
     },
     topLevelTabs: {
       game: 'Game Settings',
+      seat: 'Seat',
       display: 'Display',
       file: 'File',
       accounts: 'Accounts',
@@ -280,6 +282,8 @@ const messages_en = {
     },
     fields: {
       presetName: 'Preset rules',
+      tableFormat: 'table format',
+      userNaturalPosition: 'Seat',
       deckCount: 'deck count',
       autoStrain: 'strain when nobody declared',
       pivotPassMode: 'pivot-pass mode',
@@ -324,6 +328,10 @@ const messages_en = {
       no: 'No',
       nts: 'NTS',
       thirdInitBase: '3rd init. base',
+      normal4P: 'normal 4P',
+      threePlayerDummyAlly: '3P dummy-ally',
+      showDummy: 'Show dummy',
+      hideDummy: 'Hide dummy',
       winnerPivot: 'winner-pivot',
       rotatePivot: 'rotate-pivot',
       unlimited: 'Unlimited',
@@ -359,6 +367,12 @@ const messages_en = {
       singleOrNot: 'single-or-not',
       exponential: 'exponential',
       power: 'power',
+    },
+    natural3PDA: {
+      north: 'N',
+      southwest: 'Sw',
+      southeast: 'Se',
+      dummy: 'Ay',
     },
     timingPresetHints: {
       normal: '5s shot clock, 45s basing shot clock, 60s bank time',

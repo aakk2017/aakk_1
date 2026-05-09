@@ -20,7 +20,7 @@ const GamePhase = {
     GAME_OVER:  'game_over'
 };
 
-const HUMAN_PLAYER   = 0; // South
+let HUMAN_PLAYER   = 0; // South
 const TOTAL_CARDS    = 108;
 const CARDS_PER_HAND = 25;
 const BASE_SIZE      = 8;
@@ -1642,6 +1642,15 @@ function engineDetermineRoundWinner() {
 // Utility
 // ---------------------------------------------------------------------------
 function engineGetCurrentPlayer() {
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled
+            && game.phase === GamePhase.PLAYING && isPivotResolved(game.pivot)) {
+        let order = game.threePlayer.actorSeatByFrameSeat || [];
+        if (order.length === NUM_PLAYERS) {
+            let leaderIdx = order.indexOf(game.currentLeader);
+            if (leaderIdx < 0) leaderIdx = 0;
+            return order[(leaderIdx + game.currentTurnIndex) % NUM_PLAYERS];
+        }
+    }
     return (game.currentLeader + game.currentTurnIndex) % NUM_PLAYERS;
 }
 
@@ -1651,7 +1660,14 @@ function engineSetTeams() {
         game.attackingTeam = [];
         return;
     }
-    game.defendingTeam = [game.pivot, (game.pivot + 2) % NUM_PLAYERS];
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled) {
+        let dummySeat = Number(game.threePlayer.dummySeat);
+        game.defendingTeam = Number.isInteger(dummySeat)
+            ? [game.pivot, dummySeat]
+            : [game.pivot, (game.pivot + 2) % NUM_PLAYERS];
+    } else {
+        game.defendingTeam = [game.pivot, (game.pivot + 2) % NUM_PLAYERS];
+    }
     game.attackingTeam = [];
     for (let i = 0; i < NUM_PLAYERS; i++) {
         if (!game.defendingTeam.includes(i)) game.attackingTeam.push(i);
@@ -1674,6 +1690,325 @@ function engineResetFailedMultiplayCompensationState() {
     game.failedMultiplay = null;
     game.multiplayCompensation = 0;
     game.multiplayCompensationEvents = [];
+}
+
+/**
+ * Initialize 3-player dummy-ally state based on tableFormat setting.
+ * Sets game.tableFormat and game.threePlayer object for dynamic position mapping.
+ */
+function initializeThreePlayerDummyAllyState() {
+    game.tableFormat = (game.gameConfig && game.gameConfig.tableFormat) || 'normal4P';
+    
+    if (game.tableFormat !== 'threePlayerDummyAlly') {
+        game.threePlayer = null;
+        return;
+    }
+    
+    // 3PDA is enabled; initialize state structure
+    const naturalCycle = ['north', 'southwest', 'southeast'];
+    const actorSeatByNaturalPosition = {
+        north: 2,
+        southwest: 3,
+        southeast: 1,
+    };
+    const naturalPositionByActorSeat = [null, 'southeast', 'north', 'southwest'];
+    const naturalBySeat = {
+        1: 'southeast',
+        2: 'north',
+        3: 'southwest',
+    };
+    let dealerNaturalPosition = null;
+    let seededDealerSeat = Number(game.declarationOrderAnchor);
+    if (Number.isInteger(seededDealerSeat) && seededDealerSeat >= 0 && seededDealerSeat < NUM_PLAYERS) {
+        dealerNaturalPosition = naturalBySeat[seededDealerSeat] || null;
+    }
+    if (!dealerNaturalPosition) {
+        dealerNaturalPosition = naturalCycle[Math.floor(Math.random() * naturalCycle.length)];
+    }
+    const dealerSeat = actorSeatByNaturalPosition[dealerNaturalPosition];
+    const temporaryDummySeat = 0;
+
+    game.threePlayer = {
+        enabled: true,
+        naturalCycle,
+        realNaturalPositions: naturalCycle,
+        actorSeatByNaturalPosition,
+        naturalPositionByActorSeat,
+        declarationEligibleSeats: [1, 2, 3],
+        dummySeat: temporaryDummySeat,
+        temporaryDummySeat,
+        pivotNaturalPosition: null,
+        dealerNaturalPosition,
+        dealerSeat,
+        actorSeatByFrameSeat: [null, null, null, null],
+        frameSeatByNaturalPosition: {},
+        naturalPositionByFrameSeat: [null, null, null, null],
+        controllerByFrameSeat: [null, null, null, null],
+        dummyVisibility: 'public',
+        dummyHandPanelOpen: false,
+    };
+
+    // Pre-pivot qiangzhuang model: temporary dummy cannot declare.
+    if (!isPivotResolved(game.pivot)) {
+        const dealerIdx = naturalCycle.indexOf(dealerNaturalPosition);
+        const successorNatural = naturalCycle[(dealerIdx + 1) % naturalCycle.length];
+        const predecessorNatural = naturalCycle[(dealerIdx + naturalCycle.length - 1) % naturalCycle.length];
+        const successorSeat = actorSeatByNaturalPosition[successorNatural];
+        const predecessorSeat = actorSeatByNaturalPosition[predecessorNatural];
+
+        game.threePlayer.controllerByFrameSeat = [dealerSeat, successorSeat, dealerSeat, predecessorSeat];
+        game.threePlayer.actorSeatByFrameSeat = [dealerSeat, successorSeat, temporaryDummySeat, predecessorSeat];
+        game.threePlayer.naturalPositionByFrameSeat = [dealerNaturalPosition, successorNatural, null, predecessorNatural];
+        game.threePlayer.frameSeatByNaturalPosition = {
+            [dealerNaturalPosition]: 0,
+            [successorNatural]: 1,
+            [predecessorNatural]: 3,
+        };
+        return;
+    }
+
+    engineSyncThreePlayerFrameStateFromPivot();
+}
+
+/**
+ * Build 3PDA frame mappings from current pivot seat.
+ * Frame order: 0=pivot, 1=successor, 2=dummy, 3=predecessor.
+ */
+function engineSyncThreePlayerFrameStateFromPivot() {
+    if (!game || !game.threePlayer || !game.threePlayer.enabled) return;
+    if (typeof isPivotResolved !== 'function' || !isPivotResolved(game.pivot)) return;
+
+    const naturalCycle = game.threePlayer.naturalCycle || ['north', 'southwest', 'southeast'];
+    const seatByNatural = game.threePlayer.actorSeatByNaturalPosition || {
+        north: 2,
+        southwest: 3,
+        southeast: 1,
+    };
+    let pivotNatural = game.threePlayer.pivotNaturalPosition;
+    if (!naturalCycle.includes(pivotNatural)) {
+        let inferredNatural = null;
+        let pivotSeatFromState = Number(game.pivot);
+        for (let i = 0; i < naturalCycle.length; i++) {
+            let natural = naturalCycle[i];
+            if (Number(seatByNatural[natural]) === pivotSeatFromState) {
+                inferredNatural = natural;
+                break;
+            }
+        }
+        pivotNatural = inferredNatural || naturalCycle[0];
+    }
+    const pivotIdx = naturalCycle.indexOf(pivotNatural);
+    const successorNatural = naturalCycle[(pivotIdx + 1) % naturalCycle.length];
+    const predecessorNatural = naturalCycle[(pivotIdx + naturalCycle.length - 1) % naturalCycle.length];
+    const pivotSeat = Number(seatByNatural[pivotNatural]);
+    const successorSeat = Number(seatByNatural[successorNatural]);
+    const predecessorSeat = Number(seatByNatural[predecessorNatural]);
+
+    if (!Number.isInteger(pivotSeat) || !Number.isInteger(successorSeat) || !Number.isInteger(predecessorSeat)) {
+        return;
+    }
+
+    const dummySeat = Number(game.threePlayer.temporaryDummySeat);
+    const frameSeatToSeat = [pivotSeat, successorSeat, dummySeat, predecessorSeat];
+
+    const naturalPositionByFrameSeat = [null, null, null, null];
+    const frameSeatByNaturalPosition = {};
+    const controllerByFrameSeat = [null, null, null, null];
+
+    naturalPositionByFrameSeat[0] = pivotNatural;
+    naturalPositionByFrameSeat[1] = successorNatural;
+    naturalPositionByFrameSeat[2] = null;
+    naturalPositionByFrameSeat[3] = predecessorNatural;
+
+    frameSeatByNaturalPosition[pivotNatural] = 0;
+    frameSeatByNaturalPosition[successorNatural] = 1;
+    frameSeatByNaturalPosition[predecessorNatural] = 3;
+
+    for (let frameSeat = 0; frameSeat < NUM_PLAYERS; frameSeat++) {
+        const seat = frameSeatToSeat[frameSeat];
+        controllerByFrameSeat[frameSeat] = (frameSeat === 2) ? pivotSeat : seat;
+    }
+
+    game.pivot = pivotSeat;
+    game.threePlayer.dummySeat = dummySeat;
+    game.threePlayer.pivotNaturalPosition = pivotNatural;
+    game.threePlayer.actorSeatByFrameSeat = frameSeatToSeat;
+    game.threePlayer.frameSeatByNaturalPosition = frameSeatByNaturalPosition;
+    game.threePlayer.naturalPositionByFrameSeat = naturalPositionByFrameSeat;
+    game.threePlayer.controllerByFrameSeat = controllerByFrameSeat;
+
+    if (typeof syncHumanControlledSeatFromDisplaySettings === 'function') {
+        syncHumanControlledSeatFromDisplaySettings();
+    }
+}
+
+function engineGetControllerSeatFromNaturalPosition(naturalPosition) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    if (!isPivotResolved(game.pivot)) {
+        let seat = game.threePlayer.actorSeatByNaturalPosition
+            ? game.threePlayer.actorSeatByNaturalPosition[naturalPosition]
+            : null;
+        return Number.isInteger(seat) ? seat : null;
+    }
+    let frameSeat = engineGetFrameSeatFromNaturalPosition(naturalPosition);
+    if (!Number.isInteger(frameSeat) || frameSeat < 0 || frameSeat >= NUM_PLAYERS) return null;
+    let value = game.threePlayer.controllerByFrameSeat[frameSeat];
+    return Number.isInteger(value) ? value : null;
+}
+
+/**
+ * Get natural position from frame seat (0=pivot, 1=successor, 2=ally, 3=predecessor).
+ * Works based on current pivot's natural position in 3PDA mode.
+ * Returns null if not in 3PDA mode or mapping not yet initialized.
+ */
+function engineGetNaturalPositionFromFrameSeat(frameSeat) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    let value = game.threePlayer.naturalPositionByFrameSeat[frameSeat];
+    return (value === undefined) ? null : value;
+}
+
+/**
+ * Get frame seat from natural position in 3PDA mode.
+ * Returns null if not in 3PDA mode or mapping not yet initialized.
+ */
+function engineGetFrameSeatFromNaturalPosition(naturalPosition) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    let value = game.threePlayer.frameSeatByNaturalPosition[naturalPosition];
+    return (value === undefined) ? null : value;
+}
+
+/**
+ * Get natural position for the current controller seat.
+ */
+function engineGetNaturalPositionForControllerSeat(controllerSeat) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    let controllerSeatNum = Number(controllerSeat);
+    if (!Number.isInteger(controllerSeatNum) || controllerSeatNum < 0 || controllerSeatNum >= NUM_PLAYERS) return null;
+    for (let frameSeat = 0; frameSeat < NUM_PLAYERS; frameSeat++) {
+        if (Number(game.threePlayer.controllerByFrameSeat[frameSeat]) === controllerSeatNum) {
+            return engineGetNaturalPositionFromFrameSeat(frameSeat);
+        }
+    }
+    return null;
+}
+
+function engineGetNaturalPositionForActorSeat(actorSeat) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    let actorSeatNum = Number(actorSeat);
+    if (!Number.isInteger(actorSeatNum) || actorSeatNum < 0 || actorSeatNum >= NUM_PLAYERS) return null;
+    if (Number(game.threePlayer.dummySeat) === actorSeatNum) return null;
+
+    let natural = game.threePlayer.naturalPositionByActorSeat
+        ? game.threePlayer.naturalPositionByActorSeat[actorSeatNum]
+        : null;
+    return natural || null;
+}
+
+function engineGetActorSeatForFramePosition(framePosition) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    const frameIdxByName = { pivot: 0, successor: 1, ally: 2, predecessor: 3 };
+    let idx = frameIdxByName[framePosition];
+    if (!Number.isInteger(idx)) return null;
+    let actor = game.threePlayer.actorSeatByFrameSeat && game.threePlayer.actorSeatByFrameSeat[idx];
+    return Number.isInteger(actor) ? actor : null;
+}
+
+function engineGetFramePositionForActorSeat(actorSeat) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        return null;
+    }
+    let seat = Number(actorSeat);
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return null;
+    let byFrame = game.threePlayer.actorSeatByFrameSeat || [];
+    let frameSeat = byFrame.indexOf(seat);
+    if (frameSeat < 0) return null;
+    const frameNameByIdx = ['pivot', 'successor', 'ally', 'predecessor'];
+    return frameNameByIdx[frameSeat] || null;
+}
+
+function engineGetRoundPositionForActorSeat(actorSeat, currentLeader) {
+    let seat = Number(actorSeat);
+    let leader = Number(currentLeader);
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return null;
+    if (!Number.isInteger(leader) || leader < 0 || leader >= NUM_PLAYERS) return null;
+
+    let order = null;
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled && isPivotResolved(game.pivot)) {
+        order = game.threePlayer.actorSeatByFrameSeat || null;
+    }
+    if (!Array.isArray(order) || order.length !== NUM_PLAYERS) {
+        order = [0, 1, 2, 3];
+    }
+
+    let leaderIdx = order.indexOf(leader);
+    let seatIdx = order.indexOf(seat);
+    if (leaderIdx < 0 || seatIdx < 0) return null;
+    let delta = (seatIdx - leaderIdx + NUM_PLAYERS) % NUM_PLAYERS;
+    const roundNames = ['leader', 'second', 'third', 'fourth'];
+    return roundNames[delta] || null;
+}
+
+function engineGetActorSeatForRoundPosition(roundPosition, currentLeader) {
+    let leader = Number(currentLeader);
+    if (!Number.isInteger(leader) || leader < 0 || leader >= NUM_PLAYERS) return null;
+    const idxByRoundName = { leader: 0, second: 1, third: 2, fourth: 3 };
+    let offset = idxByRoundName[roundPosition];
+    if (!Number.isInteger(offset)) return null;
+
+    let order = null;
+    if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled && isPivotResolved(game.pivot)) {
+        order = game.threePlayer.actorSeatByFrameSeat || null;
+    }
+    if (!Array.isArray(order) || order.length !== NUM_PLAYERS) {
+        order = [0, 1, 2, 3];
+    }
+
+    let leaderIdx = order.indexOf(leader);
+    if (leaderIdx < 0) return null;
+    return order[(leaderIdx + offset) % NUM_PLAYERS];
+}
+
+/**
+ * Get display position (top/left/right/center) for a frame seat.
+ * Takes reference player seat and returns where to display that frame seat.
+ * For 3PDA: top=(opposite), left=(predecessor), right=(successor), center=unused.
+ * For normal4P: maps to traditional NESW screen positions.
+ */
+function engineGetDisplayPositionForFrameSeat(frameSeat, referencePlayerSeat) {
+    if (!game.threePlayer || !game.threePlayer.enabled) {
+        // Normal 4P mapping (not implemented here, using table defaults)
+        return null;
+    }
+
+    let frameSeatNum = Number(frameSeat);
+    let refSeatNum = Number(referencePlayerSeat);
+    if (!Number.isInteger(frameSeatNum) || frameSeatNum < 0 || frameSeatNum >= NUM_PLAYERS) return null;
+    if (!Number.isInteger(refSeatNum) || refSeatNum < 0 || refSeatNum >= NUM_PLAYERS) return null;
+
+    let actorSeatByFrameSeat = game.threePlayer.actorSeatByFrameSeat || [];
+    if (!Array.isArray(actorSeatByFrameSeat) || actorSeatByFrameSeat.length !== NUM_PLAYERS) return null;
+
+    let referenceFrameSeat = actorSeatByFrameSeat.indexOf(refSeatNum);
+    if (referenceFrameSeat < 0) return null;
+
+    // 3PDA display mapping is frame-relative to the selected reference actor.
+    // 0 = bottom/reference, 1 = right/afterhand, 2 = top/opposite, 3 = left/forehand
+    const offsetFromReference = (frameSeatNum - referenceFrameSeat + 4) % 4;
+
+    const positions = ['center', 'right', 'top', 'left'];
+    return positions[offsetFromReference];
 }
 
 // ---------------------------------------------------------------------------
@@ -1732,6 +2067,15 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
         game.gameConfig = { ...resolvedRuleConfig };
     } else if (!game.gameConfig) {
         game.gameConfig = engineBuildConfig('default');
+    }
+
+    // Initialize 3-player dummy-ally state if tableFormat is enabled
+    initializeThreePlayerDummyAllyState();
+    if (game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled && !isPivotResolved(game.pivot)) {
+        let dealerSeat = Number(game.threePlayer.dealerSeat);
+        if (Number.isInteger(dealerSeat) && dealerSeat >= 0 && dealerSeat < NUM_PLAYERS) {
+            game.declarationOrderAnchor = dealerSeat;
+        }
     }
 
     game.deck  = engineCreateDeck(level, 4);
@@ -2449,7 +2793,8 @@ function engineComputeFrameResult(finalScore) {
         else resultKey = 'defendUpN';
     } else {
         defenseHolds = false;
-        levelDelta = Math.floor((finalScore - stageThreshold) / levelThreshold);
+        // Reaching stageThreshold is an attacking success and advances one level.
+        levelDelta = Math.floor((finalScore - stageThreshold) / levelThreshold) + 1;
         if (levelCap !== null && levelDelta > levelCap) levelDelta = levelCap;
         if (levelDelta === 0) resultKey = 'takeStage';
         else if (levelDelta === 1) resultKey = 'upOne';
@@ -2464,7 +2809,35 @@ function engineComputeFrameResult(finalScore) {
     // Rotate mode: successor is always relative to current pivot and advancing direction.
     let nextPivot;
     if (pivotPassMode === 'rotate-pivot') {
-        nextPivot = (game.pivot + 1) % NUM_PLAYERS;
+        if (game && game.tableFormat === 'threePlayerDummyAlly' && game.threePlayer && game.threePlayer.enabled) {
+            const cycle = game.threePlayer.naturalCycle || ['north', 'southwest', 'southeast'];
+            let currentNatural = game.threePlayer.pivotNaturalPosition;
+            if (!cycle.includes(currentNatural)) currentNatural = cycle[0];
+            let idx = cycle.indexOf(currentNatural);
+            if (idx < 0) idx = 0;
+            let nextNatural = cycle[(idx + 1) % cycle.length];
+            let nextSeat = game.threePlayer.actorSeatByNaturalPosition
+                ? game.threePlayer.actorSeatByNaturalPosition[nextNatural]
+                : null;
+            if (Number.isInteger(nextSeat)) nextPivot = nextSeat;
+            if (!Number.isInteger(nextPivot)) {
+                nextPivot = (game.pivot + 1) % NUM_PLAYERS;
+            }
+            game.threePlayer.pivotNaturalPosition = nextNatural;
+        } else {
+            // In 4P rotate-pivot: rotate to first attacker if attack wins, or to ally if defense holds
+            if (defenseHolds) {
+                nextPivot = (game.pivot + 2) % NUM_PLAYERS;
+            } else {
+                for (let i = 1; i < NUM_PLAYERS; i++) {
+                    let p = (game.pivot + i) % NUM_PLAYERS;
+                    if (game.attackingTeam.includes(p)) {
+                        nextPivot = p;
+                        break;
+                    }
+                }
+            }
+        }
     } else {
         // Winner mode (existing behavior): defense holds -> pivot's ally; attack wins -> first attacker in advancing direction.
         if (defenseHolds) {

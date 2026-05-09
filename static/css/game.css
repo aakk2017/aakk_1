@@ -1922,3 +1922,101 @@
     padding: 0.5vh 0.8vh;
     margin-top: -0.2vh;
 }
+
+/* =========================================================
+   3PDA Dummy Hand Display Styles
+   ========================================================= */
+
+/* One-row dummy hand display (when dummy is at top). */
+/* dummy-hand-one-row remains as a legacy compatibility alias. */
+.dummy-top-hand-row,
+.dummy-hand-one-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 0.3vh;
+    justify-content: center;
+}
+
+.dummy-top-hand-row .card-container,
+.dummy-hand-one-row .card-container {
+    flex-shrink: 0;
+}
+
+/* Toggle button for side-panel dummy display */
+.dummy-toggle-btn {
+    display: block;
+    width: 100%;
+    padding: 0.5vh 1vh;
+    margin-bottom: 0.5vh;
+    background: #f5f5f5;
+    border: 1px solid #ccc;
+    border-radius: var(--radius);
+    font-family: "Noto Sans SC", "Roboto";
+    font-size: 1.8vh;
+    cursor: pointer;
+    color: #333;
+    transition: background 0.2s ease;
+}
+
+.dummy-toggle-btn:hover {
+    background: #e8e8e8;
+}
+
+.dummy-side-controls {
+    position: absolute;
+    top: 0.8vh;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5vh;
+    width: min(24vh, 92%);
+    max-width: 24vh;
+    z-index: 18;
+    pointer-events: auto;
+}
+
+.dummy-side-controls[data-display-pos="left"],
+.dummy-side-controls[data-display-pos="right"] {
+    align-items: stretch;
+}
+
+.dummy-side-controls[data-display-pos="left"] {
+    left: 0.8vh;
+}
+
+.dummy-side-controls[data-display-pos="right"] {
+    right: 0.8vh;
+}
+
+/* 5-row panel for side-position dummy */
+.dummy-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4vh;
+    padding: 0.5vh 0;
+    border-top: 1px solid #ddd;
+    max-height: 18vh;
+    overflow-y: auto;
+}
+
+.dummy-panel-5row {
+    align-items: stretch;
+}
+
+.dummy-panel-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.2vh;
+    justify-content: flex-start;
+}
+
+.dummy-panel-row .card-container {
+    flex-shrink: 0;
+}
+
+/* Highlight cards on desk in side panel */
+.dummy-panel-row .card-container[data-on-desk="true"] {
+    background: rgba(0, 255, 255, 0.15);
+    border: 2px solid #00ffff;
+}
