@@ -5,10 +5,10 @@
  */
 
 // Hand container elements
-const nhandElement = document.getElementById("nhand");
-const shandElement = document.getElementById("shand");
-const whandElement = document.getElementById("whand");
-const ehandElement = document.getElementById("ehand");
+const topHandElement    = document.getElementById("hand-top");
+const bottomHandElement = document.getElementById("hand-bottom");
+const leftHandElement   = document.getElementById("hand-left");
+const rightHandElement  = document.getElementById("hand-right");
 
 // Status and info sections
 const statusbar = document.getElementById('statusbar');
@@ -61,10 +61,10 @@ const saveUpgBtn = document.getElementById("save-upg-btn");
 // Export all DOM references as an object for organizational clarity
 const DOM = {
     hands: {
-        n: nhandElement,
-        s: shandElement,
-        w: whandElement,
-        e: ehandElement,
+        top:    topHandElement,
+        bottom: bottomHandElement,
+        left:   leftHandElement,
+        right:  rightHandElement,
     },
     sections: {
         status: statusbar,
@@ -102,5 +102,5 @@ const DOM = {
 
 // Helper function to collect all hand elements as an array
 function getHandElements() {
-    return [whandElement, ehandElement, nhandElement, shandElement];
+    return [leftHandElement, rightHandElement, topHandElement, bottomHandElement];
 }

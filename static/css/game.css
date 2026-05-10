@@ -6,23 +6,23 @@
 
    Layout structure mirrors index.html exactly:
      .container
-       .nscontainer         ← corner-lt | #game-top-info.nshand | corner-rt
-       .game-desk-container ← fills same space as .middle-container
-       .nscontainer         ← corner-lb | #shand.nshand | corner-rb
+       .tbrow (.nscontainer alias)  ← corner-lt | #hand-top.tbhand | corner-rt
+       .game-desk-container         ← fills same space as .middle-container
+       .tbrow (.nscontainer alias)  ← corner-lb | #hand-bottom.tbhand | corner-rb
        .footer
 
    The four corners and footer are at identical vh positions to index.html.
-   All space between the two nscontainers is the game desk area.
+   All space between the two tbrow containers is the game desk area.
    ========================================================= */
 
 /* Shrink the top strip to recover 4vh for desk rows.
    Corner widgets are 18vh but overflow the 14vh container outward at the
    very top of the page where nothing sits above them. */
-#game-top-row {
+#row-top {
     height: 14vh;
     overflow: visible;
 }
-#game-top-info {
+#hand-top {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -33,7 +33,7 @@
 }
 
 /* Full-width desk container — 3 rows at 20vh each = 60vh.
-   Budget: 98vh − 14vh (top) − 0vh (no margins) − 60vh (desk) − 17vh (shand) − 7vh (footer) = 98 ✓ */
+   Budget: 98vh − 14vh (top) − 0vh (no margins) − 60vh (desk) − 17vh (hand-bottom) − 7vh (footer) = 98 ✓ */
 .game-desk-container {
     display: grid;
     width: 175vh;
@@ -47,11 +47,17 @@
     grid-template-rows: 20vh 20vh 20vh;
 }
 
-#desk-north { grid-area: north; }
-#desk-west  { grid-area: west; }
+/* Note 59a — Desk slot IDs renamed from natural-coded to display-coded names.
+   #desk-top    = displayPosition.top    (Note 59: was #desk-north)
+   #desk-right  = displayPosition.right  (Note 59: was #desk-east)
+   #desk-bottom = displayPosition.bottom (Note 59: was #desk-south)
+   #desk-left   = displayPosition.left   (Note 59: was #desk-west)
+   These are fixed screen-slot containers keyed by display position. */
+#desk-top    { grid-area: north; }
+#desk-left   { grid-area: west; }
 .desk-center { grid-area: center; }
-#desk-east  { grid-area: east; }
-#desk-south { grid-area: south; }
+#desk-right  { grid-area: east; }
+#desk-bottom { grid-area: south; }
 
 .desk-slot {
     display: flex;
@@ -64,19 +70,19 @@
     /* padding-bottom: 2.5vh; */
 }
 
-#desk-north .hand {
+#desk-top .hand {
     max-width: calc(9 * var(--card-width));
 }
-#desk-north .namebar {
+#desk-top .namebar {
     max-width: calc(9 * var(--card-width));
 }
 
-#desk-west .hand, #desk-west .namebar,
-#desk-east .hand, #desk-east .namebar {
+#desk-left .hand, #desk-left .namebar,
+#desk-right .hand, #desk-right .namebar {
     max-width: calc(4 * var(--card-width));
 }
 
-#desk-south .hand, #desk-south .namebar {
+#desk-bottom .hand, #desk-bottom .namebar {
     max-width: calc(9 * var(--card-width));
 }
 
@@ -158,26 +164,26 @@
 }
 
 /* Bottom row: 17vh height. */
-#shand-row {
+#row-bottom {
     height: 17vh;
     margin-top: 1vh;
 }
-/* Let the nshand itself grow to fill the row */
-#shand-row #shand {
+/* Let the tbhand (#hand-bottom) grow to fill the row */
+#row-bottom #hand-bottom {
     height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
 
-/* Card selection in human hand (shand) */
+/* Card selection in human hand (hand-bottom) */
 /* Allow cards to lift above the row without clipping */
-#shand {
+#hand-bottom {
     overflow: visible;
 }
 
-/* §6: South player's persistent namebar inside #shand */
-#shand .shand-namebar {
+/* §6: Reference player's persistent namebar inside #hand-bottom */
+#hand-bottom .reference-hand-namebar {
     position: relative;
     left: auto;
     bottom: auto;
@@ -188,13 +194,13 @@
     max-width: calc(9 * var(--card-width));
 }
 
-#shand .card-container[card-selected="true"] {
+#hand-bottom .card-container[card-selected="true"] {
     transform: translateY(-2vh);
 }
-#shand .card-container[card-selected="true"] .card {
+#hand-bottom .card-container[card-selected="true"] .card {
     box-shadow: 0 0 0.5vh 0.3vh #48f;
 }
-#shand .card-container {
+#hand-bottom .card-container {
     cursor: pointer;
 }
 
@@ -384,14 +390,19 @@
     z-index: 20;
     transition: width 0.2s, background-color 0.3s;
 }
-#desk-north .desk-namebar { bottom: 0; max-width: calc(var(--card-width) * 9); }
+/* §3.1: Align namebar bottom with the centered card-row bottom (not slot bottom)
+   Formula: half the unused vertical space = (slot-row height - card height) / 2 */
+#desk-top .desk-namebar,
+#desk-left .desk-namebar,
+#desk-right .desk-namebar {
+    bottom: calc((20vh - var(--card-height)) / 2);
+}
+#desk-top .desk-namebar { max-width: calc(var(--card-width) * 9); }
 
-/* §1.3: Shift north slot up by one corner-card height when exposed cards are present */
-#desk-north[data-has-exposed] {
+/* §1.3: Shift top slot up by one corner-card height when exposed cards are present */
+#desk-top[data-has-exposed] {
     transform: translateY(calc(var(--card-height) / -3));
 }
-#desk-west .desk-namebar  { bottom: 0; }
-#desk-east .desk-namebar  { bottom: 0; }
 .desk-namebar .game-position-area {
     height: inherit;
     width: calc(var(--card-height) / 4);

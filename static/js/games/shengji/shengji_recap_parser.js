@@ -186,10 +186,10 @@ function readUpg(file) {
       playerNames[(i+1+mainPlayerPosition)%4] = decoder.decode(nameBuffer.slice(i * 20, (i+1)*20));
     }
     handElements = new Array(4);
-    handElements[mainPlayerPosition] = shandElement;
-    handElements[(mainPlayerPosition + 1) %4] = ehandElement;
-    handElements[(mainPlayerPosition + 2) %4] = nhandElement;
-    handElements[(mainPlayerPosition + 3) %4] = whandElement;
+    handElements[mainPlayerPosition] = bottomHandElement;
+    handElements[(mainPlayerPosition + 1) %4] = rightHandElement;
+    handElements[(mainPlayerPosition + 2) %4] = topHandElement;
+    handElements[(mainPlayerPosition + 3) %4] = leftHandElement;
     parseUpgBodyBuffer(bodyBuffer);
     setReferencePlayer(intInfo[0]);
     normalizeMoves(moves);

@@ -184,6 +184,8 @@ const messages_zhCN = {
     east:  '东 (Bot)',
     north: '北 (Bot)',
     west:  '西 (Bot)',
+    youShort: '你',
+    botShort: 'Bot',
   },
 
   // ── Position labels ──
@@ -261,7 +263,7 @@ const messages_zhCN = {
     confirm: '开始对局',
     displayPlaceholder: '显示设置（预留）：结构已保留，后续可加入局内可编辑显示项。',
     tabs: {
-      presets: '预设',
+      table: '牌桌',
       general: '总体',
       scoring: '计分',
       levels: '级设',
@@ -269,6 +271,7 @@ const messages_zhCN = {
     },
     topLevelTabs: {
       game: '游戏设置',
+      seat: '座位',
       display: '显示',
       file: '文件',
       accounts: '账号',
@@ -280,6 +283,7 @@ const messages_zhCN = {
     },
     fields: {
       presetName: '预设规则',
+      tableFormat: '牌桌形式',
       deckCount: '副数',
       autoStrain: '无人亮主时的名目',
       pivotPassMode: '递庄模式',
@@ -302,6 +306,7 @@ const messages_zhCN = {
       mustStopLevels: '必停',
       knockBackLevels: '勾级',
       skipLevels: '跳过',
+      userNaturalPosition: '选座',
       knockBackCondition: '勾回条件',
       gameMode: '循环方式',
       timingPreset: '预设计时方案',
@@ -312,7 +317,7 @@ const messages_zhCN = {
       baseTimeIncrement: '扣底加时',
     },
     presetRuleLabels: {
-      none: '无',
+      custom: '自定义',
       default: '默认（分级必停）',
       highSchool: '校园规则（炒底，初级、JA勾级必打）',
       berkeley: '伯克利规则（炒底，过河，分级必停）',
@@ -349,6 +354,7 @@ const messages_zhCN = {
       sevenThreeFive: '7-3-5',
       eightFourFour: '8-4-4',
       noPreset: '(无)',
+      normalFourPlayer: '普通四人',
       // 级别预设
       skip468: '跳468',
       singleT: '单T抠底',
@@ -370,6 +376,15 @@ const messages_zhCN = {
       singleOrNot:  '单抠2倍，非单一律4倍',
       exponential:  '2的(叠秩 + 连秩 - 1)次方',
       power:        '2 * 叠秩 ^ 连秩',
+    },
+    presetRuleHints: {
+      custom: '',
+      default: '分级必停',
+      highSchool: '炒底，初级、JA勾级必打',
+      berkeley: '炒底，过河，分级必停',
+      experimental: '7-3-5计分，终盘补分',
+      shortLevelRotatePivot: '轮庄，级限20，终盘补分',
+      plain: '无附加规则',
     },
     scoringPresetHint: '上台 ≥ {stage} | 升级 +{level} | 每局升级上限: {limit}',
     levelsPresetHint: '初级: {start} | 必打: {defend} | 必停: {stop} | 勾级: {knockBack}',

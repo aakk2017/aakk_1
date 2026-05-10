@@ -28,7 +28,9 @@
    - Usually loaded after card.css and widgets.css.
    ========================================================= */
 
-/* the top row */
+/* top/bottom row container — Note 59: renamed from .nscontainer to .tbrow.
+   .nscontainer retained as temporary legacy alias for backward compatibility. */
+.tbrow,
 .nscontainer {
     height: var(--card-height);
     width: calc(var(--container-width) - 2vh);
@@ -58,6 +60,9 @@ input[type="file"] {
     height: 3vh;
 }
 
+/* top/bottom hand surface — Note 59: renamed from .nshand to .tbhand.
+   .nshand retained as temporary legacy alias for backward compatibility. */
+.tbhand,
 .nshand {
     height: var(--card-height);
     width: calc(9 * var(--card-width));
@@ -73,21 +78,25 @@ input[type="file"] {
     justify-content: space-between;
 }
 
+/* left/right hand surface — Note 59: renamed from .ewhand to .lrhand.
+   .ewhand retained as temporary legacy alias for backward compatibility. */
+.lrhand,
 .ewhand {
     height: calc(3 * var(--card-height));
     width: calc(4 * var(--card-width));
     overflow: hidden;
 }
+.lrhand .hand,
 .ewhand .hand {
     height: calc(0.5 * var(--card-height));
 }
 .hand:not(:has(~ .hand)) {
     height: var(--card-height);
 }
-#whand .hand {
+#hand-left .hand {
     justify-content: end;
 }
-#ehand .hand {
+#hand-right .hand {
     justify-content: start;
 }
 

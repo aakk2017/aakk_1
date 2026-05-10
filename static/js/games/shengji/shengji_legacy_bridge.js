@@ -323,28 +323,32 @@ function resolveFollow(m, leadInfo) {
   }
 }
 
-function generateEwhandHtmlInClasses() {
+// Note 59a: updated comments to reference new display-coded IDs (#hand-right, #hand-left, #hand-top, #hand-bottom).
+// Generates HTML rows inside left/right hand containers (#hand-right, #hand-left).
+// The old name encoded natural EW positions; the function operates on display-position
+// left/right surfaces, so .lrhand terminology is correct.
+function generateLrhandHtmlInClasses() {
     let eFirstRow = createHandElement("n");
     let wFirstRow = createHandElement("n");
-    ehandElement.appendChild(eFirstRow);
-    whandElement.appendChild(wFirstRow);
+    rightHandElement.appendChild(eFirstRow);
+    leftHandElement.appendChild(wFirstRow);
     if(strain === 4) {
         for(let i = 3; i >= 0; i--) {
             let eRow = createHandElement(numberToDivisionName[i]);
             let wRow = createHandElement(numberToDivisionName[i]);
-            ehandElement.appendChild(eRow);
-            whandElement.appendChild(wRow);
+            rightHandElement.appendChild(eRow);
+            leftHandElement.appendChild(wRow);
         }
     } else {
         let eSecondRow = createHandElement("t");
         let wSecondRow = createHandElement("t");
-        ehandElement.appendChild(eSecondRow);
-        whandElement.appendChild(wSecondRow);
+        rightHandElement.appendChild(eSecondRow);
+        leftHandElement.appendChild(wSecondRow);
         for(let i = (strain+3)%4; i !== strain; i = (i+3)%4) {
             let eRow = createHandElement(numberToDivisionName[i]);
             let wRow = createHandElement(numberToDivisionName[i]);
-            ehandElement.appendChild(eRow);
-            whandElement.appendChild(wRow);
+            rightHandElement.appendChild(eRow);
+            leftHandElement.appendChild(wRow);
         }
     }
 }
@@ -353,7 +357,7 @@ function renderHands4() {
     for(let hand of handElements) {
       hand.innerHTML = '';
     }
-    generateEwhandHtmlInClasses();
+    generateLrhandHtmlInClasses();
     let nRow = createHandElement("n");
     let sRow = createHandElement("n");
     for(const card of initHands[(mainPlayerPosition + 2) %4]) {
@@ -362,16 +366,16 @@ function renderHands4() {
     for(const card of initHands[mainPlayerPosition]) {
       sRow.appendChild(createCardContainer(card));
     }
-    nhandElement.appendChild(nRow);
-    shandElement.appendChild(sRow);
+    topHandElement.appendChild(nRow);
+    bottomHandElement.appendChild(sRow);
     for(const card of initHands[(mainPlayerPosition + 3) %4]) {
       let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
-      let row = whandElement.querySelector("[sort-group='" + sortGroup + "']");
+      let row = leftHandElement.querySelector("[sort-group='" + sortGroup + "']");
       row.appendChild(createCardContainer(card));
     }
     for(const card of initHands[(mainPlayerPosition + 1) %4]) {
       let sortGroup = card.order >= 12 ? "n" : numberToDivisionName[card.division];
-      let row = ehandElement.querySelector("[sort-group='" + sortGroup + "']");
+      let row = rightHandElement.querySelector("[sort-group='" + sortGroup + "']");
       row.appendChild(createCardContainer(card));
     }
     for(let i = 0; i < 4; i++) {

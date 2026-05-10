@@ -529,16 +529,22 @@
         return normalized;
     }
 
+    function normalizeUserNaturalPosition(value) {
+        return ['east', 'north', 'west', 'south'].includes(value) ? value : 'east';
+    }
+
     function resolveGameSettings(input) {
         let ruleConfig = resolveRuleConfig(input || {});
         let displaySettings = {
             placeholder: true,
             theme: 'default',
             cardSize: 'default',
+            userNaturalPosition: 'east',
         };
         if (input && input.displayOverrides) {
             displaySettings = { ...displaySettings, ...input.displayOverrides };
         }
+        displaySettings.userNaturalPosition = normalizeUserNaturalPosition(displaySettings.userNaturalPosition);
         return {
             presetName: ruleConfig.presetName,
             ruleConfig,

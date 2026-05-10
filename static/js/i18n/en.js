@@ -184,6 +184,8 @@ const messages_en = {
     east:  'East (Bot)',
     north: 'North (Bot)',
     west:  'West (Bot)',
+    youShort: 'You',
+    botShort: 'Bot',
   },
 
   // ── Position labels ──
@@ -261,7 +263,7 @@ const messages_en = {
     confirm: 'Start Game',
     displayPlaceholder: 'Display settings (reserved): structure ready, in-game editable options can be added later.',
     tabs: {
-      presets: 'Presets',
+      table: 'Table',
       general: 'General',
       scoring: 'Scoring',
       levels: 'Levels',
@@ -269,6 +271,7 @@ const messages_en = {
     },
     topLevelTabs: {
       game: 'Game Settings',
+      seat: 'Seat',
       display: 'Display',
       file: 'File',
       accounts: 'Accounts',
@@ -280,6 +283,7 @@ const messages_en = {
     },
     fields: {
       presetName: 'Preset rules',
+      tableFormat: 'Table format',
       deckCount: 'deck count',
       autoStrain: 'strain when nobody declared',
       pivotPassMode: 'pivot-pass mode',
@@ -301,6 +305,7 @@ const messages_en = {
       mustDefendLevels: 'must-defend',
       mustStopLevels: 'must-stop',
       knockBackLevels: 'knock-back',
+      userNaturalPosition: 'Your seat',
       knockBackCondition: 'knock-back condition',
       gameMode: 'level cycle mode',
       timingPreset: 'preset timing scheme',
@@ -311,7 +316,7 @@ const messages_en = {
       baseTimeIncrement: 'base time increment',
     },
     presetRuleLabels: {
-      none: 'none',
+      custom: 'custom',
       default: 'default (must stop 5XK)',
       highSchool: 'high-school (overbase, must defend starting level and knock-back JA)',
       berkeley: 'Berkeley (overbase, crossing, must stop 5XK)',
@@ -348,6 +353,7 @@ const messages_en = {
       sevenThreeFive: '7-3-5',
       eightFourFour: '8-4-4',
       noPreset: '(none)',
+      normalFourPlayer: 'normal 4P',
       // levels presets
       slow: 'Slow',
       short: 'Short',
@@ -370,6 +376,15 @@ const messages_en = {
       singleOrNot:  '2 for single, 4 for all structures',
       exponential:  '2 ^ (copy + span - 1) for structures',
       power:        '2 * copy ^ span',
+    },
+    presetRuleHints: {
+      custom: '',
+      default: 'must stop 5XK',
+      highSchool: 'overbase, must defend starting level and knock-back JA',
+      berkeley: 'overbase, crossing, must stop 5XK',
+      experimental: '7-3-5 scoring, ending compensation',
+      shortLevelRotatePivot: 'rotate-pivot, level threshold 20, end.comp.',
+      plain: 'no additional rules',
     },
     scoringPresetHint: 'Stage ≥ {stage} | Level +{level} | Limit: {limit}',
     levelsPresetHint: 'Start: {start} | Defend: {defend} | Stop: {stop} | Knock-back: {knockBack}',

@@ -12,21 +12,24 @@
 // ---------------------------------------------------------------------------
 // DOM references
 // ---------------------------------------------------------------------------
-const gShand   = document.getElementById('shand');
+// gReferenceHandSurface: the bottom display hand surface — reference player's interactive hand.
+const gReferenceHandSurface = document.getElementById('hand-bottom');
 
 const gDeskSlots = [
-    document.getElementById('desk-south'),
-    document.getElementById('desk-east'),
-    document.getElementById('desk-north'),
-    document.getElementById('desk-west')
+    document.getElementById('desk-bottom'),
+    document.getElementById('desk-right'),
+    document.getElementById('desk-top'),
+    document.getElementById('desk-left')
 ];
+const gDeskDisplaySlots = {
+    bottom: gDeskSlots[0],
+    right: gDeskSlots[1],
+    top: gDeskSlots[2],
+    left: gDeskSlots[3],
+};
 
 const gDeskCenter  = document.getElementById('desk-center');
 const gDeskInfo    = document.getElementById('desk-center-info');
-const gLabelNorth  = document.getElementById('label-north');
-const gLabelWest   = document.getElementById('label-west');
-const gLabelEast   = document.getElementById('label-east');
-const gLabelSouth  = document.getElementById('label-south');
 const gBtnNewGame  = document.getElementById('btn-new-game');
 const gBtnPlay     = document.getElementById('btn-play');
 const gBtnPause    = document.getElementById('btn-pause');
@@ -35,9 +38,6 @@ const gGameActions = document.getElementById('game-actions');
 const gDeclareMatrix = document.getElementById('declare-matrix');
 const gDeclBtnsSingle = [0, 1, 2, 3, 4].map(i => document.getElementById('declare-btn-s' + i));
 const gDeclBtnsDouble = [0, 1, 2, 3, 4].map(i => document.getElementById('declare-btn-d' + i));
-const gBotCountEast  = document.getElementById('count-east');
-const gBotCountNorth = document.getElementById('count-north');
-const gBotCountWest  = document.getElementById('count-west');
 const gPhaseInfo   = document.getElementById('game-phase-info');
 const gGameLog     = document.getElementById('game-log');
 const gStatusbar   = document.getElementById('statusbar');
@@ -90,15 +90,120 @@ const gBtnPauseQuitCancel = document.getElementById('btn-pause-quit-cancel');
 const gBtnPauseQuitConfirm = document.getElementById('btn-pause-quit-confirm');
 
 // ---------------------------------------------------------------------------
-// Test mode: human controls both South (0) and East (1)
+// 4P display-position mapping
+// ---------------------------------------------------------------------------
+const FOUR_P_NATURAL_POSITIONS = ['south', 'east', 'north', 'west'];
+const FOUR_P_REFERENCE_POSITIONS = ['reference', 'afterhand', 'opposite', 'forehand'];
+const FOUR_P_REFERENCE_TO_DISPLAY_POSITION = {
+    reference: 'bottom',
+    afterhand: 'right',
+    opposite: 'top',
+    forehand: 'left',
+};
+const FOUR_P_DISPLAY_TO_REFERENCE_POSITION = {
+    bottom: 'reference',
+    right: 'afterhand',
+    top: 'opposite',
+    left: 'forehand',
+};
+
+function normalize4PUserNaturalPosition(value) {
+    return ['east', 'north', 'west', 'south'].includes(value) ? value : 'east';
+}
+
+function getActorSeatFor4PNaturalPosition(naturalPosition) {
+    let normalized = normalize4PUserNaturalPosition(naturalPosition);
+    let seat = FOUR_P_NATURAL_POSITIONS.indexOf(normalized);
+    return seat >= 0 ? seat : 1;
+}
+
+function getNaturalPositionFor4PActorSeat(actorSeat) {
+    let seat = Number(actorSeat);
+    return FOUR_P_NATURAL_POSITIONS[seat] || 'east';
+}
+
+function getReferencePositionFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+    let seat = Number(actorSeat);
+    let reference = Number(referenceActorSeat);
+    if (!Number.isInteger(seat) || !Number.isInteger(reference)) return 'reference';
+    return FOUR_P_REFERENCE_POSITIONS[(seat - reference + NUM_PLAYERS) % NUM_PLAYERS];
+}
+
+function getDisplayPositionForReferencePosition(referencePosition) {
+    return FOUR_P_REFERENCE_TO_DISPLAY_POSITION[referencePosition] || 'bottom';
+}
+
+function getDisplayPositionFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+    return getDisplayPositionForReferencePosition(getReferencePositionFor4PActorSeat(actorSeat, referenceActorSeat));
+}
+
+function getActorSeatFor4PDisplayPosition(displayPosition, referenceActorSeat = HUMAN_PLAYER) {
+    let referencePosition = FOUR_P_DISPLAY_TO_REFERENCE_POSITION[displayPosition] || 'reference';
+    let offset = FOUR_P_REFERENCE_POSITIONS.indexOf(referencePosition);
+    let reference = Number(referenceActorSeat);
+    if (!Number.isInteger(reference) || offset < 0) return getActorSeatFor4PNaturalPosition('east');
+    return (reference + offset) % NUM_PLAYERS;
+}
+
+function getReferencePositionForDisplayPosition(displayPosition) {
+    return FOUR_P_DISPLAY_TO_REFERENCE_POSITION[displayPosition] || 'reference';
+}
+
+function getActorSeatFor4PReferencePosition(referencePosition, referenceActorSeat = HUMAN_PLAYER) {
+    let offset = FOUR_P_REFERENCE_POSITIONS.indexOf(referencePosition);
+    let reference = Number(referenceActorSeat);
+    if (!Number.isInteger(reference) || offset < 0) return reference;
+    return (reference + offset) % NUM_PLAYERS;
+}
+
+function getHandSurfaceForDisplayPosition(displayPosition) {
+    // Only 'bottom' has an interactive hand surface in 4P; top/left/right are desk-slot only.
+    return displayPosition === 'bottom' ? gReferenceHandSurface : null;
+}
+
+function getNamebarContainerFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+    let slot = getDeskSlotFor4PActorSeat(actorSeat, referenceActorSeat);
+    return slot ? slot.querySelector('.desk-namebar') : null;
+}
+
+function getDeskSlotForDisplayPosition(displayPosition) {
+    return gDeskDisplaySlots[displayPosition] || null;
+}
+
+function getDeskSlotFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+    return getDeskSlotForDisplayPosition(getDisplayPositionFor4PActorSeat(actorSeat, referenceActorSeat));
+}
+
+for (let position in gDeskDisplaySlots) {
+    if (gDeskDisplaySlots[position]) gDeskDisplaySlots[position].setAttribute('data-display-position', position);
+}
+
+function buildHumanPlayerSetForCurrentMode() {
+    let primary = Number.isInteger(Number(HUMAN_PLAYER)) ? Number(HUMAN_PLAYER) : getActorSeatFor4PNaturalPosition('east');
+    if (!TEST_MODE) return new Set([primary]);
+    return new Set([primary, (primary + 1) % NUM_PLAYERS]);
+}
+
+function refreshHumanPlayersForMode() {
+    HUMAN_PLAYERS = buildHumanPlayerSetForCurrentMode();
+}
+
+function applyUserNaturalPositionFor4P(userNaturalPosition) {
+    HUMAN_PLAYER = getActorSeatFor4PNaturalPosition(userNaturalPosition);
+    activeHumanPlayer = HUMAN_PLAYER;
+    refreshHumanPlayersForMode();
+}
+
+// ---------------------------------------------------------------------------
+// Test mode: human controls the selected reference seat, plus its afterhand.
 // ---------------------------------------------------------------------------
 let TEST_MODE = false;
-let HUMAN_PLAYERS = TEST_MODE ? new Set([0, 1]) : new Set([0]);
+let HUMAN_PLAYERS = buildHumanPlayerSetForCurrentMode();
 function isHumanControlled(player) { return HUMAN_PLAYERS.has(player); }
 
 function toggleTestMode() {
     TEST_MODE = !TEST_MODE;
-    HUMAN_PLAYERS = TEST_MODE ? new Set([0, 1]) : new Set([0]);
+    refreshHumanPlayersForMode();
     const btn = document.getElementById('btn-toggle-test');
     if (btn) btn.textContent = t(TEST_MODE ? 'buttons.testModeOn' : 'buttons.testModeOff');
 }
@@ -138,8 +243,8 @@ let gFCInteraction = null;
 
 // Settings dialog state (note 34 / 35c)
 let gSettingsMode = 'create'; // 'create' | 'inspect'
-let gSettingsActiveTab = 'presets';
-let gSettingsTopLevelTab = 'game'; // 'game' | 'display' | 'file' | 'accounts'
+let gSettingsActiveTab = 'table';
+let gSettingsTopLevelTab = 'game'; // 'game' | 'seat' | 'display' | 'file' | 'accounts'
 let gSettingsDraftRuleConfig = null;
 let gSettingsDraftDisplaySettings = { placeholder: true };
 let gResolvedGameSettings = null;
@@ -386,9 +491,16 @@ function updateAttackersStreakDisplay() {
 // Persistent name bars (§3)
 // ---------------------------------------------------------------------------
 function initPersistentNamebars() {
+    [gReferenceHandSurface, ...gDeskSlots].forEach(container => {
+        if (container) container.querySelectorAll('.desk-namebar').forEach(el => el.remove());
+    });
+    gDeskNamebars = [];
     // Create persistent name bars for all players
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        let container = (p === HUMAN_PLAYER) ? gShand : gDeskSlots[p];
+        let isReferencePlayer = (p === HUMAN_PLAYER);
+        let naturalPosition = getNaturalPositionFor4PActorSeat(p);
+        let displayPosition = isReferencePlayer ? 'bottom' : getDisplayPositionFor4PActorSeat(p);
+        let container = isReferencePlayer ? gReferenceHandSurface : getDeskSlotFor4PActorSeat(p);
         if (!container) continue;
 
         // Remove any old persistent namebar
@@ -396,8 +508,12 @@ function initPersistentNamebars() {
         if (old) old.remove();
 
         let nb = document.createElement('div');
-        nb.className = (p === HUMAN_PLAYER) ? 'desk-namebar shand-namebar' : 'desk-namebar';
+        nb.className = isReferencePlayer ? 'desk-namebar reference-hand-namebar' : 'desk-namebar';
         nb.setAttribute('data-status', 'idle');
+        nb.setAttribute('data-actor-seat', String(p));
+        nb.setAttribute('data-natural-position', naturalPosition);
+        nb.setAttribute('data-display-position', displayPosition);
+        nb.setAttribute('data-reference-position', getReferencePositionFor4PActorSeat(p));
 
         let posArea = document.createElement('div');
         posArea.className = 'game-position-area';
@@ -406,11 +522,10 @@ function initPersistentNamebars() {
 
         let nameArea = document.createElement('div');
         nameArea.className = 'name-area';
-        let pName = PLAYER_NAMES[p].replace(/^[\u4e1c\u5357\u897f\u5317]\s*\(?/, '').replace(/\)?$/, '');
-        nameArea.textContent = pName;
+        nameArea.textContent = isReferencePlayer ? t('players.youShort') : t('players.botShort');
         nb.appendChild(nameArea);
 
-        if (p !== HUMAN_PLAYER) {
+        if (!isReferencePlayer) {
             // Exposed-card preview container (non-human only)
             let preview = document.createElement('div');
             preview.className = 'exposed-preview';
@@ -447,7 +562,8 @@ function updateExposedPreview(player) {
     let exposed = game.exposedCards && game.exposedCards[player];
     if (!exposed || Object.keys(exposed).length === 0) {
         preview.classList.remove('has-exposed');
-        if (gDeskSlots[player]) gDeskSlots[player].removeAttribute('data-has-exposed');
+        let emptySlot = getDeskSlotFor4PActorSeat(player);
+        if (emptySlot) emptySlot.removeAttribute('data-has-exposed');
         return;
     }
     // Build a set of FC-selected cardIds and the FC mode (if active for this player)
@@ -468,7 +584,8 @@ function updateExposedPreview(player) {
         }
     }
     preview.classList.add('has-exposed');
-    if (gDeskSlots[player]) gDeskSlots[player].setAttribute('data-has-exposed', '');
+    let exposedSlot = getDeskSlotFor4PActorSeat(player);
+    if (exposedSlot) exposedSlot.setAttribute('data-has-exposed', '');
 }
 
 function resetAllNamebars() {
@@ -503,7 +620,7 @@ function setCrossingClaimControlsVisible(visible) {
 }
 
 function showDeskEventMarker(player, text, scopeKey) {
-    let slot = gDeskSlots[player];
+    let slot = getDeskSlotFor4PActorSeat(player);
     if (!slot) return;
     slot.querySelectorAll('.basing-pass-marker[data-marker-scope="' + scopeKey + '"]').forEach(el => el.remove());
     let marker = document.createElement('div');
@@ -515,7 +632,7 @@ function showDeskEventMarker(player, text, scopeKey) {
 
 function clearDeskEventMarkersByScope(scopeKey) {
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        let slot = gDeskSlots[p];
+        let slot = getDeskSlotFor4PActorSeat(p);
         if (!slot) continue;
         slot.querySelectorAll('.basing-pass-marker[data-marker-scope="' + scopeKey + '"]').forEach(el => el.remove());
     }
@@ -566,7 +683,7 @@ function renderAllHands() {
 function renderHand(player) {
     if (!isHumanControlled(player)) return;
     if (player !== activeHumanPlayer) return;
-    let el = gShand;
+    let el = gReferenceHandSurface;
     // Preserve persistent namebar; clear only hand content
     let existingNb = el.querySelector('.desk-namebar');
     el.innerHTML = '';
@@ -715,19 +832,6 @@ function updatePlayButton() {
 // Desk rendering
 // ---------------------------------------------------------------------------
 
-/**
- * Populate N/W/E player name labels in desk slots.
- * South (human) has no label — the namebar on shand serves that purpose.
- * Called once per game start (labels remain until next game).
- */
-function initDeskLabels() {
-    // Players: 0=South(human), 1=East, 2=North, 3=West
-    if (gLabelNorth) gLabelNorth.textContent = PLAYER_NAMES[2];
-    if (gLabelWest)  gLabelWest.textContent  = PLAYER_NAMES[3];
-    if (gLabelEast)  gLabelEast.textContent  = PLAYER_NAMES[1];
-    if (gLabelSouth) gLabelSouth.textContent = PLAYER_NAMES[0];
-}
-
 function clearDesk() {
     for (let i = 0; i < gDeskSlots.length; i++) {
         let slot = gDeskSlots[i];
@@ -763,7 +867,8 @@ function showBasingPassMarker(player) {
 }
 
 function renderDeskCards(player, cards) {
-    let slot = gDeskSlots[player];
+    let slot = getDeskSlotFor4PActorSeat(player);
+    if (!slot) return;
     // Remove previous cards (not persistent namebar)
     slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
 
@@ -790,7 +895,8 @@ function renderDeskCards(player, cards) {
 function highlightActivePlayer(player) {
     // Use name bar breathing color for all players including reference player (§6)
     for (let i = 0; i < NUM_PLAYERS; i++) {
-        gDeskSlots[i].removeAttribute('data-active');
+        let slot = getDeskSlotFor4PActorSeat(i);
+        if (slot) slot.removeAttribute('data-active');
         if (gDeskNamebars[i] && gDeskNamebars[i].getAttribute('data-status') === 'on-play') {
             gDeskNamebars[i].setAttribute('data-status', 'idle');
         }
@@ -910,10 +1016,7 @@ function refreshPauseButtonState() {
 }
 
 function seatToPauseBoxPosition(seat) {
-    if (seat === 0) return 'bottom';
-    if (seat === 1) return 'right';
-    if (seat === 2) return 'top';
-    return 'left';
+    return getDisplayPositionFor4PActorSeat(seat, HUMAN_PLAYER);
 }
 
 function getPauseBoxStateMap(sourceBySeat) {
@@ -1489,7 +1592,8 @@ function showCenterTimer(seconds) {
  */
 function showTimerOverlay(player) {
     removeTimerOverlay();
-    let slot = gDeskSlots[player];
+    let slot = getDeskSlotFor4PActorSeat(player);
+    if (!slot) return;
     let overlay = document.createElement('div');
     overlay.className = 'timer-overlay';
     let timingMode = getTimingModeForRuntime();
@@ -1804,6 +1908,7 @@ function autoPlayAsBot(player) {
 
 function startNewGame() {
     ensureResolvedSettings();
+    applyUserNaturalPositionFor4P(gResolvedGameSettings.displaySettings && gResolvedGameSettings.displaySettings.userNaturalPosition);
 
     // Clean up any in-progress dealing timer
     if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
@@ -1826,7 +1931,6 @@ function startNewGame() {
     clearLog();
     clearSelection();
     clearDesk();
-    initDeskLabels();
     clearBotDealCounts();
     gDeclareMatrix.style.display = 'none';
     hideCountingDialog();
@@ -1891,7 +1995,7 @@ function startNewGame() {
             (Number.isInteger(v) && v >= 0) ? v : 0
         );
     }
-    game.displaySettings = { ...(gResolvedGameSettings.displaySettings || { placeholder: true }) };
+    game.displaySettings = { placeholder: true, userNaturalPosition: 'east', ...(gResolvedGameSettings.displaySettings || {}) };
     refreshTopLeftSeatAndLevelPositionBoxFromGameState();
 
     // Reset won counters and refresh drawer only after authoritative new-frame state reset.
@@ -3769,7 +3873,8 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
 
     // 2) Show all intended cards on desk, with revoked cards highlighted
     let revokedIds = new Set(fm.revokedCards.map(c => c.cardId));
-    let slot = gDeskSlots[player];
+    let slot = getDeskSlotFor4PActorSeat(player);
+    if (!slot) return;
     slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
     let sorted = [...allIntendedCards];
     engineSortHand(sorted);
@@ -3860,8 +3965,8 @@ function humanPlayCards() {
 // ---------------------------------------------------------------------------
 
 const SETTINGS_FIELDS_BY_TAB = {
-    presets: ['presetName'],
-    general: ['deckCount', 'autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings', 'pivotPassMode'],
+    table: ['tableFormat', 'deckCount', 'pivotPassMode', 'presetName'],
+    general: ['autoStrain', 'allowOverbase', 'overbaseRestrictions', 'attackersSelfBaseHalfMultiplier', 'failedMultiplayHandling', 'multiplayCompensationAmount', 'allowCrossings'],
     scoring: ['scoringPreset', 'endingCompensation', 'endingCompensationUnit', 'stageThreshold', 'levelThreshold', 'levelUpLimitPerFrame', 'baseMultiplierScheme'],
     levels: ['levelsPreset', 'startLevel', 'mustDefendLevels', 'mustStopLevels', 'knockBackLevels', 'skipLevels', 'knockBackConditionMode', 'knockBackTakeStageRequired', 'nonSingleKnockBackTwoSteps', 'gameMode'],
     timing: ['timingPreset', 'timingMode', 'playShotClock', 'baseShotClock', 'bankTime', 'baseTimeIncrement'],
@@ -3883,8 +3988,8 @@ const SETTINGS_SELECT_OPTIONS = {
     timingMode: ['shot + bank', 'bank-time-only'],
 };
 
-const PRESET_RULE_RADIO_OPTIONS = [
-    { value: '', labelKey: 'none' },
+const PRESET_RULE_DROPDOWN_OPTIONS = [
+    { value: 'custom', labelKey: 'custom' },
     { value: 'default', labelKey: 'default' },
     { value: 'high-school', labelKey: 'highSchool' },
     { value: 'Berkeley', labelKey: 'berkeley' },
@@ -3893,17 +3998,18 @@ const PRESET_RULE_RADIO_OPTIONS = [
     { value: 'short-level rotate-pivot', labelKey: 'shortLevelRotatePivot' },
 ];
 
-const MAIN_PRESET_BUILTIN_NAMES = PRESET_RULE_RADIO_OPTIONS.map(opt => opt.value).filter(v => v !== '');
+const MAIN_PRESET_BUILTIN_NAMES = PRESET_RULE_DROPDOWN_OPTIONS.map(opt => opt.value).filter(v => v !== 'custom');
 const MAIN_PRESET_COMPARISON_FIELDS = [
-    'deckCount',
+    // 'deckCount' and 'pivotPassMode' are table-level fields (independent);
+    // they are not included in rule-bundle comparison (see TABLE_LEVEL_FIELDS).
     'autoStrain',
-    'pivotPassMode',
     'allowOverbase',
     'overbaseRestrictions',
     'allowCrossings',
     'failedMultiplayHandling',
     'multiplayCompensationAmount',
-    'scoringPreset',
+    // 'scoringPreset' is a derived label updated by syncScoringPresetLabel; individual
+    // scoring fields below are the authoritative comparison values.
     'countingSystem',
     'endingCompensation',
     'endingCompensationUnit',
@@ -3927,6 +4033,21 @@ const MAIN_PRESET_COMPARISON_FIELDS = [
     'gameMode',
     'doubleDeclarationOrdering',
 ];
+
+// Table-level fields are independent from the rule bundle and are not part of
+// rule-bundle comparison for preset matching.  Each preset may declare
+// table-level constraints; a preset is "enabled" only when those constraints
+// are satisfied by the current draft config.
+const TABLE_LEVEL_FIELDS = ['deckCount', 'tableFormat', 'pivotPassMode'];
+
+// Per-preset table-level constraints.  Key = preset value string.
+// Value = function(draftCfg) → bool.  Returns true if the preset is compatible
+// with the current table-level settings and may be considered for matching.
+const MAIN_PRESET_CONSTRAINTS = {
+    // short-level rotate-pivot requires rotate-pivot pivot-pass mode.
+    'short-level rotate-pivot': cfg => !!(cfg && cfg.pivotPassMode === 'rotate-pivot'),
+};
+
 let gMainPresetSyncGuard = false;
 
 function cloneRuleConfig(cfg) {
@@ -3947,7 +4068,7 @@ function getDefaultResolvedSettings() {
     return {
         presetName: 'default',
         ruleConfig: engineBuildConfig('default'),
-        displaySettings: { placeholder: true },
+        displaySettings: { placeholder: true, userNaturalPosition: 'east' },
     };
 }
 
@@ -4022,10 +4143,11 @@ function renderLevelWithCycle(hostElement, level, cycleIndex) {
 }
 
 function getPivotAndAllyPositions(pivotSeat) {
-    if (pivotSeat === 0) return { pivotPos: 'bottom', allyPos: 'top' };
-    if (pivotSeat === 1) return { pivotPos: 'right', allyPos: 'left' };
-    if (pivotSeat === 2) return { pivotPos: 'top', allyPos: 'bottom' };
-    return { pivotPos: 'left', allyPos: 'right' };
+    let referenceActorSeat = Number.isInteger(Number(HUMAN_PLAYER)) ? Number(HUMAN_PLAYER) : getActorSeatFor4PNaturalPosition('east');
+    return {
+        pivotPos: getDisplayPositionFor4PActorSeat(pivotSeat, referenceActorSeat),
+        allyPos: getDisplayPositionFor4PActorSeat((Number(pivotSeat) + 2) % NUM_PLAYERS, referenceActorSeat),
+    };
 }
 
 function isUndefinedPivot(pivotSeat) {
@@ -4049,24 +4171,34 @@ function renderLevelPositionSquare(host, options) {
     square.className = 'level-position-square' + (options.squareClassName ? (' ' + options.squareClassName) : '');
     if (options.squareId) square.id = options.squareId;
 
-    let axisLevelByPosition = {
-        top: Number(options.nsLevel),
-        bottom: Number(options.nsLevel),
-        left: Number(options.ewLevel),
-        right: Number(options.ewLevel),
-    };
-    let axisCycleByPosition = {
-        top: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 0),
-        bottom: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 0),
-        left: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 1),
-        right: getSideCycleIndex([options.nsCycleIndex, options.ewCycleIndex], 1),
-    };
+    let referenceActorSeat = Number.isInteger(Number(options.referenceActorSeat))
+        ? Number(options.referenceActorSeat)
+        : HUMAN_PLAYER;
+    let levelFallback = Number.isInteger(Number(options.nsLevel)) ? Number(options.nsLevel) : 0;
+    let levelsByActor = Array.isArray(options.levelsByActor)
+        ? options.levelsByActor
+        : [Number(options.nsLevel), Number(options.ewLevel), Number(options.nsLevel), Number(options.ewLevel)];
+    let cycleIndexBySide = Array.isArray(options.cycleIndexBySide)
+        ? options.cycleIndexBySide
+        : [options.nsCycleIndex, options.ewCycleIndex];
+
+    let axisLevelByPosition = {};
+    let axisCycleByPosition = {};
+    ['top', 'right', 'bottom', 'left'].forEach((position) => {
+        let actorSeat = getActorSeatFor4PDisplayPosition(position, referenceActorSeat);
+        let actorLevel = Number(levelsByActor[actorSeat]);
+        axisLevelByPosition[position] = Number.isInteger(actorLevel) ? actorLevel : levelFallback;
+        axisCycleByPosition[position] = getSideCycleIndex(cycleIndexBySide, actorSeat % 2);
+    });
 
     // Check if pivot is undefined
     let pivotUndefined = isUndefinedPivot(options.pivotSeat);
     let seat = Number(options.pivotSeat);
     let pivotSeat = (!pivotUndefined && typeof isPivotResolved === 'function' && isPivotResolved(seat)) ? seat : undefined;
-    let markers = pivotUndefined ? { pivotPos: undefined, allyPos: undefined } : getPivotAndAllyPositions(pivotSeat);
+    let markers = pivotUndefined ? { pivotPos: undefined, allyPos: undefined } : {
+        pivotPos: getDisplayPositionFor4PActorSeat(pivotSeat, referenceActorSeat),
+        allyPos: getDisplayPositionFor4PActorSeat((pivotSeat + 2) % NUM_PLAYERS, referenceActorSeat),
+    };
 
     ['top', 'right', 'bottom', 'left'].forEach((position) => {
         let section = document.createElement('div');
@@ -4110,14 +4242,18 @@ function getCurrentFrameSideLevelAndCycleState() {
         : [0, 0];
     let pivotSeat = (game && typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) ? game.pivot : UNDETERMINED_PIVOT;
 
-    let nsLevel = Number.isInteger(Number(levels[0])) ? Number(levels[0]) : levelFallback;
-    let ewLevel = Number.isInteger(Number(levels[1])) ? Number(levels[1]) : levelFallback;
+    let levelsByActor = [];
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        let actorLevel = Number(levels[seat]);
+        levelsByActor[seat] = Number.isInteger(actorLevel) ? actorLevel : levelFallback;
+    }
 
     return {
-        nsLevel,
-        ewLevel,
-        nsCycleIndex: getSideCycleIndex(cycleBySide, 0),
-        ewCycleIndex: getSideCycleIndex(cycleBySide, 1),
+        levelsByActor,
+        cycleIndexBySide: [
+            getSideCycleIndex(cycleBySide, 0),
+            getSideCycleIndex(cycleBySide, 1),
+        ],
         pivotSeat,
     };
 }
@@ -4141,11 +4277,10 @@ function renderSeatsHoverLevelPositionSquare() {
         squareId: 'seats-toggle-level-position-square',
         squareClassName: 'seats-toggle-level-position-square',
         triangleClassName: 'seats-toggle-level-position-triangle',
-        nsLevel: state.nsLevel,
-        ewLevel: state.ewLevel,
-        nsCycleIndex: state.nsCycleIndex,
-        ewCycleIndex: state.ewCycleIndex,
+        levelsByActor: state.levelsByActor,
+        cycleIndexBySide: state.cycleIndexBySide,
         pivotSeat: state.pivotSeat,
+        referenceActorSeat: HUMAN_PLAYER,
     });
 }
 
@@ -4184,6 +4319,7 @@ function settingsOptionLabel(value) {
         'Infinity': 'unlimited',
         'none': 'none',
         '': 'noPreset',
+        'custom': 'custom',
         'default': 'default',
         'experimental': 'experimental',
         'plain': 'plain',
@@ -4212,7 +4348,88 @@ function settingsOptionLabel(value) {
     return t('settingsDialog.options.' + key);
 }
 
+function getDraftUserNaturalPosition() {
+    let source = gSettingsDraftDisplaySettings || {};
+    return normalize4PUserNaturalPosition(source.userNaturalPosition);
+}
+
+function setDisplaySettingFieldValue(field, value) {
+    if (!gSettingsDraftDisplaySettings) gSettingsDraftDisplaySettings = { placeholder: true };
+    if (field === 'userNaturalPosition') {
+        gSettingsDraftDisplaySettings.userNaturalPosition = normalize4PUserNaturalPosition(value);
+    } else {
+        gSettingsDraftDisplaySettings[field] = value;
+    }
+}
+
+function settingsUserNaturalPositionLabel(value) {
+    let actorSeat = getActorSeatFor4PNaturalPosition(value);
+    return POSITION_LABELS[actorSeat];
+}
+
+function createUserNaturalPositionSelector(readOnly) {
+    let wrapper = document.createElement('div');
+    wrapper.className = 'settings-field';
+
+    let label = document.createElement('label');
+    label.textContent = t('settingsDialog.fields.userNaturalPosition');
+    wrapper.appendChild(label);
+
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    let current = getDraftUserNaturalPosition();
+    for (let value of ['east', 'north', 'west', 'south']) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'userNaturalPosition';
+        radio.value = value;
+        radio.checked = (value === current);
+        radio.disabled = !!readOnly;
+        radio.setAttribute('data-settings-field', 'userNaturalPosition');
+
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setDisplaySettingFieldValue('userNaturalPosition', value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(settingsUserNaturalPositionLabel(value)));
+        radioGroup.appendChild(radioLabel);
+    }
+
+    wrapper.appendChild(radioGroup);
+    return wrapper;
+}
+
+function renderSeatSettingsPanel(container, readOnly) {
+    if (!container) return;
+    container.innerHTML = '';
+    let grid = document.createElement('div');
+    grid.className = 'settings-grid settings-display-grid';
+    grid.appendChild(createUserNaturalPositionSelector(readOnly));
+    container.appendChild(grid);
+}
+
+function renderDisplaySettingsPanel(container, readOnly) {
+    if (!container) return;
+    container.innerHTML = '';
+    let p = document.createElement('p');
+    p.textContent = t('settingsDialog.placeholders.display');
+    p.style.padding = '1em';
+    container.appendChild(p);
+}
+
 function getRuleConfigFieldValue(field) {
+    if (field === 'tableFormat') {
+        return (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal-4P';
+    }
     if (field in (gSettingsDraftRuleConfig.timing || {})) {
         return gSettingsDraftRuleConfig.timing[field];
     }
@@ -4294,6 +4511,14 @@ function snapshotsExactMatch(a, b) {
     return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// Returns true when the given preset's table-level constraints are satisfied
+// by the current draft config.  Presets with no constraints are always enabled.
+function isPresetEnabled(presetName, cfg) {
+    const constraint = MAIN_PRESET_CONSTRAINTS[presetName];
+    if (typeof constraint === 'function') return constraint(cfg);
+    return true;
+}
+
 function syncMainPresetSelectionByExactMatch() {
     if (!gSettingsDraftRuleConfig) return;
 
@@ -4301,9 +4526,12 @@ function syncMainPresetSelectionByExactMatch() {
     if (!normalizedCurrent) return;
     let currentSnap = buildMainPresetComparisonSnapshot(normalizedCurrent);
 
-    let matched = '';
+    let matched = 'custom';
     for (let presetName of MAIN_PRESET_BUILTIN_NAMES) {
         if (!window.shengjiSettingsPresets || !window.shengjiSettingsPresets[presetName]) continue;
+        // Skip presets whose table-level constraints are not satisfied by the
+        // current draft config (e.g. short-level rotate-pivot requires rotate-pivot).
+        if (!isPresetEnabled(presetName, gSettingsDraftRuleConfig)) continue;
         let canonical = (typeof shengjiResolveGameRuleConfig === 'function')
             ? shengjiResolveGameRuleConfig({ presetName })
             : null;
@@ -4416,10 +4644,10 @@ function resetLevelsMatrixStateFromRuleConfig() {
 function setRuleConfigFieldValue(field, rawValue) {
     try {
         if (field === 'presetName') {
-            if (rawValue === '') {
+            if (rawValue === 'custom' || rawValue === '') {
                 gSettingsDraftRuleConfig = cloneRuleConfig(gSettingsDraftRuleConfig || {});
-                // none is a custom non-matching state, not a hidden preset bundle.
-                gSettingsDraftRuleConfig.presetName = '';
+                // custom is a non-matching state — does not apply any preset bundle.
+                gSettingsDraftRuleConfig.presetName = 'custom';
                 // Keep scoring sub-preset selector consistent with actual scoring fields.
                 syncScoringPresetLabel();
                 return;
@@ -4512,6 +4740,11 @@ function setRuleConfigFieldValue(field, rawValue) {
                 rawValue === 'compensation'
                 || rawValue === 'lian-zhong-compensation'
             );
+            return;
+        }
+
+        if (field === 'tableFormat') {
+            gSettingsDraftRuleConfig.tableFormat = rawValue;
             return;
         }
 
@@ -5148,39 +5381,69 @@ function createKnockBackConditionRow(readOnly) {
     return row;
 }
 
-function createPresetRulesRadioSelector(currentValue, readOnly) {
-    let radioGroup = document.createElement('div');
-    radioGroup.className = 'settings-radio-group settings-preset-rules-group';
+function createPresetRulesDropdown(currentValue, readOnly) {
+    let current = (currentValue === undefined || currentValue === null || currentValue === '') ? 'custom' : String(currentValue);
 
-    let current = (currentValue === undefined || currentValue === null) ? 'default' : String(currentValue);
+    let sel = document.createElement('select');
+    sel.className = 'settings-preset-rules-select';
+    sel.setAttribute('data-settings-field', 'presetName');
+    sel.disabled = !!readOnly;
 
-    for (let opt of PRESET_RULE_RADIO_OPTIONS) {
-        let radioLabel = document.createElement('label');
-        radioLabel.className = 'settings-radio-option settings-preset-rules-option';
-
-        let radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = 'presetName';
-        radio.value = opt.value;
-        radio.checked = (opt.value === current);
-        radio.disabled = !!readOnly;
-        radio.setAttribute('data-settings-field', 'presetName');
-
-        if (!readOnly) {
-            radio.addEventListener('change', () => {
-                if (radio.checked) {
-                    setRuleConfigFieldValue('presetName', opt.value);
-                    renderSettingsDialog();
-                }
-            });
+    for (let opt of PRESET_RULE_DROPDOWN_OPTIONS) {
+        let op = document.createElement('option');
+        op.value = opt.value;
+        op.textContent = t('settingsDialog.presetRuleLabels.' + opt.labelKey);
+        // Disable options whose table-level constraints are not satisfied.
+        // 'custom' has no constraints and is always selectable.
+        if (opt.value !== 'custom') {
+            op.disabled = !isPresetEnabled(opt.value, gSettingsDraftRuleConfig);
         }
-
-        radioLabel.appendChild(radio);
-        radioLabel.appendChild(document.createTextNode(t('settingsDialog.presetRuleLabels.' + opt.labelKey)));
-        radioGroup.appendChild(radioLabel);
+        sel.appendChild(op);
     }
 
-    return radioGroup;
+    sel.value = current;
+
+    if (!readOnly) {
+        sel.addEventListener('change', () => {
+            setRuleConfigFieldValue('presetName', sel.value);
+            renderSettingsDialog();
+        });
+    }
+
+    return sel;
+}
+
+function createPresetRuleHint() {
+    let hint = document.createElement('div');
+    hint.className = 'settings-field-hint';
+    let preset = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.presetName) || 'custom';
+    if (preset === '' || preset === null || preset === undefined) preset = 'custom';
+    const hintKeyMap = {
+        'custom': 'custom',
+        'default': 'default',
+        'high-school': 'highSchool',
+        'Berkeley': 'berkeley',
+        'experimental': 'experimental',
+        'plain': 'plain',
+        'short-level rotate-pivot': 'shortLevelRotatePivot',
+    };
+    let hintKey = hintKeyMap[preset] || 'custom';
+    hint.textContent = t('settingsDialog.presetRuleHints.' + hintKey);
+    return hint;
+}
+
+function createTableFormatSelector(readOnly) {
+    let sel = document.createElement('select');
+    sel.className = 'settings-table-format-select';
+    sel.setAttribute('data-settings-field', 'tableFormat');
+    // Only normal-4P is available in this version; option is always disabled.
+    let op = document.createElement('option');
+    op.value = 'normal-4P';
+    op.textContent = t('settingsDialog.options.normalFourPlayer');
+    sel.appendChild(op);
+    sel.value = 'normal-4P';
+    sel.disabled = true; // only one option exists
+    return sel;
 }
 
 function createSettingsFieldEl(field, readOnly) {
@@ -5272,7 +5535,7 @@ function createSettingsFieldEl(field, readOnly) {
     }
 
     if (field === 'presetName') {
-        wrapper.appendChild(createPresetRulesRadioSelector(currentValue, readOnly));
+        wrapper.appendChild(createPresetRulesDropdown(currentValue, readOnly));
         wrapper.setAttribute('data-settings-field', field);
         return wrapper;
     }
@@ -5485,45 +5748,9 @@ function renderGeneralTabBody(container, readOnly) {
     let rows = document.createElement('div');
     rows.className = 'general-tab-rows';
 
-    // Row 1: deck count with disabled 1/3/4 options visible.
+    // Row 1: auto strain radios + hint.
     let row1 = document.createElement('div');
     row1.className = 'general-row';
-    let deckField = document.createElement('div');
-    deckField.className = 'settings-field';
-    deckField.setAttribute('data-settings-field', 'deckCount');
-    let deckLabel = document.createElement('label');
-    deckLabel.textContent = t('settingsDialog.fields.deckCount');
-    let deckSel = document.createElement('select');
-    deckSel.setAttribute('data-settings-field', 'deckCount');
-    const deckOptions = [
-        { value: '1', disabled: true },
-        { value: '2', disabled: false },
-        { value: '3', disabled: true },
-        { value: '4', disabled: true },
-    ];
-    for (let opt of deckOptions) {
-        let op = document.createElement('option');
-        op.value = opt.value;
-        op.textContent = opt.value;
-        op.disabled = !!opt.disabled;
-        deckSel.appendChild(op);
-    }
-    deckSel.value = String(getRuleConfigFieldValue('deckCount'));
-    deckSel.disabled = !!readOnly;
-    if (!readOnly) {
-        deckSel.addEventListener('change', () => {
-            setRuleConfigFieldValue('deckCount', deckSel.value);
-            renderSettingsDialog();
-        });
-    }
-    deckField.appendChild(deckLabel);
-    deckField.appendChild(deckSel);
-    row1.appendChild(deckField);
-    rows.appendChild(row1);
-
-    // Row 2: auto strain radios + hint.
-    let row2 = document.createElement('div');
-    row2.className = 'general-row';
     let autoField = document.createElement('div');
     autoField.className = 'settings-field';
     autoField.setAttribute('data-settings-field', 'autoStrain');
@@ -5531,13 +5758,13 @@ function renderGeneralTabBody(container, readOnly) {
     autoLabel.textContent = t('settingsDialog.fields.autoStrain');
     autoField.appendChild(autoLabel);
     autoField.appendChild(createGeneralAutoStrainSelector(getRuleConfigFieldValue('autoStrain'), readOnly));
-    row2.appendChild(autoField);
-    row2.appendChild(createGeneralHint(t('settingsDialog.generalHints.autoStrain'), 'general-hint-auto-strain'));
-    rows.appendChild(row2);
+    row1.appendChild(autoField);
+    row1.appendChild(createGeneralHint(t('settingsDialog.generalHints.autoStrain'), 'general-hint-auto-strain'));
+    rows.appendChild(row1);
 
-    // Row 3: overbase + conditional restriction + conditional attackers-self-base-half + conditional hint.
-    let row3 = document.createElement('div');
-    row3.className = 'general-row';
+    // Row 2: overbase + conditional restriction + conditional attackers-self-base-half + conditional hint.
+    let row2 = document.createElement('div');
+    row2.className = 'general-row';
 
     let overbaseField = document.createElement('div');
     overbaseField.className = 'settings-field';
@@ -5560,7 +5787,7 @@ function renderGeneralTabBody(container, readOnly) {
     }
     overbaseField.appendChild(overbaseLabel);
     overbaseField.appendChild(overbaseInput);
-    row3.appendChild(overbaseField);
+    row2.appendChild(overbaseField);
 
     let showRestriction = !!getRuleConfigFieldValue('allowOverbase');
     let restrictionChecked = String(getRuleConfigFieldValue('overbaseRestrictions')) === 'default';
@@ -5583,7 +5810,7 @@ function renderGeneralTabBody(container, readOnly) {
         }
         restrictionField.appendChild(restrictionLabel);
         restrictionField.appendChild(restrictionInput);
-        row3.appendChild(restrictionField);
+        row2.appendChild(restrictionField);
 
         let attackersHalfField = document.createElement('div');
         attackersHalfField.className = 'settings-field';
@@ -5603,17 +5830,17 @@ function renderGeneralTabBody(container, readOnly) {
         }
         attackersHalfField.appendChild(attackersHalfLabel);
         attackersHalfField.appendChild(attackersHalfInput);
-        row3.appendChild(attackersHalfField);
+        row2.appendChild(attackersHalfField);
 
         if (restrictionChecked) {
-            row3.appendChild(createGeneralHint(t('settingsDialog.generalHints.overbaseRestriction'), 'general-hint-overbase-restriction'));
+            row2.appendChild(createGeneralHint(t('settingsDialog.generalHints.overbaseRestriction'), 'general-hint-overbase-restriction'));
         }
     }
-    rows.appendChild(row3);
+    rows.appendChild(row2);
 
-    // Row 4: crossing + hint.
-    let row4 = document.createElement('div');
-    row4.className = 'general-row';
+    // Row 3: crossing + hint.
+    let row3 = document.createElement('div');
+    row3.className = 'general-row';
     let crossingField = document.createElement('div');
     crossingField.className = 'settings-field';
     crossingField.setAttribute('data-settings-field', 'allowCrossings');
@@ -5632,13 +5859,13 @@ function renderGeneralTabBody(container, readOnly) {
     }
     crossingField.appendChild(crossingLabel);
     crossingField.appendChild(crossingInput);
-    row4.appendChild(crossingField);
-    row4.appendChild(createGeneralHint(t('settingsDialog.generalHints.crossing'), 'general-hint-crossing'));
-    rows.appendChild(row4);
+    row3.appendChild(crossingField);
+    row3.appendChild(createGeneralHint(t('settingsDialog.generalHints.crossing'), 'general-hint-crossing'));
+    rows.appendChild(row3);
 
-    // Row 5: failed multiplay + conditional compensation amount + hint.
-    let row5 = document.createElement('div');
-    row5.className = 'general-row';
+    // Row 4: failed multiplay + conditional compensation amount + hint.
+    let row4 = document.createElement('div');
+    row4.className = 'general-row';
 
     let failedField = document.createElement('div');
     failedField.className = 'settings-field';
@@ -5668,7 +5895,7 @@ function renderGeneralTabBody(container, readOnly) {
     }
     failedField.appendChild(failedLabel);
     failedField.appendChild(failedSelect);
-    row5.appendChild(failedField);
+    row4.appendChild(failedField);
 
     let showComp = (String(getRuleConfigFieldValue('failedMultiplayHandling') || 'default') === 'compensation');
     if (showComp) {
@@ -5693,24 +5920,11 @@ function renderGeneralTabBody(container, readOnly) {
         }
         compField.appendChild(compLabel);
         compField.appendChild(compInput);
-        row5.appendChild(compField);
-        row5.appendChild(createGeneralHint(t('settingsDialog.generalHints.multiplayCompensationAmount'), 'general-hint-multiplay-compensation'));
+        row4.appendChild(compField);
+        row4.appendChild(createGeneralHint(t('settingsDialog.generalHints.multiplayCompensationAmount'), 'general-hint-multiplay-compensation'));
     }
 
-    rows.appendChild(row5);
-
-    // Row 6: pivot-pass mode radios (last row).
-    let row6 = document.createElement('div');
-    row6.className = 'general-row';
-    let pivotPassField = document.createElement('div');
-    pivotPassField.className = 'settings-field';
-    pivotPassField.setAttribute('data-settings-field', 'pivotPassMode');
-    let pivotPassLabel = document.createElement('label');
-    pivotPassLabel.textContent = t('settingsDialog.fields.pivotPassMode');
-    pivotPassField.appendChild(pivotPassLabel);
-    pivotPassField.appendChild(createPivotPassModeRadioSelector(getRuleConfigFieldValue('pivotPassMode'), readOnly));
-    row6.appendChild(pivotPassField);
-    rows.appendChild(row6);
+    rows.appendChild(row4);
 
     container.appendChild(rows);
 }
@@ -5821,14 +6035,85 @@ function renderTimingTabBody(container, readOnly) {
     container.appendChild(rows);
 }
 
-function renderPresetsTabBody(container, readOnly) {
+function renderTableTabBody(container, readOnly) {
     let rows = document.createElement('div');
-    rows.className = 'preset-tab-rows';
+    rows.className = 'table-tab-rows';
 
-    let row = document.createElement('div');
-    row.className = 'preset-row';
-    row.appendChild(createSettingsFieldEl('presetName', readOnly));
-    rows.appendChild(row);
+    // Row 1: deck count with disabled 1/3/4 options visible.
+    let row1 = document.createElement('div');
+    row1.className = 'table-row';
+    let deckField = document.createElement('div');
+    deckField.className = 'settings-field';
+    deckField.setAttribute('data-settings-field', 'deckCount');
+    let deckLabel = document.createElement('label');
+    deckLabel.textContent = t('settingsDialog.fields.deckCount');
+    let deckSel = document.createElement('select');
+    deckSel.setAttribute('data-settings-field', 'deckCount');
+    const deckOptions = [
+        { value: '1', disabled: true },
+        { value: '2', disabled: false },
+        { value: '3', disabled: true },
+        { value: '4', disabled: true },
+    ];
+    for (let opt of deckOptions) {
+        let op = document.createElement('option');
+        op.value = opt.value;
+        op.textContent = opt.value;
+        op.disabled = !!opt.disabled;
+        deckSel.appendChild(op);
+    }
+    deckSel.value = String(getRuleConfigFieldValue('deckCount'));
+    deckSel.disabled = !!readOnly;
+    if (!readOnly) {
+        deckSel.addEventListener('change', () => {
+            setRuleConfigFieldValue('deckCount', deckSel.value);
+            renderSettingsDialog();
+        });
+    }
+    deckField.appendChild(deckLabel);
+    deckField.appendChild(deckSel);
+    row1.appendChild(deckField);
+    rows.appendChild(row1);
+
+    // Row 2: table format (normal 4P only; select always disabled).
+    let row2 = document.createElement('div');
+    row2.className = 'table-row';
+    let tableFormatField = document.createElement('div');
+    tableFormatField.className = 'settings-field';
+    tableFormatField.setAttribute('data-settings-field', 'tableFormat');
+    let tableFormatLabel = document.createElement('label');
+    tableFormatLabel.textContent = t('settingsDialog.fields.tableFormat');
+    tableFormatField.appendChild(tableFormatLabel);
+    tableFormatField.appendChild(createTableFormatSelector(readOnly));
+    row2.appendChild(tableFormatField);
+    rows.appendChild(row2);
+
+    // Row 3: pivot-pass mode radios.
+    let row3 = document.createElement('div');
+    row3.className = 'table-row';
+    let pivotPassField = document.createElement('div');
+    pivotPassField.className = 'settings-field';
+    pivotPassField.setAttribute('data-settings-field', 'pivotPassMode');
+    let pivotPassLabel = document.createElement('label');
+    pivotPassLabel.textContent = t('settingsDialog.fields.pivotPassMode');
+    pivotPassField.appendChild(pivotPassLabel);
+    pivotPassField.appendChild(createPivotPassModeRadioSelector(getRuleConfigFieldValue('pivotPassMode'), readOnly));
+    row3.appendChild(pivotPassField);
+    rows.appendChild(row3);
+
+    // Row 4: preset rules dropdown + hint.
+    let row4 = document.createElement('div');
+    row4.className = 'table-row';
+    let presetField = document.createElement('div');
+    presetField.className = 'settings-field';
+    presetField.setAttribute('data-settings-field', 'presetName');
+    let presetLabel = document.createElement('label');
+    presetLabel.textContent = t('settingsDialog.fields.presetName');
+    presetField.appendChild(presetLabel);
+    presetField.appendChild(createPresetRulesDropdown(getRuleConfigFieldValue('presetName'), readOnly));
+    row4.appendChild(presetField);
+    row4.appendChild(createPresetRuleHint());
+    rows.appendChild(row4);
 
     container.appendChild(rows);
 }
@@ -5858,7 +6143,13 @@ function renderSettingsDialog() {
     if (gSettingsPlaceholderPanel) {
         gSettingsPlaceholderPanel.style.display = isGameTab ? 'none' : 'block';
         if (!isGameTab) {
-            gSettingsPlaceholderPanel.textContent = t('settingsDialog.placeholders.' + gSettingsTopLevelTab);
+            if (gSettingsTopLevelTab === 'seat') {
+                renderSeatSettingsPanel(gSettingsPlaceholderPanel, readOnly);
+            } else if (gSettingsTopLevelTab === 'display') {
+                renderDisplaySettingsPanel(gSettingsPlaceholderPanel, readOnly);
+            } else {
+                gSettingsPlaceholderPanel.textContent = t('settingsDialog.placeholders.' + gSettingsTopLevelTab);
+            }
             return;
         }
     }
@@ -5873,8 +6164,8 @@ function renderSettingsDialog() {
     gSettingsBody.className = readOnly ? 'settings-readonly' : '';
     gSettingsBody.innerHTML = '';
 
-    if (gSettingsActiveTab === 'presets') {
-        renderPresetsTabBody(gSettingsBody, readOnly);
+    if (gSettingsActiveTab === 'table') {
+        renderTableTabBody(gSettingsBody, readOnly);
     } else if (gSettingsActiveTab === 'scoring') {
         renderScoringTabBody(gSettingsBody, readOnly);
     } else if (gSettingsActiveTab === 'general') {
@@ -5897,7 +6188,7 @@ function renderSettingsDialog() {
 function openSettingsDialog(mode) {
     ensureResolvedSettings();
     gSettingsMode = mode;
-    gSettingsActiveTab = 'presets';
+    gSettingsActiveTab = 'table';
     gSettingsTopLevelTab = 'game';
 
     if (mode === 'inspect') {
@@ -5908,6 +6199,7 @@ function openSettingsDialog(mode) {
         gSettingsDraftRuleConfig = cloneRuleConfig(gResolvedGameSettings.ruleConfig);
         gSettingsDraftDisplaySettings = { ...gResolvedGameSettings.displaySettings };
     }
+    gSettingsDraftDisplaySettings.userNaturalPosition = normalize4PUserNaturalPosition(gSettingsDraftDisplaySettings.userNaturalPosition);
 
     // Sync preset labels to current config state
     syncScoringPresetLabel();
@@ -6043,7 +6335,8 @@ function finishRound() {
     if (isPauseDialogBlockingGameplay()) return;
     let result = engineEndRound();
     highlightActivePlayer(-1);
-    gDeskSlots[result.winner].setAttribute('data-winner', 'true');
+    let winnerSlot = getDeskSlotFor4PActorSeat(result.winner);
+    if (winnerSlot) winnerSlot.setAttribute('data-winner', 'true');
     updateScoreDisplay();
 
     // Update attackers' streak (within-frame consecutive attacker round wins)
@@ -6232,8 +6525,6 @@ function renderCountingDialogNextFrameSquare(applied) {
     if (!host) return;
     if (!applied || !Array.isArray(applied.newLevels)) return;
 
-    let nsLevel = Number(applied.newLevels[0]);
-    let ewLevel = Number(applied.newLevels[1]);
     let nextCycleIndexBySide = Array.isArray(applied.newCycleIndexBySide)
         ? applied.newCycleIndexBySide
         : (game && game.levelRuleState ? game.levelRuleState.cycleIndexBySide : [0, 0]);
@@ -6249,11 +6540,13 @@ function renderCountingDialogNextFrameSquare(applied) {
         squareId: 'cd-next-frame-square',
         squareClassName: 'cd-next-frame-square',
         triangleClassName: 'cd-next-frame-triangle',
-        nsLevel,
-        ewLevel,
-        nsCycleIndex: getSideCycleIndex(nextCycleIndexBySide, 0),
-        ewCycleIndex: getSideCycleIndex(nextCycleIndexBySide, 1),
+        levelsByActor: applied.newLevels,
+        cycleIndexBySide: [
+            getSideCycleIndex(nextCycleIndexBySide, 0),
+            getSideCycleIndex(nextCycleIndexBySide, 1),
+        ],
         pivotSeat: nextPivot,
+        referenceActorSeat: HUMAN_PLAYER,
     });
 }
 
@@ -6276,11 +6569,11 @@ function showCountingDialog(result, frameResult, applied) {
     let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
     let multiplayCompEnabled = (handling === 'compensation' || handling === 'lian-zhong-compensation' || !!(game.gameConfig && game.gameConfig.multiplayCompensation));
 
-    // Size: match #desk-south width × 2× height
-    let deskSouth = document.getElementById('desk-south');
-    if (deskSouth) {
-        let w = deskSouth.offsetWidth;
-        let h = deskSouth.offsetHeight * 2;
+    // Size: match #desk-bottom width × 2× height
+    let deskBottom = document.getElementById('desk-bottom');
+    if (deskBottom) {
+        let w = deskBottom.offsetWidth;
+        let h = deskBottom.offsetHeight * 2;
         gCountingDialog.style.width = Math.round(w * 1.08) + 'px';
         gCountingDialog.style.height = h + 'px';
     }
@@ -6328,7 +6621,7 @@ function showCountingDialog(result, frameResult, applied) {
         // Reset page to initial state
         clearDesk();
         clearLog();
-        gShand.innerHTML = '';
+        gReferenceHandSurface.innerHTML = '';
         gBtnNewGame.textContent = t('buttons.newGame');
         updatePhaseDisplay(t('phase.initial'));
         updateStatus(t('status.ready'));

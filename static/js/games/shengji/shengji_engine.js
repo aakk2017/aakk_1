@@ -20,7 +20,7 @@ const GamePhase = {
     GAME_OVER:  'game_over'
 };
 
-const HUMAN_PLAYER   = 0; // South
+let HUMAN_PLAYER     = 1; // East by default; display settings may select any 4P natural seat.
 const TOTAL_CARDS    = 108;
 const CARDS_PER_HAND = 25;
 const BASE_SIZE      = 8;
