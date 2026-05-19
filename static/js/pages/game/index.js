@@ -93,6 +93,321 @@ const gBtnPauseQuitConfirm = document.getElementById('btn-pause-quit-confirm');
 // 4P display-position mapping
 // ---------------------------------------------------------------------------
 const FOUR_P_NATURAL_POSITIONS = ['south', 'east', 'north', 'west'];
+
+// ---------------------------------------------------------------------------
+// 3PDA position helpers (Note 62 — placeholder + pure helper model)
+//
+// These constants and functions are INERT in Note 62.
+// No 3PDA game state is created; gameplay start is blocked in
+// confirmCreateGameFromSettings when tableFormat === 'three-player-dummy-ally'.
+// ---------------------------------------------------------------------------
+
+// The three real natural positions for 3PDA.
+// Dummy/Ay is NOT a real natural position — it is a frame role.
+const THREE_PDA_REAL_NATURAL_POSITIONS = ['N', 'Sw', 'Se'];
+
+// Dummy/ally is a frame-role label, not a natural position.
+const THREE_PDA_DUMMY_ROLE    = 'Ay';
+const THREE_PDA_DUMMY_LABEL_EN = 'Ay';
+const THREE_PDA_DUMMY_LABEL_ZH = '明';
+
+// i18n labels for real natural positions.
+// NOTE (Note 62a): these constants are retained as semantic helper-test labels only.
+// Display labels for UI are now owned by i18n (naturalPositions3PDA / dummyRoles namespaces).
+const THREE_PDA_NATURAL_POSITION_LABELS = {
+    en: { N: 'N', Sw: 'Sw', Se: 'Se' },
+    zh: { N: '子', Sw: '申', Se: '辰' },   // corrected per Note 62b: Sw=申, Se=辰
+};
+
+// Inter-frame pivot-passing order: N → Sw → Se → N (CCW real-player cycle).
+const THREE_PDA_PIVOT_NEXT = { N: 'Sw', Sw: 'Se', Se: 'N' };
+
+/**
+ * Returns the next 3PDA pivot natural position in the inter-frame cycle.
+ * Throws if the input is not a valid real natural position (Ay/dummy is rejected).
+ */
+function getNext3PDAPivotNaturalPosition(currentPivotNaturalPosition) {
+    if (!(currentPivotNaturalPosition in THREE_PDA_PIVOT_NEXT)) {
+        throw new Error(
+            'getNext3PDAPivotNaturalPosition: invalid pivot "' + currentPivotNaturalPosition +
+            '". Must be one of N/Sw/Se (Ay/dummy is not eligible as pivot).'
+        );
+    }
+    return THREE_PDA_PIVOT_NEXT[currentPivotNaturalPosition];
+}
+
+/**
+ * Returns true if value is a valid 3PDA real natural position (N, Sw, or Se).
+ * Ay/dummy and all 4P positions return false.
+ */
+function is3PDARealNaturalPosition(value) {
+    return THREE_PDA_REAL_NATURAL_POSITIONS.includes(value);
+}
+
+/**
+ * Validates and returns the value as a 3PDA real natural position.
+ * Throws for Ay, 4P positions south/east/north/west, numeric indices, or any other input.
+ */
+function normalize3PDAPivotNaturalPosition(value) {
+    if (!THREE_PDA_REAL_NATURAL_POSITIONS.includes(value)) {
+        throw new Error(
+            'normalize3PDAPivotNaturalPosition: "' + value + '"' +
+            ' is not a valid 3PDA real natural position. Must be N, Sw, or Se.' +
+            ' Ay/dummy is not eligible as pivot; 4P positions are not valid.'
+        );
+    }
+    return value;
+}
+
+/**
+ * Creates an immutable 3PDA pivot-passing state object.
+ * State update policy: immutable — advance3PDAPivotPassingState returns a new object
+ * and does not mutate the input.
+ * @param {string} initialPivotNaturalPosition - N, Sw, or Se
+ * @returns {Readonly<{ currentPivot: string }>}
+ */
+function create3PDAPivotPassingState(initialPivotNaturalPosition) {
+    normalize3PDAPivotNaturalPosition(initialPivotNaturalPosition);
+    return Object.freeze({ currentPivot: initialPivotNaturalPosition });
+}
+
+/**
+ * Returns the current pivot natural position from a pivot-passing state.
+ */
+function getCurrent3PDAPivotNaturalPosition(pivotState) {
+    return pivotState.currentPivot;
+}
+
+/**
+ * Returns the next pivot natural position without advancing the state.
+ */
+function peekNext3PDAPivotNaturalPosition(pivotState) {
+    return getNext3PDAPivotNaturalPosition(pivotState.currentPivot);
+}
+
+/**
+ * Returns a new pivot-passing state advanced by one inter-frame step.
+ * The original state is NOT mutated (immutable update policy).
+ * @param {Readonly<{ currentPivot: string }>} pivotState
+ * @returns {Readonly<{ currentPivot: string }>}
+ */
+function advance3PDAPivotPassingState(pivotState) {
+    return Object.freeze({ currentPivot: getNext3PDAPivotNaturalPosition(pivotState.currentPivot) });
+}
+
+/**
+ * Returns an array of frameCount pivot natural positions starting from initialPivotNaturalPosition.
+ * @param {string} initialPivotNaturalPosition - N, Sw, or Se
+ * @param {number} frameCount
+ * @returns {string[]}
+ */
+function get3PDAPivotSequence(initialPivotNaturalPosition, frameCount) {
+    normalize3PDAPivotNaturalPosition(initialPivotNaturalPosition);
+    let sequence = [];
+    let current = initialPivotNaturalPosition;
+    for (let i = 0; i < frameCount; i++) {
+        sequence.push(current);
+        current = THREE_PDA_PIVOT_NEXT[current];
+    }
+    return sequence;
+}
+
+/**
+ * Developer-only simulation helper — not user-facing, not reachable via normal UI.
+ * Returns an array of pivot positions for frameCount frames starting from initialPivot.
+ */
+function simulate3PDAPivotPassing(initialPivot, frameCount) {
+    return get3PDAPivotSequence(initialPivot, frameCount);
+}
+
+// In-frame action cycle for a given pivot: pivot -> successor -> ally(Ay) -> predecessor -> pivot.
+// Real-player cycle determines the successor/predecessor.
+const THREE_PDA_PIVOT_FRAME_ROLES = {
+    N:  { pivot: 'N',  successor: 'Sw', ally: 'Ay', predecessor: 'Se' },
+    Sw: { pivot: 'Sw', successor: 'Se', ally: 'Ay', predecessor: 'N'  },
+    Se: { pivot: 'Se', successor: 'N',  ally: 'Ay', predecessor: 'Sw' },
+};
+
+/**
+ * Returns the in-frame roles object for the given real pivot natural position.
+ * { pivot, successor, ally, predecessor }
+ * ally is always 'Ay' (dummy).
+ */
+function get3PDAFrameRolesForPivot(pivotNaturalPosition) {
+    if (!(pivotNaturalPosition in THREE_PDA_PIVOT_FRAME_ROLES)) {
+        throw new Error(
+            'get3PDAFrameRolesForPivot: invalid pivot "' + pivotNaturalPosition +
+            '". Must be one of N/Sw/Se.'
+        );
+    }
+    return { ...THREE_PDA_PIVOT_FRAME_ROLES[pivotNaturalPosition] };
+}
+
+/**
+ * Returns the reference-relative display position for a given frame actor,
+ * given a reference actor, within the frame defined by pivotNaturalPosition.
+ *
+ * The in-frame action cycle is:
+ *   pivot -> successor -> ally(Ay) -> predecessor -> pivot
+ * which maps to reference positions:
+ *   reference -> afterhand -> opposite -> forehand -> reference
+ *
+ * @param {string} frameActor     - N, Sw, Se, or Ay
+ * @param {string} referenceActor - N, Sw, Se, or Ay (the observer)
+ * @param {string} pivotNaturalPosition - N, Sw, or Se
+ * @returns {'reference'|'afterhand'|'opposite'|'forehand'}
+ */
+function get3PDAReferencePositionForActor(frameActor, referenceActor, pivotNaturalPosition) {
+    let roles = get3PDAFrameRolesForPivot(pivotNaturalPosition);
+    // Build ordered frame sequence: pivot, successor, ally, predecessor
+    let frameOrder = [roles.pivot, roles.successor, roles.ally, roles.predecessor];
+    let refPositions = ['reference', 'afterhand', 'opposite', 'forehand'];
+    let refIndex = frameOrder.indexOf(referenceActor);
+    let actorIndex = frameOrder.indexOf(frameActor);
+    if (refIndex < 0) {
+        throw new Error('get3PDAReferencePositionForActor: reference "' + referenceActor + '" not in frame');
+    }
+    if (actorIndex < 0) {
+        throw new Error('get3PDAReferencePositionForActor: actor "' + frameActor + '" not in frame');
+    }
+    let offset = (actorIndex - refIndex + 4) % 4;
+    return refPositions[offset];
+}
+
+// ---------------------------------------------------------------------------
+// Note 64 — 3PDA in-frame construction model
+// Constructs a 4-actor frame model: N, Sw, Se (real) + Ay (dummy/ally).
+// These helpers are INERT — no live game is created from them.
+// ---------------------------------------------------------------------------
+
+const THREE_PDA_FRAME_ACTOR_IDS = ['N', 'Sw', 'Se', 'Ay'];
+
+/**
+ * Constructs a 3PDA in-frame model for the given pivot natural position.
+ * Returns a frozen frame model object with full role/actor/cycle mappings.
+ * @param {string} pivotNaturalPosition - must be N, Sw, or Se (Ay and 4P positions are rejected)
+ */
+function create3PDAFrameModel(pivotNaturalPosition) {
+    if (!THREE_PDA_REAL_NATURAL_POSITIONS.includes(pivotNaturalPosition)) {
+        throw new Error(
+            'create3PDAFrameModel: invalid pivot "' + pivotNaturalPosition + '".' +
+            ' Must be one of N/Sw/Se. Ay/dummy is not eligible as pivot;' +
+            ' 4P positions (north/south/east/west) and numeric indices are not valid.'
+        );
+    }
+    let roles = get3PDAFrameRolesForPivot(pivotNaturalPosition);
+    // pivot -> successor -> ally(Ay) -> predecessor -> pivot
+    let actionCycle = [roles.pivot, roles.successor, roles.ally, roles.predecessor];
+
+    let frameActors = [
+        { frameActorId: roles.pivot,       actorKind: 'real',  realNaturalPosition: roles.pivot,       frameRole: 'pivot'       },
+        { frameActorId: roles.successor,   actorKind: 'real',  realNaturalPosition: roles.successor,   frameRole: 'successor'   },
+        { frameActorId: 'Ay',              actorKind: 'dummy', realNaturalPosition: null,               frameRole: 'ally'        },
+        { frameActorId: roles.predecessor, actorKind: 'real',  realNaturalPosition: roles.predecessor, frameRole: 'predecessor' },
+    ];
+
+    let roleToActor = {
+        pivot:       roles.pivot,
+        successor:   roles.successor,
+        ally:        'Ay',
+        predecessor: roles.predecessor,
+    };
+
+    let actorToRole = {};
+    actorToRole[roles.pivot]       = 'pivot';
+    actorToRole[roles.successor]   = 'successor';
+    actorToRole['Ay']              = 'ally';
+    actorToRole[roles.predecessor] = 'predecessor';
+
+    return Object.freeze({
+        tableFormat:             'three-player-dummy-ally',
+        pivotNaturalPosition:    pivotNaturalPosition,
+        realNaturalPositions:    ['N', 'Sw', 'Se'],
+        dummyActorId:            'Ay',
+        frameActors:             Object.freeze(frameActors.map(Object.freeze)),
+        actionCycle:             Object.freeze(actionCycle),
+        roleToActor:             Object.freeze(roleToActor),
+        actorToRole:             Object.freeze(actorToRole),
+    });
+}
+
+/**
+ * Constructs a 3PDA frame model from a pivot-passing state (from Note 63).
+ * Does NOT mutate or advance the pivot state.
+ */
+function create3PDAFrameModelFromPivotState(pivotPassingState) {
+    let pivot = getCurrent3PDAPivotNaturalPosition(pivotPassingState);
+    return create3PDAFrameModel(pivot);
+}
+
+/** Returns the array of 4 frame actor descriptors. */
+function get3PDAFrameActors(frameModel) {
+    return frameModel.frameActors;
+}
+
+/** Returns the action cycle array [pivot, successor, ally, predecessor]. */
+function get3PDAFrameActionCycle(frameModel) {
+    return frameModel.actionCycle;
+}
+
+/** Returns the frameActorId for the given frameRole. Throws for invalid role. */
+function get3PDAFrameActorForRole(frameModel, frameRole) {
+    if (!(frameRole in frameModel.roleToActor)) {
+        throw new Error('get3PDAFrameActorForRole: invalid role "' + frameRole + '". Must be pivot/successor/ally/predecessor.');
+    }
+    return frameModel.roleToActor[frameRole];
+}
+
+/** Returns the frameRole for the given frameActorId. Throws for invalid actor. */
+function get3PDAFrameRoleForActor(frameModel, frameActorId) {
+    if (!(frameActorId in frameModel.actorToRole)) {
+        throw new Error('get3PDAFrameRoleForActor: invalid actor "' + frameActorId + '". Must be one of N/Sw/Se/Ay present in this frame.');
+    }
+    return frameModel.actorToRole[frameActorId];
+}
+
+/** Returns true if frameActorId is one of the four frame actors in this frame. */
+function is3PDAFrameActor(frameModel, frameActorId) {
+    return frameActorId in frameModel.actorToRole;
+}
+
+/** Returns true if frameActorId is a real (non-dummy) frame actor. */
+function is3PDAFrameRealActor(frameModel, frameActorId) {
+    let actor = frameModel.frameActors.find(a => a.frameActorId === frameActorId);
+    return actor != null && actor.actorKind === 'real';
+}
+
+/** Returns true only if frameActorId is 'Ay' (dummy actor). */
+function is3PDAFrameDummyActor(frameModel, frameActorId) {
+    let actor = frameModel.frameActors.find(a => a.frameActorId === frameActorId);
+    return actor != null && actor.actorKind === 'dummy';
+}
+
+/**
+ * Returns the realNaturalPosition for a frame actor, or null for Ay.
+ * Throws for an invalid actor.
+ */
+function get3PDARealNaturalPositionForFrameActor(frameModel, frameActorId) {
+    let actor = frameModel.frameActors.find(a => a.frameActorId === frameActorId);
+    if (!actor) {
+        throw new Error('get3PDARealNaturalPositionForFrameActor: "' + frameActorId + '" is not a frame actor in this frame.');
+    }
+    return actor.realNaturalPosition; // null for Ay
+}
+
+/**
+ * Returns the reference-relative position of frameActorId relative to referenceFrameActorId.
+ * Uses the frame action cycle: reference -> afterhand -> opposite -> forehand.
+ * Delegates to the existing get3PDAReferencePositionForActor which uses pivotNaturalPosition.
+ */
+function get3PDAReferencePositionForFrameActor(frameModel, frameActorId, referenceFrameActorId) {
+    return get3PDAReferencePositionForActor(frameActorId, referenceFrameActorId, frameModel.pivotNaturalPosition);
+}
+
+// ---------------------------------------------------------------------------
+// End of Note 64 helpers
+// ---------------------------------------------------------------------------
+
 const FOUR_P_REFERENCE_POSITIONS = ['reference', 'afterhand', 'opposite', 'forehand'];
 const FOUR_P_REFERENCE_TO_DISPLAY_POSITION = {
     reference: 'bottom',
@@ -249,6 +564,2445 @@ let gSettingsDraftRuleConfig = null;
 let gSettingsDraftDisplaySettings = { placeholder: true };
 let gResolvedGameSettings = null;
 let gLevelsMatrixDraftState = null;
+
+// Note 65 — 3PDA preview local UI state (not live game state; pure draft only)
+let g3PDAPreviewPivot = 'N';     // default preview pivot
+let g3PDAPreviewReference = 'Sw'; // default reference (successor of N)
+
+// Note 68 — 3PDA selected real natural seat (separate from 4P selected seat and debug reference).
+// Valid values: N, Sw, Se (Ay is never a valid real seat).
+// Stored in gSettingsDraftDisplaySettings.user3PDARealNaturalPosition.
+// 4P selected seat is stored in gSettingsDraftDisplaySettings.userNaturalPosition (east/north/west/south).
+// These two must never be conflated.
+
+const THREE_PDA_REAL_NATURAL_POSITIONS_SET = new Set(['N', 'Sw', 'Se']);
+
+/**
+ * Normalizes a candidate value to a valid 3PDA real natural position.
+ * Returns 'N' for any invalid value (including Ay, null, undefined, 4P positions).
+ */
+function normalize3PDARealNaturalPosition(value) {
+    return THREE_PDA_REAL_NATURAL_POSITIONS_SET.has(value) ? value : 'N';
+}
+
+/** Returns the draft selected 3PDA real natural seat (N/Sw/Se). Never returns Ay. */
+function getDraftUser3PDARealNaturalPosition() {
+    let source = gSettingsDraftDisplaySettings || {};
+    return normalize3PDARealNaturalPosition(source.user3PDARealNaturalPosition);
+}
+
+/** Sets the draft selected 3PDA real natural seat. Normalizes and rejects Ay. */
+function setDraftUser3PDARealNaturalPosition(value) {
+    if (!gSettingsDraftDisplaySettings) gSettingsDraftDisplaySettings = { placeholder: true };
+    gSettingsDraftDisplaySettings.user3PDARealNaturalPosition = normalize3PDARealNaturalPosition(value);
+}
+
+/**
+ * Returns the real-game 3PDA reference actor ID for the given shell state.
+ * Uses the stored selected3PDARealNaturalPosition — never returns Ay.
+ * Does not depend on current pivot, successor, or debug reference.
+ * @param {Object} shellState
+ * @returns {'N'|'Sw'|'Se'}
+ */
+function get3PDARealGameReferenceActorId(shellState) {
+    return normalize3PDARealNaturalPosition(shellState && shellState.selected3PDARealNaturalPosition);
+}
+
+// ---------------------------------------------------------------------------
+// Note 69 — Phase guard helpers for 3PDA shell / frame-start boundary
+// ---------------------------------------------------------------------------
+
+/** Returns true if state is a 3PDA shell state (not a 4P game state). */
+function isThreePDAShellState(state) {
+    return !!(state && state.kind === 'three-player-dummy-ally-shell');
+}
+
+/**
+ * Returns true if state is a 3PDA shell state in the non-card frame-start shell phase.
+ * Phase 'three-pda-frame-start-shell' is distinct from all 4P playable phases:
+ * dealing / declaring / basing / playing / counting / paused / game-over
+ */
+function isThreePDAFrameStartShellPhase(state) {
+    return isThreePDAShellState(state) && state.phase === 'three-pda-frame-start-shell';
+}
+
+/**
+ * Asserts that state is a 3PDA non-card frame-start shell.
+ * Throws if called on a 4P game state or wrong/missing phase.
+ * Use before any code that must not run on playable/card game state.
+ */
+function assertThreePDAFrameStartShellPhase(state) {
+    if (!isThreePDAFrameStartShellPhase(state)) {
+        throw new Error('Expected 3PDA frame-start shell phase but got: ' +
+            (state ? JSON.stringify({ kind: state.kind, phase: state.phase }) : String(state)));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Note 70 — 3PDA deck / hand-count / card-zone planning only
+//
+// These helpers define the future card-zone schema and count formulas.
+// PLANNING ONLY: no actual deck, hand, or card arrays are created here.
+// No dealing, shuffling, qz, scoring, or card-phase logic.
+// Legacy internal name for base/bottom cards: kitty (engine). User-facing: base/bottom/底牌.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns total card count for a given deck count.
+ * Formula: 54 * deckCount (each standard deck has 54 cards including 2 jokers).
+ * For deckCount=2: 108.
+ * PLANNING ONLY — does not produce card objects.
+ */
+function get3PDATotalCardCount(deckCount) {
+    return 54 * (Number(deckCount) || 2);
+}
+
+/**
+ * Returns the base/bottom card count for a given deck count.
+ * Uses the same fixed BASE_SIZE=8 as the existing 4P Shengji engine (shengji_engine.js line 26).
+ * The engine constant BASE_SIZE is fixed at 8 regardless of deck count.
+ * Note: legacy internal name 'kitty' = base/bottom cards (user-facing term).
+ * PLANNING ONLY — does not assign actual base cards.
+ * @param {number} deckCount - number of decks (typically 2)
+ * @returns {number} base card count (8 for standard game)
+ */
+function get3PDABaseCardCount(deckCount) {
+    // Mirrors engine's BASE_SIZE = 8 (fixed, not scaled by deck count).
+    // If the project ever changes BASE_SIZE per deck count, update here too.
+    void deckCount; // currently not used — fixed per engine convention
+    return 8;
+}
+
+/**
+ * Creates a planning-only 3PDA card-zone schema.
+ * Returns metadata about future card zones and count formulas.
+ * PLANNING ONLY: cardZonePlanOnly=true; no card arrays, no live state.
+ *
+ * @param {{ deckCount?: number }} [settings] - optional; defaults to deckCount=2
+ * @returns {Object} planning schema (immutable-style plain object)
+ */
+function create3PDACardZonePlan(settings) {
+    let deckCount = Number((settings && settings.deckCount) || 2);
+    let totalCards = get3PDATotalCardCount(deckCount);
+    let baseCardCount = get3PDABaseCardCount(deckCount);
+    let dealtToHandsTotal = totalCards - baseCardCount;
+    let handZoneCount = 4; // N, Sw, Se, Ay
+    let cardsPerHandZone = dealtToHandsTotal / handZoneCount;
+
+    return {
+        // Planning marker — must remain true. Never set to false without implementing real cards.
+        cardZonePlanOnly: true,
+
+        tableFormat: 'three-player-dummy-ally',
+
+        // Deck configuration
+        deckCount: deckCount,
+        totalCards: totalCards,
+
+        // Real player hand zones (natural positions, pivot-eligible)
+        realPlayerHandZones: ['N', 'Sw', 'Se'],
+
+        // Dummy/ally hand zone (not a real natural position, not pivot-eligible)
+        dummyHandZone: 'Ay',
+
+        // All actor hand zones combined (real players + dummy)
+        actorHandZones: ['N', 'Sw', 'Se', 'Ay'],
+
+        // Non-actor zones (base/bottom cards — not a player, not Ay)
+        nonActorZones: ['base'],
+
+        // Base/bottom zone identifier (user-facing: base/bottom/底牌; legacy internal: kitty)
+        baseZone: 'base',
+
+        // Pivot-eligible actors (real natural positions only — Ay excluded)
+        pivotEligibleActors: ['N', 'Sw', 'Se'],
+
+        // Non-pivot actors (dummy — not a real natural position)
+        nonPivotActors: ['Ay'],
+
+        // Count formulas (planning only — no arrays allocated)
+        baseCardCount: baseCardCount,
+        dealtToHandsTotal: dealtToHandsTotal,
+        handZoneCount: handZoneCount,
+        cardsPerHandZone: cardsPerHandZone,
+
+        // Notes for documentation
+        notes: {
+            Ay: 'dummy/ally hand zone — not a real natural position, not pivot-eligible',
+            base: 'base/bottom cards — not an actor, not a hand zone (legacy internal: kitty)',
+            cardZonePlanOnly: 'No cards allocated. This schema is planning metadata only.',
+        },
+    };
+}
+
+/**
+ * Validates a 3PDA card-zone plan object.
+ * Returns { valid: true } or { valid: false, errors: [...] }.
+ * PLANNING ONLY.
+ */
+function validate3PDACardZonePlan(plan) {
+    let errors = [];
+    if (!plan || !plan.cardZonePlanOnly)
+        errors.push('cardZonePlanOnly must be true');
+    if (!Array.isArray(plan.realPlayerHandZones) || !['N','Sw','Se'].every(z => plan.realPlayerHandZones.includes(z)))
+        errors.push('realPlayerHandZones must include N, Sw, Se');
+    if (plan.dummyHandZone !== 'Ay')
+        errors.push('dummyHandZone must be Ay');
+    if (plan.realPlayerHandZones && plan.realPlayerHandZones.includes('Ay'))
+        errors.push('Ay must not be in realPlayerHandZones');
+    if (!Array.isArray(plan.pivotEligibleActors) || plan.pivotEligibleActors.includes('Ay'))
+        errors.push('Ay must not be in pivotEligibleActors');
+    if (!Array.isArray(plan.nonActorZones) || !plan.nonActorZones.includes('base'))
+        errors.push('nonActorZones must include base');
+    if (plan.baseZone !== 'base')
+        errors.push('baseZone must be base');
+    if (plan.dealtToHandsTotal % plan.handZoneCount !== 0)
+        errors.push('dealtToHandsTotal must be divisible by handZoneCount');
+    if (plan.totalCards !== 54 * plan.deckCount)
+        errors.push('totalCards must equal 54 * deckCount');
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 71 — 3PDA planned hand/base state shape, no card allocation
+//
+// These helpers define the future hand/base state shape as planning metadata.
+// PLANNING ONLY: planOnly=true; zones have cards=null; no card objects generated.
+// Depends on Note 70 helpers: create3PDACardZonePlan, get3PDATotalCardCount,
+// get3PDABaseCardCount.
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a planning-only 3PDA hand/base state shape.
+ * All zone `cards` fields are null — no card objects are created.
+ * Future dealing will fill these zones; this note only defines their shape.
+ *
+ * @param {Object|{ deckCount?: number }} [settingsOrPlan]
+ *   Either a raw settings object (with optional .deckCount) or the output of
+ *   create3PDACardZonePlan(). Both paths produce the same result.
+ * @returns {Object} planned card state shape (plain object, planOnly=true)
+ */
+function create3PDAPlannedCardStateShape(settingsOrPlan) {
+    // Accept either a card-zone plan (Note 70) or a raw settings object.
+    let plan = (settingsOrPlan && settingsOrPlan.cardZonePlanOnly)
+        ? settingsOrPlan
+        : create3PDACardZonePlan(settingsOrPlan);
+
+    let cpz = plan.cardsPerHandZone; // 25 for standard 2-deck
+    let bcc = plan.baseCardCount;    // 8 for standard 2-deck
+
+    return {
+        kind: 'three-pda-planned-card-state',
+        // PLANNING ONLY marker — must remain true until real cards are implemented.
+        planOnly: true,
+
+        tableFormat: 'three-player-dummy-ally',
+
+        // Formula-driven count fields (see Note 70)
+        deckCount:          plan.deckCount,
+        totalCards:         plan.totalCards,
+        baseCardCount:      bcc,
+        dealtToHandsTotal:  plan.dealtToHandsTotal,
+        cardsPerHandZone:   cpz,
+
+        // Ordered list of hand zones (actor zones only; base is separate)
+        handZoneOrder: ['N', 'Sw', 'Se', 'Ay'],
+
+        // Base zone identifier
+        baseZoneId: 'base',
+
+        // Zone definitions — cards: null in all zones (no card allocation)
+        zones: {
+            N: {
+                zoneId:              'N',
+                zoneKind:            'real-player-hand',
+                frameActorId:        'N',
+                realNaturalPosition: 'N',
+                isRealPlayer:        true,
+                isDummy:             false,
+                isActorZone:         true,
+                isBaseZone:          false,
+                expectedCount:       cpz,
+                cards:               null, // Note 71: no card allocation
+            },
+            Sw: {
+                zoneId:              'Sw',
+                zoneKind:            'real-player-hand',
+                frameActorId:        'Sw',
+                realNaturalPosition: 'Sw',
+                isRealPlayer:        true,
+                isDummy:             false,
+                isActorZone:         true,
+                isBaseZone:          false,
+                expectedCount:       cpz,
+                cards:               null,
+            },
+            Se: {
+                zoneId:              'Se',
+                zoneKind:            'real-player-hand',
+                frameActorId:        'Se',
+                realNaturalPosition: 'Se',
+                isRealPlayer:        true,
+                isDummy:             false,
+                isActorZone:         true,
+                isBaseZone:          false,
+                expectedCount:       cpz,
+                cards:               null,
+            },
+            Ay: {
+                zoneId:              'Ay',
+                zoneKind:            'dummy-hand',
+                frameActorId:        'Ay',
+                realNaturalPosition: null,  // Ay is not a real natural position
+                isRealPlayer:        false,
+                isDummy:             true,
+                isActorZone:         true,
+                isBaseZone:          false,
+                expectedCount:       cpz,
+                cards:               null,
+            },
+            base: {
+                zoneId:              'base',
+                zoneKind:            'base-bottom',
+                frameActorId:        null,  // base is not an actor
+                realNaturalPosition: null,
+                isRealPlayer:        false,
+                isDummy:             false,
+                isActorZone:         false,
+                isBaseZone:          true,
+                expectedCount:       bcc,
+                cards:               null,
+            },
+        },
+    };
+}
+
+/**
+ * Validates a planned 3PDA hand/base state shape.
+ * Returns { valid: true } or { valid: false, errors: string[] }.
+ * Rejects any shape that contains actual card arrays or card IDs.
+ * PLANNING ONLY.
+ */
+function validate3PDAPlannedCardStateShape(state) {
+    let errors = [];
+    if (!state || !state.planOnly)
+        errors.push('planOnly must be true');
+    if (!state || state.kind !== 'three-pda-planned-card-state')
+        errors.push('kind must be three-pda-planned-card-state');
+    if (!state || !state.zones)
+        return { valid: false, errors: errors.concat(['zones missing']) };
+
+    // Exactly five zones
+    let zoneKeys = Object.keys(state.zones).sort();
+    let expectedZones = ['Ay', 'N', 'Se', 'Sw', 'base'];
+    if (JSON.stringify(zoneKeys) !== JSON.stringify(expectedZones))
+        errors.push('zones must be exactly N, Sw, Se, Ay, base — got: ' + zoneKeys.join(','));
+
+    // Zone semantics
+    for (let zid of ['N', 'Sw', 'Se']) {
+        let z = state.zones[zid];
+        if (!z) { errors.push(zid + ' zone missing'); continue; }
+        if (!z.isRealPlayer)   errors.push(zid + ' must have isRealPlayer=true');
+        if (z.isDummy)         errors.push(zid + ' must have isDummy=false');
+        if (!z.isActorZone)    errors.push(zid + ' must have isActorZone=true');
+        if (z.isBaseZone)      errors.push(zid + ' must have isBaseZone=false');
+        if (z.realNaturalPosition !== zid) errors.push(zid + ' realNaturalPosition must equal ' + zid);
+    }
+    let ay = state.zones['Ay'];
+    if (ay) {
+        if (ay.isRealPlayer)   errors.push('Ay must have isRealPlayer=false');
+        if (!ay.isDummy)       errors.push('Ay must have isDummy=true');
+        if (!ay.isActorZone)   errors.push('Ay must have isActorZone=true');
+        if (ay.isBaseZone)     errors.push('Ay must have isBaseZone=false');
+        if (ay.realNaturalPosition !== null) errors.push('Ay realNaturalPosition must be null');
+    }
+    let base = state.zones['base'];
+    if (base) {
+        if (base.isRealPlayer) errors.push('base must have isRealPlayer=false');
+        if (base.isDummy)      errors.push('base must have isDummy=false');
+        if (base.isActorZone)  errors.push('base must have isActorZone=false');
+        if (!base.isBaseZone)  errors.push('base must have isBaseZone=true');
+        if (base.frameActorId !== null) errors.push('base frameActorId must be null');
+    }
+
+    // Expected-count sum
+    let total = Object.values(state.zones).reduce((s, z) => s + (z ? z.expectedCount : 0), 0);
+    if (total !== state.totalCards)
+        errors.push('expected counts sum ' + total + ' must equal totalCards ' + state.totalCards);
+
+    // Hand zones must have equal expected counts
+    let handCounts = ['N','Sw','Se','Ay'].map(z => state.zones[z] && state.zones[z].expectedCount);
+    if (handCounts.some(c => c !== handCounts[0]))
+        errors.push('all hand zone expectedCounts must be equal');
+
+    // Reject any zone with a card array or card IDs
+    for (let [zid, z] of Object.entries(state.zones)) {
+        if (!z) continue;
+        if (Array.isArray(z.cards))
+            errors.push(zid + ': cards must be null, not an array');
+        if (z.cards !== null && z.cards !== undefined)
+            errors.push(zid + ': cards must be null (got ' + typeof z.cards + ')');
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 72 — 3PDA dry-run deck manifest, no shuffle/deal
+//
+// Defines the future 3PDA deck composition as a manifest/specification.
+// MANIFEST ONLY: manifestOnly=true; no shuffle, no deal, no zone assignment,
+// no live deck, no hand arrays, no base arrays.
+// Project card model: suits d/c/h/s (0-3), ranks 2-A (0-12),
+//   jokers V (small) / W (big); suit names from core/cards.js numberToSuitName.
+//
+// TEMPORARY 3PDA SCAFFOLDING:
+// These dry-run manifest helpers are scoped under 3PDA only to keep the
+// current implementation isolated from stable 4P code during development.
+// They must follow shared Shengji card identity conventions:
+//   ranks: 2 3 4 5 6 7 8 9 X J Q K A
+//   jokers: V = small joker, W = big joker
+//   suits: standard Shengji suits
+//
+// These helpers must not become a permanent separate 3PDA card model.
+// After 3PDA works end-to-end, redirect generic card/deck identity logic to
+// shared Shengji utilities and remove or rename this scaffold.
+// ---------------------------------------------------------------------------
+
+/** Ordered suit keys used in the manifest (aligns with numberToSuitName 0-3). */
+const THREE_PDA_MANIFEST_SUITS = ['d', 'c', 'h', 's'];
+
+/** Ordered rank keys used in the manifest (aligns with numberToRankName 0-12). */
+const THREE_PDA_MANIFEST_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'X', 'J', 'Q', 'K', 'A'];
+
+/**
+ * Returns 54 manifest entries for a single deck ordinal.
+ * 52 suited cards (4 suits × 13 ranks) + small joker (V) + big joker (W).
+ * Cards contain no zone assignment, shuffle order, or live state.
+ * @param {number} deckOrdinal  1-based deck ordinal (e.g. 1 or 2 for 2-deck)
+ * @returns {Object[]}
+ */
+function getStandardSingleDeckCardIdentities(deckOrdinal) {
+    let entries = [];
+    for (let si = 0; si < THREE_PDA_MANIFEST_SUITS.length; si++) {
+        let suit = THREE_PDA_MANIFEST_SUITS[si];
+        for (let ri = 0; ri < THREE_PDA_MANIFEST_RANKS.length; ri++) {
+            let rank = THREE_PDA_MANIFEST_RANKS[ri];
+            entries.push({
+                manifestCardId:           'D' + deckOrdinal + '-' + suit + '-' + rank,
+                deckOrdinal:              deckOrdinal,
+                suit:                     suit,
+                rank:                     rank,
+                copyOrdinalWithinDeck:    0,
+                isJoker:                  false,
+            });
+        }
+    }
+    // Small joker (V)
+    entries.push({
+        manifestCardId:        'D' + deckOrdinal + '-w-V',
+        deckOrdinal:           deckOrdinal,
+        suit:                  'w',
+        rank:                  'V',
+        copyOrdinalWithinDeck: 0,
+        isJoker:               true,
+    });
+    // Big joker (W)
+    entries.push({
+        manifestCardId:        'D' + deckOrdinal + '-w-W',
+        deckOrdinal:           deckOrdinal,
+        suit:                  'w',
+        rank:                  'W',
+        copyOrdinalWithinDeck: 0,
+        isJoker:               true,
+    });
+    return entries; // 54 entries
+}
+
+/**
+ * Creates a dry-run deck manifest for a 3PDA game.
+ * MANIFEST ONLY — not a live deck; no shuffle; no zone assignment.
+ *
+ * @param {Object|{ deckCount?: number }} [settingsOrPlan]
+ *   Either a raw settings object (with optional .deckCount) or the output of
+ *   create3PDACardZonePlan() (Note 70).
+ * @returns {Object} manifest object (plain object, manifestOnly=true)
+ */
+function create3PDADryRunDeckManifest(settingsOrPlan) {
+    let deckCount;
+    if (settingsOrPlan && settingsOrPlan.cardZonePlanOnly) {
+        // Accept Note 70 card-zone plan directly
+        deckCount = settingsOrPlan.deckCount;
+    } else {
+        deckCount = Number((settingsOrPlan && settingsOrPlan.deckCount) || 2);
+    }
+    if (!Number.isFinite(deckCount) || deckCount < 1) deckCount = 2;
+
+    let totalCards = 54 * deckCount;
+    let cardIdentities = [];
+    for (let d = 1; d <= deckCount; d++) {
+        cardIdentities = cardIdentities.concat(getStandardSingleDeckCardIdentities(d));
+    }
+
+    return {
+        kind:           'three-pda-dry-run-deck-manifest',
+        // MANIFEST ONLY marker — must remain true until live deck is implemented.
+        manifestOnly:   true,
+        deckCount:      deckCount,
+        totalCards:     totalCards,
+        cardIdentities: cardIdentities,
+    };
+}
+
+/**
+ * Validates a dry-run deck manifest.
+ * Returns { valid: true } or { valid: false, errors: string[] }.
+ * Rejects any manifest that contains zone assignments, shuffle orders,
+ * duplicate IDs, or incorrect card counts.
+ * MANIFEST ONLY.
+ */
+function validate3PDADryRunDeckManifest(manifest) {
+    let errors = [];
+    if (!manifest || !manifest.manifestOnly)
+        errors.push('manifestOnly must be true');
+    if (!manifest || manifest.kind !== 'three-pda-dry-run-deck-manifest')
+        errors.push('kind must be three-pda-dry-run-deck-manifest');
+    if (!manifest) return { valid: false, errors };
+
+    let dc = manifest.deckCount;
+    if (!Number.isFinite(dc) || dc < 1)
+        errors.push('deckCount must be a positive integer');
+    let expectedTotal = 54 * dc;
+    if (manifest.totalCards !== expectedTotal)
+        errors.push('totalCards must equal 54 * deckCount (' + expectedTotal + '), got ' + manifest.totalCards);
+
+    if (!Array.isArray(manifest.cardIdentities))
+        return { valid: false, errors: errors.concat(['cardIdentities must be an array']) };
+
+    if (manifest.cardIdentities.length !== expectedTotal)
+        errors.push('cardIdentities.length must equal ' + expectedTotal + ', got ' + manifest.cardIdentities.length);
+
+    // Check uniqueness of manifestCardId
+    let idSet = new Set();
+    for (let card of manifest.cardIdentities) {
+        if (!card || !card.manifestCardId)
+            { errors.push('every card must have a manifestCardId'); continue; }
+        if (idSet.has(card.manifestCardId))
+            errors.push('duplicate manifestCardId: ' + card.manifestCardId);
+        idSet.add(card.manifestCardId);
+
+        // Reject zone-assignment fields
+        for (let banned of ['zoneId', 'owner', 'dealtTo', 'hand', 'base', 'shuffleIndex']) {
+            if (banned in card)
+                errors.push('card ' + card.manifestCardId + ' must not have field: ' + banned);
+        }
+    }
+
+    // Per-deck-ordinal checks
+    for (let d = 1; d <= dc; d++) {
+        let deckCards = manifest.cardIdentities.filter(c => c.deckOrdinal === d);
+        if (deckCards.length !== 54)
+            errors.push('deck ordinal ' + d + ' must have 54 cards, got ' + deckCards.length);
+
+        let jokers = deckCards.filter(c => c.isJoker);
+        if (jokers.length !== 2)
+            errors.push('deck ordinal ' + d + ' must have exactly 2 jokers, got ' + jokers.length);
+
+        let suited = deckCards.filter(c => !c.isJoker);
+        if (suited.length !== 52)
+            errors.push('deck ordinal ' + d + ' must have 52 suited cards, got ' + suited.length);
+
+        // Check all 4 suits × 13 ranks are present
+        for (let suit of THREE_PDA_MANIFEST_SUITS) {
+            let suitCards = suited.filter(c => c.suit === suit);
+            if (suitCards.length !== 13)
+                errors.push('deck ' + d + ' suit ' + suit + ' must have 13 cards, got ' + suitCards.length);
+        }
+
+        // Check joker types
+        let hasSmall = jokers.some(c => c.rank === 'V');
+        let hasBig   = jokers.some(c => c.rank === 'W');
+        if (!hasSmall) errors.push('deck ordinal ' + d + ' missing small joker (V)');
+        if (!hasBig)   errors.push('deck ordinal ' + d + ' missing big joker (W)');
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 73 — 3PDA dry-run shuffle order, no dealing/assignment
+//
+// Produces a permutation of manifest card IDs derived from a Note 72 manifest.
+// SHUFFLE ORDER ONLY: shuffleOrderOnly=true; no dealing, no zone assignment,
+// no live deck, no hand arrays, no base arrays.
+// Supports deterministic seeded testing via a local LCG PRNG.
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal LCG (linear-congruential) PRNG for deterministic seeded shuffles.
+ * Returns a next() function that yields floats in [0, 1).
+ * Parameters from Numerical Recipes / Knuth.
+ * @param {number|string} seed
+ * @returns {{ next: function(): number }}
+ */
+function createSeededRandom(seed) {
+    // Fold seed to a 32-bit positive integer
+    let s = (Math.abs(Number(seed) | 0) || 1) >>> 0;
+    return {
+        next() {
+            // LCG parameters (Park-Miller variant, safe for 32-bit)
+            s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+            return s / 0x100000000;
+        },
+    };
+}
+
+/**
+ * Creates a dry-run shuffle order from a Note 72 deck manifest.
+ * Returns an ordered list of manifestCardIds — a permutation of the manifest.
+ * DRY-RUN ONLY: no cards dealt, no zones assigned, manifest not mutated.
+ *
+ * @param {Object} manifest       Output of create3PDADryRunDeckManifest().
+ * @param {{ seed?: number|string }} [options]  Optional seed for reproducibility.
+ * @returns {Object} shuffle-order object (plain object, shuffleOrderOnly=true)
+ */
+function create3PDADryRunShuffleOrder(manifest, options) {
+    // Work on a copy of the ID list — never mutate manifest.cardIdentities
+    let ids = manifest.cardIdentities.map(c => c.manifestCardId);
+
+    let seed  = options && options.seed != null ? options.seed : null;
+    let rng   = seed != null ? createSeededRandom(seed) : null;
+    let randFn = rng ? () => rng.next() : () => Math.random();
+
+    // Fisher-Yates shuffle on the copied ID array
+    for (let i = ids.length - 1; i > 0; i--) {
+        let j = Math.floor(randFn() * (i + 1));
+        let tmp = ids[i]; ids[i] = ids[j]; ids[j] = tmp;
+    }
+
+    return {
+        kind:                   'three-pda-dry-run-shuffle-order',
+        // DRY-RUN markers — must remain true until live dealing is implemented.
+        shuffleOrderOnly:       true,
+        manifestOnly:           true,
+        deckCount:              manifest.deckCount,
+        totalCards:             manifest.totalCards,
+        seed:                   seed != null ? String(seed) : null,
+        orderedManifestCardIds: ids,
+        sourceManifestKind:     manifest.kind,
+    };
+}
+
+/**
+ * Validates a dry-run shuffle order against its source manifest.
+ * Returns { valid: true } or { valid: false, errors: string[] }.
+ * Rejects any shuffle order that has zone-assignment fields, phase-transition
+ * fields, duplicate IDs, unknown IDs, or missing manifest IDs.
+ * DRY-RUN ONLY.
+ *
+ * @param {Object} shuffleOrder  Output of create3PDADryRunShuffleOrder().
+ * @param {Object} manifest      The source Note 72 manifest.
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDADryRunShuffleOrder(shuffleOrder, manifest) {
+    let errors = [];
+    if (!shuffleOrder || !shuffleOrder.shuffleOrderOnly)
+        errors.push('shuffleOrderOnly must be true');
+    if (!shuffleOrder || shuffleOrder.kind !== 'three-pda-dry-run-shuffle-order')
+        errors.push('kind must be three-pda-dry-run-shuffle-order');
+    if (!shuffleOrder) return { valid: false, errors };
+
+    if (shuffleOrder.deckCount !== manifest.deckCount)
+        errors.push('deckCount must match manifest deckCount');
+    if (shuffleOrder.totalCards !== manifest.totalCards)
+        errors.push('totalCards must match manifest totalCards');
+
+    if (!Array.isArray(shuffleOrder.orderedManifestCardIds))
+        return { valid: false, errors: errors.concat(['orderedManifestCardIds must be an array']) };
+
+    let ordered = shuffleOrder.orderedManifestCardIds;
+    if (ordered.length !== manifest.totalCards)
+        errors.push('orderedManifestCardIds.length must equal ' + manifest.totalCards + ', got ' + ordered.length);
+
+    // Build expected ID set from manifest
+    let manifestIdSet = new Set(manifest.cardIdentities.map(c => c.manifestCardId));
+
+    // Check every ordered ID is in manifest
+    let seen = new Set();
+    for (let id of ordered) {
+        if (!manifestIdSet.has(id))
+            errors.push('ordered ID not in manifest: ' + id);
+        if (seen.has(id))
+            errors.push('duplicate ordered ID: ' + id);
+        seen.add(id);
+    }
+
+    // Check every manifest ID appears exactly once
+    for (let id of manifestIdSet) {
+        if (!seen.has(id))
+            errors.push('missing manifest ID in order: ' + id);
+    }
+
+    // Reject zone-assignment and phase-transition fields
+    for (let banned of ['zoneId', 'owner', 'dealtTo', 'hand', 'base', 'assignedZone',
+                        'cardZones', 'hands', 'baseCards', 'dealingSequence',
+                        'dealtCards', 'phase', 'nextPhase']) {
+        if (banned in shuffleOrder)
+            errors.push('shuffle order must not have field: ' + banned);
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+
+// ---------------------------------------------------------------------------
+// Note 74 — 3PDA dry-run deal plan, no live hand/base assignment
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a dry-run deal plan by distributing shuffled manifest IDs across
+ * hand zones (N/Sw/Se/Ay) and the base zone, using round-robin dealing policy.
+ * Counts are derived from Note 70/71 formulas via cardZonePlan.
+ * Does NOT mutate manifest, shuffleOrder, or any shell/game state.
+ * DRY-RUN ONLY — returns pure planning metadata.
+ *
+ * @param {Object} shuffleOrder   Output of create3PDADryRunShuffleOrder().
+ * @param {Object} cardZonePlan   Output of create3PDACardZonePlan() (Note 70).
+ * @returns {Object}  Dry-run deal plan (dryRunDealOnly: true).
+ */
+function create3PDADryRunDealPlan(shuffleOrder, cardZonePlan) {
+    let handZoneOrder = ['N', 'Sw', 'Se', 'Ay'];
+    let cardsPerHandZone = cardZonePlan.cardsPerHandZone;
+    let baseCardCount   = cardZonePlan.baseCardCount;
+    let dealtToHandsTotal = cardsPerHandZone * handZoneOrder.length;
+
+    // Work on a copy so neither input is mutated
+    let ids = shuffleOrder.orderedManifestCardIds.slice();
+
+    let plannedAssignments = { N: [], Sw: [], Se: [], Ay: [], base: [] };
+
+    // Round-robin to hand zones
+    for (let i = 0; i < dealtToHandsTotal; i++) {
+        let zone = handZoneOrder[i % handZoneOrder.length];
+        plannedAssignments[zone].push(ids[i]);
+    }
+
+    // Remaining cards go to base
+    for (let i = dealtToHandsTotal; i < ids.length; i++) {
+        plannedAssignments.base.push(ids[i]);
+    }
+
+    return {
+        kind: 'three-pda-dry-run-deal-plan',
+        dryRunDealOnly: true,
+        manifestOnly: true,
+
+        deckCount:  shuffleOrder.deckCount,
+        totalCards: shuffleOrder.totalCards,
+
+        cardsPerHandZone: cardsPerHandZone,
+        baseCardCount:    baseCardCount,
+
+        handZoneOrder: handZoneOrder.slice(),
+        baseZoneId: 'base',
+
+        plannedAssignments: plannedAssignments,
+
+        assignmentPolicy: 'round-robin-hands-then-base',
+    };
+}
+
+/**
+ * Validates a dry-run deal plan against its source shuffle order and
+ * card-zone plan.
+ * Returns { valid: true } or { valid: false, errors: string[] }.
+ * Rejects duplicate/missing/unknown IDs, wrong counts, card objects,
+ * phase-transition fields, and qz/scoring/play fields.
+ * DRY-RUN ONLY.
+ *
+ * @param {Object} dealPlan      Output of create3PDADryRunDealPlan().
+ * @param {Object} shuffleOrder  Source shuffle order (Note 73).
+ * @param {Object} cardZonePlan  Source card-zone plan (Note 70).
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDADryRunDealPlan(dealPlan, shuffleOrder, cardZonePlan) {
+    let errors = [];
+    if (!dealPlan) return { valid: false, errors: ['dealPlan is null/undefined'] };
+
+    if (!dealPlan.dryRunDealOnly)
+        errors.push('dryRunDealOnly must be true');
+    if (dealPlan.kind !== 'three-pda-dry-run-deal-plan')
+        errors.push('kind must be three-pda-dry-run-deal-plan');
+    if (dealPlan.deckCount !== shuffleOrder.deckCount)
+        errors.push('deckCount must match shuffleOrder deckCount');
+    if (dealPlan.totalCards !== shuffleOrder.totalCards)
+        errors.push('totalCards must match shuffleOrder totalCards');
+
+    // Validate zone structure
+    let expectedHands = ['N', 'Sw', 'Se', 'Ay'];
+    let pa = dealPlan.plannedAssignments;
+    if (!pa || typeof pa !== 'object') {
+        errors.push('plannedAssignments must be an object');
+    } else {
+        for (let zone of expectedHands) {
+            if (!Array.isArray(pa[zone]))
+                errors.push('plannedAssignments.' + zone + ' must be an array');
+            else if (pa[zone].length !== cardZonePlan.cardsPerHandZone)
+                errors.push(zone + ' must have ' + cardZonePlan.cardsPerHandZone +
+                            ' IDs, got ' + pa[zone].length);
+        }
+        if (!Array.isArray(pa.base)) {
+            errors.push('plannedAssignments.base must be an array');
+        } else if (pa.base.length !== cardZonePlan.baseCardCount) {
+            errors.push('base must have ' + cardZonePlan.baseCardCount +
+                        ' IDs, got ' + pa.base.length);
+        }
+
+        // Build full assigned list
+        let allAssigned = [];
+        for (let z of expectedHands) {
+            if (Array.isArray(pa[z])) allAssigned = allAssigned.concat(pa[z]);
+        }
+        if (Array.isArray(pa.base)) allAssigned = allAssigned.concat(pa.base);
+
+        // Build manifest ID set from shuffleOrder
+        let manifestIdSet = new Set(shuffleOrder.orderedManifestCardIds);
+
+        // Check total count
+        if (allAssigned.length !== shuffleOrder.totalCards)
+            errors.push('total assigned IDs (' + allAssigned.length +
+                        ') must equal totalCards (' + shuffleOrder.totalCards + ')');
+
+        // Check for card objects (no objects allowed — strings only)
+        for (let id of allAssigned) {
+            if (typeof id !== 'string')
+                errors.push('assigned values must be manifest ID strings, got ' + typeof id);
+        }
+
+        // Check for duplicates and unknown/missing IDs
+        let seen = new Set();
+        for (let id of allAssigned) {
+            if (!manifestIdSet.has(id))
+                errors.push('assigned ID not in manifest: ' + id);
+            if (seen.has(id))
+                errors.push('duplicate assigned ID: ' + id);
+            seen.add(id);
+        }
+        for (let id of manifestIdSet) {
+            if (!seen.has(id))
+                errors.push('manifest ID not assigned: ' + id);
+        }
+    }
+
+    // Reject live-state/phase-transition/qz/scoring/play fields
+    for (let banned of ['hands', 'base', 'hand', 'liveDeck', 'phase', 'nextPhase',
+                        'dealing', 'dealingSequence', 'dealtCards',
+                        'declaration', 'qz', 'scoring', 'tricks', 'play',
+                        'zoneId', 'owner', 'dealtTo', 'assignedZone']) {
+        if (banned in dealPlan)
+            errors.push('deal plan must not have field: ' + banned);
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 75 — 3PDA live frame card-state container, empty/no cards
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates an empty live 3PDA frame card-state container.
+ * Zones are present but all card fields are null — no cards, no manifest IDs,
+ * no card objects, no live deck.
+ * Counts are derived from Note 70 helpers via cardZonePlan.
+ * Does NOT mutate shell/game state, call shuffle/deal helpers, or render cards.
+ * EMPTY CONTAINER ONLY — not a dealing phase, not live hands/base.
+ *
+ * @param {Object} cardZonePlan  Output of create3PDACardZonePlan() (Note 70).
+ * @returns {Object}  Empty live card-state container (containsLiveCards: false).
+ */
+function create3PDAEmptyLiveCardState(cardZonePlan) {
+    let dc  = cardZonePlan.deckCount;
+    let tc  = cardZonePlan.totalCards;
+    let cph = cardZonePlan.cardsPerHandZone;
+    let bcc = cardZonePlan.baseCardCount;
+
+    return {
+        kind: 'three-pda-live-card-state',
+        tableFormat: 'three-player-dummy-ally',
+        initialized: true,
+        containsLiveCards: false,
+
+        deckCount:        dc,
+        totalCards:       tc,
+        cardsPerHandZone: cph,
+        baseCardCount:    bcc,
+
+        handZoneOrder: ['N', 'Sw', 'Se', 'Ay'],
+        baseZoneId: 'base',
+
+        zones: {
+            N:    { zoneKind: 'real-player-hand', isRealPlayer: true,  isDummy: false, isBaseZone: false, realNaturalPosition: 'N',  frameActorId: 'N',   expectedCount: cph, cards: null },
+            Sw:   { zoneKind: 'real-player-hand', isRealPlayer: true,  isDummy: false, isBaseZone: false, realNaturalPosition: 'Sw', frameActorId: 'Sw',  expectedCount: cph, cards: null },
+            Se:   { zoneKind: 'real-player-hand', isRealPlayer: true,  isDummy: false, isBaseZone: false, realNaturalPosition: 'Se', frameActorId: 'Se',  expectedCount: cph, cards: null },
+            Ay:   { zoneKind: 'dummy-hand',       isRealPlayer: false, isDummy: true,  isBaseZone: false, realNaturalPosition: null, frameActorId: 'Ay',  expectedCount: cph, cards: null },
+            base: { zoneKind: 'base-bottom',      isRealPlayer: false, isDummy: false, isBaseZone: true,  realNaturalPosition: null, frameActorId: null,  expectedCount: bcc, cards: null },
+        },
+    };
+}
+
+/**
+ * Validates an empty 3PDA live card-state container.
+ * Rejects any state that contains cards, manifest IDs, card arrays,
+ * live-deck/hands/deal/phase/gameplay fields.
+ * Returns { valid: true } or { valid: false, errors: string[] }.
+ *
+ * @param {Object} cardState  Output of create3PDAEmptyLiveCardState().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAEmptyLiveCardState(cardState) {
+    let errors = [];
+    if (!cardState) return { valid: false, errors: ['cardState is null/undefined'] };
+
+    if (cardState.kind !== 'three-pda-live-card-state')
+        errors.push('kind must be three-pda-live-card-state');
+    if (cardState.tableFormat !== 'three-player-dummy-ally')
+        errors.push('tableFormat must be three-player-dummy-ally');
+    if (cardState.containsLiveCards !== false)
+        errors.push('containsLiveCards must be false');
+
+    // Count consistency
+    if (typeof cardState.totalCards !== 'number' || cardState.totalCards !== 54 * cardState.deckCount)
+        errors.push('totalCards must equal 54 * deckCount');
+    if (typeof cardState.baseCardCount !== 'number')
+        errors.push('baseCardCount must be a number');
+    if (typeof cardState.cardsPerHandZone !== 'number')
+        errors.push('cardsPerHandZone must be a number');
+
+    // Zone presence
+    let zones = cardState.zones;
+    if (!zones || typeof zones !== 'object')
+        return { valid: false, errors: errors.concat(['zones must be an object']) };
+
+    let expectedZones = ['N', 'Sw', 'Se', 'Ay', 'base'];
+    for (let z of expectedZones) {
+        if (!zones[z]) errors.push('missing zone: ' + z);
+    }
+    for (let z of Object.keys(zones)) {
+        if (!expectedZones.includes(z)) errors.push('unexpected zone: ' + z);
+    }
+
+    // Zone semantics
+    for (let z of ['N', 'Sw', 'Se']) {
+        if (zones[z] && zones[z].isRealPlayer !== true)
+            errors.push(z + ' must be isRealPlayer=true');
+        if (zones[z] && zones[z].isDummy !== false)
+            errors.push(z + ' must be isDummy=false');
+        if (zones[z] && zones[z].isBaseZone !== false)
+            errors.push(z + ' must be isBaseZone=false');
+    }
+    if (zones.Ay) {
+        if (zones.Ay.isRealPlayer !== false)
+            errors.push('Ay must be isRealPlayer=false');
+        if (zones.Ay.isDummy !== true)
+            errors.push('Ay must be isDummy=true');
+        if (zones.Ay.realNaturalPosition !== null)
+            errors.push('Ay realNaturalPosition must be null');
+        if (zones.Ay.isBaseZone !== false)
+            errors.push('Ay must be isBaseZone=false');
+    }
+    if (zones.base) {
+        if (zones.base.isBaseZone !== true)
+            errors.push('base must be isBaseZone=true');
+        if (zones.base.isRealPlayer !== false)
+            errors.push('base must be isRealPlayer=false');
+        if (zones.base.frameActorId !== null)
+            errors.push('base frameActorId must be null');
+    }
+
+    // No cards in any zone
+    for (let z of expectedZones) {
+        let zone = zones[z];
+        if (!zone) continue;
+        if (zone.cards !== null && zone.cards !== undefined)
+            errors.push(z + '.cards must be null or absent, got: ' + JSON.stringify(zone.cards));
+        // Reject manifest IDs (strings in any card-like field)
+        for (let field of ['manifestId', 'manifestCardId', 'cardId', 'id']) {
+            if (field in zone) errors.push(z + ' must not have field: ' + field);
+        }
+    }
+
+    // Reject live-deal/deck/hands/gameplay fields on container
+    for (let banned of ['liveDeck', 'deck', 'shuffleOrder', 'dealPlan',
+                        'hands', 'baseCards', 'dealtCards', 'dealingSequence',
+                        'phase', 'nextPhase', 'dealing', 'declaration', 'qz',
+                        'scoring', 'tricks', 'play', 'orderedManifestCardIds',
+                        'plannedAssignments']) {
+        if (banned in cardState)
+            errors.push('cardState must not have field: ' + banned);
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 77 — Attach 3PDA manifest/shuffle metadata to shell cardState, still no hand/base assignment
+//
+// Adds manifest/shuffle metadata to the live card-state container.
+// METADATA ONLY: containsLiveCards remains false; all zone cards remain null.
+// No cards are assigned to N/Sw/Se/Ay/base. No dealing phase. No rendering.
+// TEMPORARY 3PDA SCAFFOLDING — redirect generic card/deck identity logic to
+// shared Shengji utilities when a shared module is established.
+// ---------------------------------------------------------------------------
+
+/**
+ * Default deterministic debug seed for 3PDA shell metadata.
+ * Tests may override via options.seed.
+ */
+const THREE_PDA_SHELL_DEBUG_SEED = 'three-pda-shell-debug-seed';
+
+// ---------------------------------------------------------------------------
+// Note 96 — 3PDA deal-instance seed/state
+// A deal instance is a lifecycle descriptor that owns the seed/policy/source
+// for one 3PDA scaffold deal/frame.  It is distinct from:
+//   manifest        — full deck identity list
+//   shuffle order   — permutation produced from a seed
+//   deal plan       — dry-run zone assignment
+//   activated cardState — renderable manifest-ID payload in zones
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Note 97 — generated-local seed policy
+// ---------------------------------------------------------------------------
+
+/**
+ * Note 97: Creates a generated-local seed for one 3PDA deal instance.
+ * Called ONLY at the deal-instance lifecycle boundary (never inside
+ * shuffle/deal/cardState creation or render helpers).
+ * Uses crypto.getRandomValues if available; documented monotonic-counter
+ * fallback otherwise (no hidden nondeterminism in either path).
+ * Returns a non-empty string.  No card IDs, player info, or manifest IDs embedded.
+ *
+ * @returns {string}  Generated seed string.
+ */
+function create3PDAGeneratedDealSeed() {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        let buf = new Uint32Array(3);
+        crypto.getRandomValues(buf);
+        return '3pda-gen-' +
+            buf[0].toString(16).padStart(8, '0') +
+            buf[1].toString(16).padStart(8, '0') +
+            buf[2].toString(16).padStart(8, '0');
+    }
+    // Fallback: documented monotonic counter — auditable, not crypto-quality.
+    // Only reached when crypto.getRandomValues is unavailable (unusual environments).
+    create3PDAGeneratedDealSeed._counter = (create3PDAGeneratedDealSeed._counter || 0) + 1;
+    let ts = (typeof performance !== 'undefined' && performance.now)
+        ? Math.floor(performance.now() * 1000)
+        : Date.now();
+    return '3pda-gen-fb-' + create3PDAGeneratedDealSeed._counter + '-' + ts;
+}
+
+/**
+ * Note 96: Creates a 3PDA deal-instance descriptor.
+ * Pure helper — does not mutate shell state, cardState, or game engine state.
+ * Does not create live card objects, assign cards, or render UI.
+ * Returns a plain metadata object that owns the seed/policy for one scaffold deal/frame.
+ *
+ * @param {{ seedPolicy?: string, seed?: string|number,
+ *           frameIndex?: number, pivotActorId?: string,
+ *           referenceActorId?: string }} [options]
+ * @returns {Object} Deal-instance descriptor.
+ */
+function create3PDADealInstance(options) {
+    let opts = options || {};
+    let seedPolicy = opts.seedPolicy || 'fixed-debug';
+
+    // Allowed seed policies:
+    // 'fixed-debug'      — deterministic debug default (THREE_PDA_SHELL_DEBUG_SEED).
+    // 'explicit-test'    — tests may pass an explicit seed; must not be used for production randomness.
+    // 'generated-local'  — Note 97: production/local generated seed; calls create3PDAGeneratedDealSeed().
+    // 'future-generated' — reserved placeholder; still inactive (see Note 96); uses fixed-debug seed.
+    const ALLOWED_POLICIES = ['fixed-debug', 'explicit-test', 'generated-local', 'future-generated'];
+    if (!ALLOWED_POLICIES.includes(seedPolicy)) {
+        throw new Error('Note 96/97: invalid seedPolicy: ' + seedPolicy);
+    }
+
+    let seed;
+    if (seedPolicy === 'fixed-debug') {
+        seed = THREE_PDA_SHELL_DEBUG_SEED;
+    } else if (seedPolicy === 'explicit-test') {
+        if (opts.seed == null) throw new Error('Note 96: explicit-test seedPolicy requires explicit seed');
+        seed = opts.seed;
+    } else if (seedPolicy === 'generated-local') {
+        // Note 97: call seed-generation helper ONLY at deal-instance lifecycle boundary.
+        // Never called inside shuffle/deal/cardState creation or render helpers.
+        seed = create3PDAGeneratedDealSeed();
+    } else {
+        // future-generated: still reserved — not active production randomness.
+        // Uses fixed-debug seed until a future note defines its own lifecycle.
+        seed = THREE_PDA_SHELL_DEBUG_SEED;
+    }
+
+    let frameIndex = (opts.frameIndex != null && typeof opts.frameIndex === 'number') ? opts.frameIndex : 1;
+    // Deterministic id — no Math.random / Date.now.
+    let dealInstanceId = '3pda-di-' + String(seed).replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 12) + '-f' + frameIndex;
+
+    return {
+        kind:             'three-pda-deal-instance',
+        tableFormat:      'three-player-dummy-ally',
+        dealInstanceId:   dealInstanceId,
+        seed:             seed,
+        seedPolicy:       seedPolicy,
+        frameIndex:       frameIndex,
+        pivotActorId:     (opts.pivotActorId != null) ? opts.pivotActorId : null,
+        referenceActorId: (opts.referenceActorId != null) ? opts.referenceActorId : null,
+        createdForShellOnly: true,
+    };
+}
+
+/**
+ * Note 96: Validates a 3PDA deal-instance descriptor.
+ * Checks kind/tableFormat, seedPolicy, seed, dealInstanceId, frameIndex, createdForShellOnly.
+ * Rejects live card/hand/base/gameplay fields.
+ * Does not check consistency with shuffle/deal metadata (use validate3PDAShellDealInstanceConsistency for that).
+ *
+ * @param {Object} dealInstance  Output of create3PDADealInstance().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDADealInstance(dealInstance) {
+    if (!dealInstance || typeof dealInstance !== 'object')
+        return { valid: false, errors: ['dealInstance is null/undefined or not an object'] };
+    let errors = [];
+    if (dealInstance.kind !== 'three-pda-deal-instance')
+        errors.push('kind must be three-pda-deal-instance');
+    if (dealInstance.tableFormat !== 'three-player-dummy-ally')
+        errors.push('tableFormat must be three-player-dummy-ally');
+    const ALLOWED_POLICIES = ['fixed-debug', 'explicit-test', 'generated-local', 'future-generated'];
+    if (!ALLOWED_POLICIES.includes(dealInstance.seedPolicy))
+        errors.push('invalid seedPolicy: ' + dealInstance.seedPolicy);
+    if (dealInstance.seed == null || (typeof dealInstance.seed !== 'string' && typeof dealInstance.seed !== 'number'))
+        errors.push('seed must be a non-null string or number');
+    if (!dealInstance.dealInstanceId || typeof dealInstance.dealInstanceId !== 'string')
+        errors.push('dealInstanceId must be a non-empty string');
+    if (typeof dealInstance.frameIndex !== 'number' || dealInstance.frameIndex < 1)
+        errors.push('frameIndex must be a number >= 1');
+    if (dealInstance.createdForShellOnly !== true)
+        errors.push('createdForShellOnly must be true');
+    // Reject live card/gameplay fields
+    for (let banned of ['cards', 'hands', 'base', 'liveDeck', 'declaration', 'qz', 'scoring', 'tricks', 'play']) {
+        if (dealInstance[banned] != null) errors.push('dealInstance must not contain live field: ' + banned);
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * Note 96: Validates consistency between a shell state's dealInstance and its cardState shuffle metadata.
+ * Confirms dealInstance.seed matches cardState.shuffleMetadata.seed.
+ * Does not validate gameplay fields (those are handled by validate3PDAActivatedCardState).
+ *
+ * @param {Object} shellState  Output of createThreePDAShellState().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAShellDealInstanceConsistency(shellState) {
+    if (!shellState || typeof shellState !== 'object')
+        return { valid: false, errors: ['shellState is null/undefined or not an object'] };
+    let errors = [];
+    let di = shellState.dealInstance;
+    if (!di || typeof di !== 'object') { return { valid: false, errors: ['dealInstance missing from shellState'] }; }
+    let diV = validate3PDADealInstance(di);
+    if (!diV.valid) { return { valid: false, errors: ['dealInstance invalid: ' + (diV.errors || []).join(', ')] }; }
+    let cs = shellState.cardState;
+    if (!cs || typeof cs !== 'object') { return { valid: false, errors: ['cardState missing from shellState'] }; }
+    let sm = cs.shuffleMetadata;
+    if (!sm || typeof sm !== 'object') { errors.push('cardState.shuffleMetadata missing'); }
+    else if (sm.seed !== di.seed) {
+        errors.push('dealInstance.seed (' + di.seed + ') does not match shuffleMetadata.seed (' + sm.seed + ')');
+    }
+    // Confirm no gameplay/card-assignment mutation
+    if (cs.hands != null) errors.push('cardState must not have hands field');
+    if (cs.liveDeck != null) errors.push('cardState must not have liveDeck field');
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 99 — 3PDA deal lifecycle shell
+// Represents an explicit instant undealt-shell -> dealt-shell lifecycle
+// transition.  The transition is synchronous/instant; no animation, no timer,
+// no new top-level phase.
+// Distinct from dealInstance (seed/policy owner) and cardState (payload).
+// ---------------------------------------------------------------------------
+
+/**
+ * Note 99: Creates a 3PDA deal lifecycle state descriptor.
+ * Pure helper — returns a plain metadata object.
+ * Does not render UI, mutate cardState, assign cards, or generate seeds.
+ *
+ * @param {Object} dealInstance        Output of create3PDADealInstance().
+ * @param {string} lifecycleStage      'undealt-shell' | 'dealt-shell'.
+ * @param {string} transitionPolicy    'instant-scaffold'.
+ * @param {{ containsDealtCardState?: boolean }} [options]
+ * @returns {Object} Deal lifecycle descriptor.
+ */
+function create3PDADealLifecycleState(dealInstance, lifecycleStage, transitionPolicy, options) {
+    return {
+        kind:                  'three-pda-deal-lifecycle',
+        tableFormat:           'three-player-dummy-ally',
+        lifecycleStage:        lifecycleStage,
+        transitionPolicy:      transitionPolicy,
+        dealInstanceId:        dealInstance ? dealInstance.dealInstanceId : null,
+        frameIndex:            dealInstance ? dealInstance.frameIndex : null,
+        containsDealtCardState: (options && options.containsDealtCardState === true) ? true : false,
+        animationEnabled:      false,
+        gameplayEnabled:       false,
+    };
+}
+
+/**
+ * Note 99: Creates a dealt-shell lifecycle state (instant undealt->dealt transition).
+ * Called after cardState has been activated from the dealInstance seed.
+ * Records instant-scaffold as the transitionPolicy.
+ * Pure helper — does not render, mutate cardState, assign cards, or generate seeds.
+ *
+ * @param {Object} dealInstance  Output of create3PDADealInstance().
+ * @param {Object} cardState     Activated cardState (activationStatus='manifest-ids-in-zones').
+ * @returns {Object} Dealt-shell lifecycle descriptor.
+ */
+function create3PDAInstantScaffoldDealLifecycle(dealInstance, cardState) {
+    // Instant undealt-shell -> dealt-shell.  No animation, no timer, no top-level phase.
+    return create3PDADealLifecycleState(dealInstance, 'dealt-shell', 'instant-scaffold', {
+        containsDealtCardState: !!(cardState && cardState.activationStatus === 'manifest-ids-in-zones'),
+    });
+}
+
+/**
+ * Note 99: Validates a 3PDA deal lifecycle state descriptor.
+ * Checks kind/tableFormat, lifecycleStage, transitionPolicy, and safety flags.
+ * Rejects animation/gameplay/card-payload fields.
+ *
+ * @param {Object} lifecycle  Output of create3PDADealLifecycleState() or create3PDAInstantScaffoldDealLifecycle().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDADealLifecycleState(lifecycle) {
+    if (!lifecycle || typeof lifecycle !== 'object')
+        return { valid: false, errors: ['lifecycle is null/undefined or not an object'] };
+    let errors = [];
+    if (lifecycle.kind !== 'three-pda-deal-lifecycle')
+        errors.push('kind must be three-pda-deal-lifecycle');
+    if (lifecycle.tableFormat !== 'three-player-dummy-ally')
+        errors.push('tableFormat must be three-player-dummy-ally');
+    const ALLOWED_STAGES = ['undealt-shell', 'dealt-shell'];
+    if (!ALLOWED_STAGES.includes(lifecycle.lifecycleStage))
+        errors.push('invalid lifecycleStage: ' + lifecycle.lifecycleStage);
+    const ALLOWED_POLICIES = ['instant-scaffold'];
+    if (!ALLOWED_POLICIES.includes(lifecycle.transitionPolicy))
+        errors.push('invalid transitionPolicy: ' + lifecycle.transitionPolicy);
+    if (lifecycle.animationEnabled !== false)
+        errors.push('animationEnabled must be false');
+    if (lifecycle.gameplayEnabled !== false)
+        errors.push('gameplayEnabled must be false');
+    if (!lifecycle.dealInstanceId || typeof lifecycle.dealInstanceId !== 'string')
+        errors.push('dealInstanceId must be a non-empty string');
+    if (typeof lifecycle.frameIndex !== 'number' || lifecycle.frameIndex < 1)
+        errors.push('frameIndex must be a number >= 1');
+    // Reject card-payload / forbidden fields
+    for (let banned of ['cards', 'hands', 'base', 'liveDeck', 'shuffleOrder',
+                        'dealPlan', 'manifest', 'orderedManifestCardIds']) {
+        if (lifecycle[banned] != null)
+            errors.push('lifecycle must not contain payload field: ' + banned);
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * Note 99: Validates consistency between shellState.dealLifecycle, shellState.dealInstance,
+ * shellState.cardState, and shellState.frameIndex.
+ *
+ * @param {Object} shellState  Output of createThreePDAShellState() or mutated by advanceThreePDAShellFrame().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAShellDealLifecycleConsistency(shellState) {
+    if (!shellState || typeof shellState !== 'object')
+        return { valid: false, errors: ['shellState is null/undefined or not an object'] };
+    let errors = [];
+    let lc = shellState.dealLifecycle;
+    if (!lc || typeof lc !== 'object') { return { valid: false, errors: ['dealLifecycle missing from shellState'] }; }
+    let lcV = validate3PDADealLifecycleState(lc);
+    if (!lcV.valid) { return { valid: false, errors: ['dealLifecycle invalid: ' + (lcV.errors || []).join(', ')] }; }
+    let di = shellState.dealInstance;
+    if (!di || typeof di !== 'object') { errors.push('dealInstance missing from shellState'); }
+    else if (lc.dealInstanceId !== di.dealInstanceId) {
+        errors.push('dealLifecycle.dealInstanceId (' + lc.dealInstanceId +
+                    ') does not match dealInstance.dealInstanceId (' + di.dealInstanceId + ')');
+    }
+    if (typeof shellState.frameIndex === 'number' && lc.frameIndex !== shellState.frameIndex) {
+        errors.push('dealLifecycle.frameIndex (' + lc.frameIndex +
+                    ') does not match shellState.frameIndex (' + shellState.frameIndex + ')');
+    }
+    let cs = shellState.cardState;
+    if (lc.lifecycleStage === 'dealt-shell') {
+        if (!cs || cs.activationStatus !== 'manifest-ids-in-zones') {
+            errors.push('dealt-shell lifecycle requires cardState.activationStatus=manifest-ids-in-zones');
+        }
+        if (lc.containsDealtCardState !== true) {
+            errors.push('dealt-shell lifecycle must have containsDealtCardState=true');
+        }
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 100 — 3PDA hidden-zone placeholder display contract, no card backs
+//
+// Formalizes the hidden-zone display contract for 3PDA:
+//     reference zone             = visible card faces
+//     afterhand/opposite/forehand = abstract placeholder/count display only
+//     base                       = abstract placeholder/count display only
+//     no card backs
+//     no hidden per-card DOM
+//
+// hidden-placeholder does NOT mean card backs.
+// hidden-placeholder does NOT mean per-card hidden DOM.
+// hidden-placeholder means abstract display only.
+//
+// This block adds a classification helper and a shell validator.
+// No new visual rendering is introduced.
+// ---------------------------------------------------------------------------
+
+/**
+ * THREE_PDA_ZONE_DISPLAY_CONTRACT
+ *
+ * Canonical display contract tokens for 3PDA placement slots.
+ *   reference-face       : reference slot; resolved card faces visible.
+ *   hidden-placeholder   : afterhand/opposite/forehand slots; abstract count/placeholder only.
+ *   base-placeholder     : base slot/zone; abstract count/placeholder only.
+ *
+ * Not card backs. Not hidden per-card DOM. Abstract display only.
+ */
+const THREE_PDA_ZONE_DISPLAY_CONTRACT = Object.freeze({
+    REFERENCE_FACE:     'reference-face',
+    HIDDEN_PLACEHOLDER: 'hidden-placeholder',
+    BASE_PLACEHOLDER:   'base-placeholder',
+});
+
+/**
+ * get3PDAZoneDisplayMode(slotNameOrZoneId)
+ *
+ * Returns the display contract mode for a 3PDA placement slot name.
+ * Accepts: 'reference', 'afterhand', 'opposite', 'forehand', 'base'.
+ * Returns one of: 'reference-face', 'hidden-placeholder', 'base-placeholder', or null.
+ *
+ * Pure — no DOM mutation, no cardState mutation, no card object creation,
+ * no selected-seat recomputation. Limited to display-contract classification.
+ *
+ * @param {string} slotNameOrZoneId
+ * @returns {string|null}
+ */
+function get3PDAZoneDisplayMode(slotNameOrZoneId) {
+    switch (slotNameOrZoneId) {
+        case 'reference': return THREE_PDA_ZONE_DISPLAY_CONTRACT.REFERENCE_FACE;
+        case 'afterhand':
+        case 'opposite':
+        case 'forehand':  return THREE_PDA_ZONE_DISPLAY_CONTRACT.HIDDEN_PLACEHOLDER;
+        case 'base':      return THREE_PDA_ZONE_DISPLAY_CONTRACT.BASE_PLACEHOLDER;
+        default:          return null;
+    }
+}
+
+/**
+ * validate3PDAHiddenZonePlaceholderContract(shellState)
+ *
+ * Validates that shellState conforms to the hidden-zone placeholder display contract:
+ *   - animationEnabled and gameplayEnabled are false (lifecycle safety flags);
+ *   - cardState zone payloads are manifest ID strings, not card objects or DOM;
+ *   - no card-back/face-down/hiddenCardDom fields on zones, cardState, or shellState;
+ *   - no hidden per-card DOM state embedded in zone or cardState fields;
+ *   - base zone conforms to base-placeholder contract (string IDs only).
+ *
+ * Does not query the DOM. Does not mutate shellState or cardState.
+ * Returns { valid: true } or { valid: false, errors: string[] }.
+ *
+ * @param {object} shellState
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAHiddenZonePlaceholderContract(shellState) {
+    if (!shellState || typeof shellState !== 'object')
+        return { valid: false, errors: ['shellState is null/undefined'] };
+    let errors = [];
+
+    // 1. Lifecycle safety flags
+    let lc = shellState.dealLifecycle;
+    if (!lc) {
+        errors.push('dealLifecycle missing — cannot confirm no-animation/no-gameplay contract');
+    } else {
+        if (lc.animationEnabled !== false)
+            errors.push('contract violation: animationEnabled must be false');
+        if (lc.gameplayEnabled !== false)
+            errors.push('contract violation: gameplayEnabled must be false');
+    }
+
+    // 2. cardState zone payload contract: string manifest IDs only, no card objects
+    let cs = shellState.cardState;
+    if (!cs || typeof cs !== 'object') {
+        errors.push('cardState missing');
+    } else {
+        if (cs.activationStatus !== 'manifest-ids-in-zones') {
+            errors.push('cardState.activationStatus must be manifest-ids-in-zones; got: ' + cs.activationStatus);
+        }
+        let allZones = ['N', 'Sw', 'Se', 'Ay', 'base'];
+        for (let zid of allZones) {
+            let zone = cs.zones && cs.zones[zid];
+            if (!zone) { errors.push('zone missing: ' + zid); continue; }
+            let cards = zone.cards;
+            if (!Array.isArray(cards)) { errors.push(zid + ': zone.cards must be an array'); continue; }
+            // Each card must be a manifest ID string, not a card object
+            for (let i = 0; i < cards.length; i++) {
+                if (typeof cards[i] !== 'string') {
+                    errors.push(zid + '[' + i + ']: zone payload must be a manifest ID string, not ' + typeof cards[i]);
+                    break; // one error per zone is enough
+                }
+            }
+            // Forbidden DOM/card-object/card-back fields on zone
+            let forbiddenZoneFields = ['domElements', 'htmlElement', 'cardBackRendering',
+                                       'faceDownCards', 'hiddenCardDom', 'renderObjects'];
+            for (let f of forbiddenZoneFields) {
+                if (f in zone) errors.push(zid + ': forbidden field on zone: ' + f);
+            }
+        }
+        // Forbidden hidden-zone rendering fields on cardState itself
+        let forbiddenCSFields = ['cardBackRendering', 'faceDownCards', 'hiddenCardDom',
+                                 'renderObjects', 'liveHands', 'liveBase'];
+        for (let f of forbiddenCSFields) {
+            if (f in cs) errors.push('cardState: forbidden field: ' + f);
+        }
+    }
+
+    // 3. Forbidden card-back/animation fields on shellState itself
+    let forbiddenShellFields = ['cardBackRendering', 'faceDownCards', 'hiddenCardDom',
+                                'renderObjects', 'dealingAnimation'];
+    for (let f of forbiddenShellFields) {
+        if (f in shellState) errors.push('shellState: forbidden field: ' + f);
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+// END Note 100 scaffolding
+
+// ---------------------------------------------------------------------------
+// Note 101 — 3PDA qz/declaration state shell, no declaration logic, no UI controls
+//
+// Adds a neutral qz/declaration metadata container for the future qiangzhuang/declaration
+// lifecycle layer.  strain/trump/declarer remain null.  availableActions is empty.
+// logicImplemented / uiControlsEnabled / botActionsEnabled are all false.
+// No declaration rules, no UI controls, no top-level declaring phase.
+// ---------------------------------------------------------------------------
+
+/**
+ * Note 101 — Creates a neutral, unresolved qz/declaration state shell.
+ * Pure factory — returns a plain metadata object.  Does not render UI, does not mutate
+ * cardState or dealLifecycle, does not determine strain/trump/declarer, does not call
+ * bot logic, and does not create declaration actions.
+ *
+ * @param {Object} shellState  Parent 3PDA shell (used only to read frameIndex/dealInstanceId).
+ * @returns {Object}  Unresolved qz/declaration state descriptor.
+ */
+function create3PDAQZDeclarationState(shellState) {
+    // Note 101: pure neutral metadata — no strain, no declarer, no logic/UI/bot.
+    // hidden-placeholder does NOT mean card backs.
+    // qz-declaration-unresolved means declaration layer is not yet implemented in this scaffold.
+    return {
+        kind:                   'three-pda-qz-declaration-state',
+        tableFormat:            'three-player-dummy-ally',
+        status:                 'not-started',
+        lifecycleStage:         'qz-declaration-unresolved',
+        strainEstablished:      false,
+        strain:                 null,
+        trumpDivision:          null,
+        declarerActorId:        null,
+        lastDeclarationActorId: null,
+        availableActions:       [],
+        logicImplemented:       false,
+        uiControlsEnabled:      false,
+        botActionsEnabled:      false,
+        frameIndex:             (shellState && typeof shellState.frameIndex === 'number')
+                                    ? shellState.frameIndex : null,
+        dealInstanceId:         (shellState && shellState.dealInstance)
+                                    ? shellState.dealInstance.dealInstanceId : null,
+    };
+}
+
+/**
+ * Note 101 — Validates a 3PDA qz/declaration state descriptor.
+ * Checks kind/tableFormat, lifecycle stage, null semantics for strain/trump/declarer,
+ * empty availableActions, false logic/UI/bot flags, and absence of forbidden gameplay fields.
+ *
+ * @param {Object} qzState  Output of create3PDAQZDeclarationState().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAQZDeclarationState(qzState) {
+    if (!qzState || typeof qzState !== 'object')
+        return { valid: false, errors: ['qzState is null/undefined or not an object'] };
+    let errors = [];
+    if (qzState.kind !== 'three-pda-qz-declaration-state')
+        errors.push('kind must be three-pda-qz-declaration-state');
+    if (qzState.tableFormat !== 'three-player-dummy-ally')
+        errors.push('tableFormat must be three-player-dummy-ally');
+    const ALLOWED_STATUSES = ['not-started', 'unresolved'];
+    if (!ALLOWED_STATUSES.includes(qzState.status))
+        errors.push('status must be not-started or unresolved, got: ' + qzState.status);
+    if (qzState.lifecycleStage !== 'qz-declaration-unresolved')
+        errors.push('lifecycleStage must be qz-declaration-unresolved');
+    if (qzState.strainEstablished !== false)
+        errors.push('strainEstablished must be false in initial shell');
+    if (qzState.strain !== null)
+        errors.push('strain must be null in initial shell');
+    if (qzState.trumpDivision !== null)
+        errors.push('trumpDivision must be null in initial shell');
+    if (qzState.declarerActorId !== null)
+        errors.push('declarerActorId must be null in initial shell');
+    if (!Array.isArray(qzState.availableActions) || qzState.availableActions.length !== 0)
+        errors.push('availableActions must be an empty array');
+    if (qzState.logicImplemented !== false)
+        errors.push('logicImplemented must be false');
+    if (qzState.uiControlsEnabled !== false)
+        errors.push('uiControlsEnabled must be false');
+    if (qzState.botActionsEnabled !== false)
+        errors.push('botActionsEnabled must be false');
+    // Reject premature/forbidden gameplay fields
+    const FORBIDDEN_FIELDS = [
+        'declarationHistory', 'overcallCandidates', 'selectedDeclaration',
+        'qzWinner', 'basingState', 'scoreState', 'trickState',
+        'playableActions', 'botDecision', 'timerState',
+    ];
+    for (let f of FORBIDDEN_FIELDS) {
+        if (qzState[f] != null)
+            errors.push('qzState must not contain gameplay field: ' + f);
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * Note 101 — Validates consistency between shellState.qzDeclarationState,
+ * shellState.frameIndex, and shellState.dealInstance.dealInstanceId.
+ *
+ * @param {Object} shellState  Output of createThreePDAShellState() or mutated by advanceThreePDAShellFrame().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAShellQZDeclarationConsistency(shellState) {
+    if (!shellState || typeof shellState !== 'object')
+        return { valid: false, errors: ['shellState is null/undefined or not an object'] };
+    let qz = shellState.qzDeclarationState;
+    if (!qz || typeof qz !== 'object')
+        return { valid: false, errors: ['qzDeclarationState missing from shellState'] };
+    let qzV = validate3PDAQZDeclarationState(qz);
+    if (!qzV.valid)
+        return { valid: false, errors: ['qzDeclarationState invalid: ' + (qzV.errors || []).join(', ')] };
+    let errors = [];
+    if (typeof shellState.frameIndex === 'number' && qz.frameIndex !== null &&
+            qz.frameIndex !== shellState.frameIndex) {
+        errors.push('qzDeclarationState.frameIndex (' + qz.frameIndex +
+                    ') does not match shellState.frameIndex (' + shellState.frameIndex + ')');
+    }
+    let di = shellState.dealInstance;
+    if (di && qz.dealInstanceId !== null && qz.dealInstanceId !== di.dealInstanceId) {
+        errors.push('qzDeclarationState.dealInstanceId (' + qz.dealInstanceId +
+                    ') does not match dealInstance.dealInstanceId (' + di.dealInstanceId + ')');
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+// END Note 101 scaffolding
+
+// ---------------------------------------------------------------------------
+// Note 102 — 3PDA basing/bottom state shell, no basing logic, no UI controls
+//
+// Adds a neutral basing/bottom metadata container for the future base/bottom
+// lifecycle layer.  Base cards remain internal assigned manifest-IDs only.
+// basingActorId/controllingActorId are null.  availableActions is empty.
+// logicImplemented / uiControlsEnabled / botActionsEnabled / scoringEnabled are false.
+// No base reveal, pickup, bury/exchange, actor selection, scoring, or top-level phase.
+// ---------------------------------------------------------------------------
+
+/**
+ * Note 102 — Creates a neutral, unresolved basing/bottom state shell.
+ * Pure factory — returns a plain metadata object.  Does not render UI, does not mutate
+ * cardState, dealLifecycle, or qzDeclarationState, does not reveal base cards, does not
+ * determine basing actor, does not call bot/scoring logic.
+ *
+ * @param {Object} shellState  Parent 3PDA shell (used only to read frameIndex/dealInstanceId/cardState).
+ * @returns {Object}  Unresolved basing/bottom state descriptor.
+ */
+function create3PDABasingBottomState(shellState) {
+    // Derive base card count from activated cardState if available; fall back to formula constant.
+    let baseCardCount = 8; // default from create3PDACardZonePlan
+    if (shellState && shellState.cardState &&
+            shellState.cardState.zones && shellState.cardState.zones.base &&
+            Array.isArray(shellState.cardState.zones.base.cards)) {
+        baseCardCount = shellState.cardState.zones.base.cards.length;
+    }
+    let baseCardsAssigned = !!(shellState && shellState.cardState &&
+        shellState.cardState.activationStatus === 'manifest-ids-in-zones');
+    return {
+        kind:                 'three-pda-basing-bottom-state',
+        tableFormat:          'three-player-dummy-ally',
+        status:               'not-started',
+        lifecycleStage:       'basing-unresolved',
+        baseZoneId:           'base',
+        baseCardCount:        baseCardCount,
+        baseCardsAssigned:    baseCardsAssigned,
+        baseCardsRevealed:    false,
+        baseCardsPickedUp:    false,
+        baseCardsBuried:      false,
+        basingActorId:        null,
+        controllingActorId:   null,
+        availableActions:     [],
+        logicImplemented:     false,
+        uiControlsEnabled:    false,
+        botActionsEnabled:    false,
+        scoringEnabled:       false,
+        frameIndex:           (shellState && typeof shellState.frameIndex === 'number')
+                                  ? shellState.frameIndex : null,
+        dealInstanceId:       (shellState && shellState.dealInstance)
+                                  ? shellState.dealInstance.dealInstanceId : null,
+    };
+}
+
+/**
+ * Note 102 — Validates a 3PDA basing/bottom state descriptor.
+ * Checks kind/tableFormat, lifecycle stage, false flags, null actor/control,
+ * empty availableActions, and absence of forbidden gameplay fields.
+ *
+ * @param {Object} basingState  Output of create3PDABasingBottomState().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDABasingBottomState(basingState) {
+    if (!basingState || typeof basingState !== 'object')
+        return { valid: false, errors: ['basingState is null/undefined or not an object'] };
+    let errors = [];
+    if (basingState.kind !== 'three-pda-basing-bottom-state')
+        errors.push('kind must be three-pda-basing-bottom-state');
+    if (basingState.tableFormat !== 'three-player-dummy-ally')
+        errors.push('tableFormat must be three-player-dummy-ally');
+    const ALLOWED_STATUSES = ['not-started', 'unresolved'];
+    if (!ALLOWED_STATUSES.includes(basingState.status))
+        errors.push('status must be not-started or unresolved, got: ' + basingState.status);
+    if (basingState.lifecycleStage !== 'basing-unresolved')
+        errors.push('lifecycleStage must be basing-unresolved');
+    if (basingState.baseZoneId !== 'base')
+        errors.push('baseZoneId must be base');
+    if (basingState.baseCardsRevealed !== false)
+        errors.push('baseCardsRevealed must be false');
+    if (basingState.baseCardsPickedUp !== false)
+        errors.push('baseCardsPickedUp must be false');
+    if (basingState.baseCardsBuried !== false)
+        errors.push('baseCardsBuried must be false');
+    if (basingState.basingActorId !== null)
+        errors.push('basingActorId must be null');
+    if (basingState.controllingActorId !== null)
+        errors.push('controllingActorId must be null');
+    if (!Array.isArray(basingState.availableActions) || basingState.availableActions.length !== 0)
+        errors.push('availableActions must be an empty array');
+    if (basingState.logicImplemented !== false)
+        errors.push('logicImplemented must be false');
+    if (basingState.uiControlsEnabled !== false)
+        errors.push('uiControlsEnabled must be false');
+    if (basingState.botActionsEnabled !== false)
+        errors.push('botActionsEnabled must be false');
+    if (basingState.scoringEnabled !== false)
+        errors.push('scoringEnabled must be false');
+    // Reject premature/forbidden gameplay fields
+    const FORBIDDEN_FIELDS = [
+        'revealedBaseCards', 'pickedUpBaseCards', 'buriedCards', 'burySelection',
+        'basingActor', 'baseOwner', 'baseScoreCards', 'baseScore',
+        'basingTimer', 'basingPrompt', 'playableActions', 'botDecision',
+        'trickState', 'scoreState',
+    ];
+    for (let f of FORBIDDEN_FIELDS) {
+        if (basingState[f] != null)
+            errors.push('basingState must not contain gameplay field: ' + f);
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * Note 102 — Validates consistency between shellState.basingBottomState,
+ * shellState.frameIndex, shellState.dealInstance.dealInstanceId, and
+ * shellState.cardState base zone count.
+ *
+ * @param {Object} shellState  Output of createThreePDAShellState() or mutated by advanceThreePDAShellFrame().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAShellBasingBottomConsistency(shellState) {
+    if (!shellState || typeof shellState !== 'object')
+        return { valid: false, errors: ['shellState is null/undefined or not an object'] };
+    let bs = shellState.basingBottomState;
+    if (!bs || typeof bs !== 'object')
+        return { valid: false, errors: ['basingBottomState missing from shellState'] };
+    let bsV = validate3PDABasingBottomState(bs);
+    if (!bsV.valid)
+        return { valid: false, errors: ['basingBottomState invalid: ' + (bsV.errors || []).join(', ')] };
+    let errors = [];
+    if (typeof shellState.frameIndex === 'number' && bs.frameIndex !== null &&
+            bs.frameIndex !== shellState.frameIndex) {
+        errors.push('basingBottomState.frameIndex (' + bs.frameIndex +
+                    ') does not match shellState.frameIndex (' + shellState.frameIndex + ')');
+    }
+    let di = shellState.dealInstance;
+    if (di && bs.dealInstanceId !== null && bs.dealInstanceId !== di.dealInstanceId) {
+        errors.push('basingBottomState.dealInstanceId (' + bs.dealInstanceId +
+                    ') does not match dealInstance.dealInstanceId (' + di.dealInstanceId + ')');
+    }
+    // baseCardCount consistency
+    let cs = shellState.cardState;
+    if (cs && cs.zones && cs.zones.base && Array.isArray(cs.zones.base.cards)) {
+        let actualCount = cs.zones.base.cards.length;
+        if (bs.baseCardCount !== actualCount) {
+            errors.push('basingBottomState.baseCardCount (' + bs.baseCardCount +
+                        ') does not match cardState base zone count (' + actualCount + ')');
+        }
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+// END Note 102 scaffolding
+
+/**
+ * Creates a metadata-bearing empty 3PDA live card-state container.
+ * Attaches manifest metadata (Note 72), shuffle metadata (Note 73), and
+ * dry-run deal-plan metadata (Note 78 / Note 74).
+ * All hand/base zones remain empty (cards=null). containsLiveCards remains false.
+ * Pure helper — does not mutate shell state, render cards, or change phase.
+ *
+ * @param {Object} cardZonePlan  Output of create3PDACardZonePlan() (Note 70).
+ * @param {{ seed?: string|number }} [options]  Optional seed for shuffle; defaults to THREE_PDA_SHELL_DEBUG_SEED.
+ * @returns {Object}  Metadata-bearing empty live card-state container.
+ */
+function create3PDAMetadataBearingEmptyCardState(cardZonePlan, options) {
+    let seed = (options && options.seed != null) ? options.seed : THREE_PDA_SHELL_DEBUG_SEED;
+
+    // Step 1: empty container (Note 75) — zones null, no live cards
+    let cardState = create3PDAEmptyLiveCardState(cardZonePlan);
+
+    // Step 2: deck manifest (Note 72) — manifest IDs only, no zone assignment
+    let manifest = create3PDADryRunDeckManifest(cardZonePlan);
+    let mResult = validate3PDADryRunDeckManifest(manifest);
+    if (!mResult.valid) {
+        throw new Error('Note 77: manifest invalid: ' + (mResult.errors || []).join(', '));
+    }
+
+    // Step 3: shuffle order (Note 73) — permutation of manifest IDs, no zone assignment
+    let shuffleOrder = create3PDADryRunShuffleOrder(manifest, { seed: seed });
+    let sResult = validate3PDADryRunShuffleOrder(shuffleOrder, manifest);
+    if (!sResult.valid) {
+        throw new Error('Note 77: shuffle order invalid: ' + (sResult.errors || []).join(', '));
+    }
+
+    // Step 4 (Note 78): dry-run deal plan (Note 74) — plannedAssignments as metadata only.
+    // IDs are stored in dealPlanMetadata.plannedAssignments, NOT copied into zone cards.
+    // Zone cards remain null. containsLiveCards remains false.
+    let dealPlan = create3PDADryRunDealPlan(shuffleOrder, cardZonePlan);
+    let dpResult = validate3PDADryRunDealPlan(dealPlan, shuffleOrder, cardZonePlan);
+    if (!dpResult.valid) {
+        throw new Error('Note 78: deal plan invalid: ' + (dpResult.errors || []).join(', '));
+    }
+
+    // Step 5: attach all metadata — IDs stored in metadata, NOT in zone cards.
+    // Zone cards remain null. containsLiveCards remains false.
+    cardState.manifestMetadata = {
+        kind:              manifest.kind,
+        manifestOnly:      manifest.manifestOnly,
+        deckCount:         manifest.deckCount,
+        totalCards:        manifest.totalCards,
+        cardIdentityCount: manifest.cardIdentities.length,
+        manifestCardIds:   manifest.cardIdentities.map(function(c) { return c.manifestCardId; }),
+    };
+    cardState.shuffleMetadata = {
+        kind:                   shuffleOrder.kind,
+        shuffleOrderOnly:       shuffleOrder.shuffleOrderOnly,
+        manifestOnly:           shuffleOrder.manifestOnly,
+        seed:                   shuffleOrder.seed,
+        deckCount:              shuffleOrder.deckCount,
+        totalCards:             shuffleOrder.totalCards,
+        orderedManifestCardIds: shuffleOrder.orderedManifestCardIds,
+        sourceManifestKind:     shuffleOrder.sourceManifestKind,
+    };
+    // Note 78: deal-plan metadata only — plannedAssignments are dry-run IDs, never live zone cards.
+    cardState.dealPlanMetadata = {
+        kind:             dealPlan.kind,
+        dryRunDealOnly:   dealPlan.dryRunDealOnly,
+        manifestOnly:     dealPlan.manifestOnly,
+        deckCount:        dealPlan.deckCount,
+        totalCards:       dealPlan.totalCards,
+        cardsPerHandZone: dealPlan.cardsPerHandZone,
+        baseCardCount:    dealPlan.baseCardCount,
+        assignmentPolicy: dealPlan.assignmentPolicy,
+        handZoneOrder:    dealPlan.handZoneOrder,
+        baseZoneId:       dealPlan.baseZoneId,
+        plannedAssignments: {
+            N:    dealPlan.plannedAssignments.N.slice(),
+            Sw:   dealPlan.plannedAssignments.Sw.slice(),
+            Se:   dealPlan.plannedAssignments.Se.slice(),
+            Ay:   dealPlan.plannedAssignments.Ay.slice(),
+            base: dealPlan.plannedAssignments.base.slice(),
+        },
+    };
+
+    return cardState;
+}
+
+/**
+ * Validates a metadata-bearing empty 3PDA live card-state container.
+ * Runs base Note 75 validation plus metadata field checks.
+ * Ensures manifest/shuffle metadata is present and valid while zones remain empty.
+ * Rejects live cards, zone assignment, deal plan, hands/base, and gameplay fields.
+ *
+ * @param {Object} cardState  Output of create3PDAMetadataBearingEmptyCardState().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAMetadataBearingEmptyCardState(cardState) {
+    // Base empty-container checks (zones, containsLiveCards, count formulas)
+    let baseResult = validate3PDAEmptyLiveCardState(cardState);
+    if (!baseResult.valid) return baseResult;
+
+    let errors = [];
+
+    // Validate manifestMetadata
+    let mm = cardState.manifestMetadata;
+    if (!mm || typeof mm !== 'object') {
+        errors.push('manifestMetadata must be present as an object');
+    } else {
+        if (mm.kind !== 'three-pda-dry-run-deck-manifest')
+            errors.push('manifestMetadata.kind must be three-pda-dry-run-deck-manifest');
+        if (mm.manifestOnly !== true)
+            errors.push('manifestMetadata.manifestOnly must be true');
+        if (typeof mm.deckCount !== 'number' || mm.deckCount < 1)
+            errors.push('manifestMetadata.deckCount must be a positive number');
+        if (mm.totalCards !== 54 * mm.deckCount)
+            errors.push('manifestMetadata.totalCards must equal 54*deckCount');
+        if (!Array.isArray(mm.manifestCardIds))
+            errors.push('manifestMetadata.manifestCardIds must be an array');
+        else if (mm.manifestCardIds.length !== mm.totalCards)
+            errors.push('manifestMetadata.manifestCardIds.length must equal totalCards');
+        if (typeof mm.cardIdentityCount !== 'number' || mm.cardIdentityCount !== mm.totalCards)
+            errors.push('manifestMetadata.cardIdentityCount must equal totalCards');
+    }
+
+    // Validate shuffleMetadata
+    let sm = cardState.shuffleMetadata;
+    if (!sm || typeof sm !== 'object') {
+        errors.push('shuffleMetadata must be present as an object');
+    } else {
+        if (sm.kind !== 'three-pda-dry-run-shuffle-order')
+            errors.push('shuffleMetadata.kind must be three-pda-dry-run-shuffle-order');
+        if (sm.shuffleOrderOnly !== true)
+            errors.push('shuffleMetadata.shuffleOrderOnly must be true');
+        if (sm.manifestOnly !== true)
+            errors.push('shuffleMetadata.manifestOnly must be true');
+        if (!Array.isArray(sm.orderedManifestCardIds))
+            errors.push('shuffleMetadata.orderedManifestCardIds must be an array');
+        else {
+            let mmTotal = (mm && mm.totalCards) || 0;
+            if (sm.orderedManifestCardIds.length !== mmTotal)
+                errors.push('shuffleMetadata.orderedManifestCardIds.length must equal ' + mmTotal);
+            // Permutation check against manifest IDs
+            if (mm && Array.isArray(mm.manifestCardIds)) {
+                let mSet = new Set(mm.manifestCardIds);
+                let seen = new Set();
+                for (let id of sm.orderedManifestCardIds) {
+                    if (!mSet.has(id)) errors.push('shuffleMetadata unknown ID: ' + id);
+                    if (seen.has(id))  errors.push('shuffleMetadata duplicate ID: ' + id);
+                    seen.add(id);
+                }
+                for (let id of mSet) {
+                    if (!seen.has(id)) errors.push('shuffleMetadata missing manifest ID: ' + id);
+                }
+            }
+        }
+    }
+
+    // Validate dealPlanMetadata (Note 78)
+    let dm = cardState.dealPlanMetadata;
+    if (!dm || typeof dm !== 'object') {
+        errors.push('dealPlanMetadata must be present as an object');
+    } else {
+        if (dm.kind !== 'three-pda-dry-run-deal-plan')
+            errors.push('dealPlanMetadata.kind must be three-pda-dry-run-deal-plan');
+        if (dm.dryRunDealOnly !== true)
+            errors.push('dealPlanMetadata.dryRunDealOnly must be true');
+        if (dm.manifestOnly !== true)
+            errors.push('dealPlanMetadata.manifestOnly must be true');
+        if (typeof dm.cardsPerHandZone !== 'number' || dm.cardsPerHandZone < 1)
+            errors.push('dealPlanMetadata.cardsPerHandZone must be a positive number');
+        if (typeof dm.baseCardCount !== 'number' || dm.baseCardCount < 1)
+            errors.push('dealPlanMetadata.baseCardCount must be a positive number');
+        let pa = dm.plannedAssignments;
+        if (!pa || typeof pa !== 'object') {
+            errors.push('dealPlanMetadata.plannedAssignments must be an object');
+        } else {
+            // Count checks
+            for (let z of ['N','Sw','Se','Ay']) {
+                if (!Array.isArray(pa[z]))
+                    errors.push('dealPlanMetadata.plannedAssignments.' + z + ' must be an array');
+                else if (pa[z].length !== dm.cardsPerHandZone)
+                    errors.push('dealPlanMetadata.' + z + ' count must equal cardsPerHandZone');
+            }
+            if (!Array.isArray(pa.base))
+                errors.push('dealPlanMetadata.plannedAssignments.base must be an array');
+            else if (pa.base.length !== dm.baseCardCount)
+                errors.push('dealPlanMetadata.base count must equal baseCardCount');
+            // Consistency: every ID in dealPlanMetadata must be in shuffleMetadata
+            if (sm && Array.isArray(sm.orderedManifestCardIds)) {
+                let sSet = new Set(sm.orderedManifestCardIds);
+                let allAssigned = [];
+                for (let z of ['N','Sw','Se','Ay','base']) {
+                    if (Array.isArray(pa[z])) allAssigned = allAssigned.concat(pa[z]);
+                }
+                let seen = new Set();
+                for (let id of allAssigned) {
+                    if (!sSet.has(id)) errors.push('dealPlanMetadata unknown ID: ' + id);
+                    if (seen.has(id))  errors.push('dealPlanMetadata duplicate ID: ' + id);
+                    seen.add(id);
+                }
+                for (let id of sSet) {
+                    if (!seen.has(id)) errors.push('dealPlanMetadata missing shuffle ID: ' + id);
+                }
+            }
+        }
+    }
+
+    // Belt-and-suspenders: reject live/deal/hands/base fields on container root
+    for (let banned of ['liveDeck', 'deck', 'hands', 'baseCards', 'dealtCards',
+                        'dealingSequence', 'dealing', 'declaration', 'qz',
+                        'scoring', 'tricks', 'play', 'plannedAssignments', 'dealPlan']) {
+        if (banned in cardState) errors.push('cardState must not have field: ' + banned);
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Note 79 — Activation helper: copy dealPlanMetadata into live zone IDs
+// ---------------------------------------------------------------------------
+
+/**
+ * Activates a metadata-bearing empty 3PDA cardState by copying
+ * dealPlanMetadata.plannedAssignments into zone.cards as manifest ID arrays.
+ * Pure helper — does not mutate the input cardState.
+ * Sets containsLiveCards=true, activationStatus='manifest-ids-in-zones',
+ * liveCardPayloadKind='manifest-id'.
+ * Does not create card objects, render cards, change phase, or start gameplay.
+ *
+ * @param {Object} cardState  Output of create3PDAMetadataBearingEmptyCardState().
+ * @returns {Object}  Activated cardState with manifest ID arrays in zone.cards.
+ */
+function activate3PDADealPlanMetadataIntoCardState(cardState) {
+    let vr = validate3PDAMetadataBearingEmptyCardState(cardState);
+    if (!vr.valid) {
+        throw new Error('Note 79: input cardState invalid: ' + (vr.errors || []).join(', '));
+    }
+    let pa = cardState.dealPlanMetadata.plannedAssignments;
+    // Build new zones — manifest ID strings only, no card objects
+    let oldZones = cardState.zones;
+    let newZones = {
+        N:    Object.assign({}, oldZones.N,    { cards: pa.N.slice() }),
+        Sw:   Object.assign({}, oldZones.Sw,   { cards: pa.Sw.slice() }),
+        Se:   Object.assign({}, oldZones.Se,   { cards: pa.Se.slice() }),
+        Ay:   Object.assign({}, oldZones.Ay,   { cards: pa.Ay.slice() }),
+        base: Object.assign({}, oldZones.base, { cards: pa.base.slice() }),
+    };
+    // Return new object — input cardState is not mutated
+    return Object.assign({}, cardState, {
+        containsLiveCards:   true,
+        activationStatus:    'manifest-ids-in-zones',
+        liveCardPayloadKind: 'manifest-id',
+        zones:               newZones,
+    });
+}
+
+/**
+ * Validates an activated 3PDA card-state produced by activate3PDADealPlanMetadataIntoCardState.
+ * Confirms containsLiveCards=true, manifest-ID-only payloads, correct zone counts,
+ * one-time assignment from dealPlanMetadata, metadata preserved, no gameplay fields.
+ *
+ * @param {Object} cardState  Output of activate3PDADealPlanMetadataIntoCardState().
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAActivatedCardState(cardState) {
+    let errors = [];
+    if (!cardState || typeof cardState !== 'object') return { valid: false, errors: ['cardState is null/undefined'] };
+    if (cardState.containsLiveCards !== true)
+        errors.push('containsLiveCards must be true');
+    if (cardState.activationStatus !== 'manifest-ids-in-zones')
+        errors.push('activationStatus must be manifest-ids-in-zones');
+    if (cardState.liveCardPayloadKind !== 'manifest-id')
+        errors.push('liveCardPayloadKind must be manifest-id');
+
+    // Zones must exist with card arrays
+    let zones = cardState.zones;
+    if (!zones || typeof zones !== 'object') {
+        errors.push('zones must be an object');
+        return { valid: false, errors };
+    }
+    let expectedZones = ['N', 'Sw', 'Se', 'Ay', 'base'];
+    for (let z of expectedZones) {
+        if (!zones[z]) { errors.push('missing zone: ' + z); continue; }
+        if (!Array.isArray(zones[z].cards)) errors.push(z + '.cards must be an array');
+    }
+    for (let z of Object.keys(zones)) {
+        if (!expectedZones.includes(z)) errors.push('unexpected zone: ' + z);
+    }
+
+    // Retrieve metadata for validation
+    let dm = cardState.dealPlanMetadata;
+    let sm = cardState.shuffleMetadata;
+    let mm = cardState.manifestMetadata;
+
+    // Metadata must still be present
+    if (!mm || typeof mm !== 'object') errors.push('manifestMetadata must be present');
+    if (!sm || typeof sm !== 'object') errors.push('shuffleMetadata must be present');
+    if (!dm || typeof dm !== 'object') errors.push('dealPlanMetadata must be present');
+
+    if (dm && typeof dm === 'object' && dm.plannedAssignments) {
+        let pa = dm.plannedAssignments;
+        let cph = dm.cardsPerHandZone;
+        let bcc = dm.baseCardCount;
+        // Count checks
+        for (let z of ['N', 'Sw', 'Se', 'Ay']) {
+            if (zones[z] && Array.isArray(zones[z].cards)) {
+                if (zones[z].cards.length !== cph)
+                    errors.push(z + '.cards.length must equal cardsPerHandZone (' + cph + ')');
+                // Exact match against plannedAssignments
+                if (Array.isArray(pa[z])) {
+                    for (let i = 0; i < pa[z].length; i++) {
+                        if (zones[z].cards[i] !== pa[z][i])
+                            errors.push(z + '.cards[' + i + '] does not match plannedAssignments');
+                    }
+                }
+            }
+        }
+        if (zones.base && Array.isArray(zones.base.cards)) {
+            if (zones.base.cards.length !== bcc)
+                errors.push('base.cards.length must equal baseCardCount (' + bcc + ')');
+            if (Array.isArray(pa.base)) {
+                for (let i = 0; i < pa.base.length; i++) {
+                    if (zones.base.cards[i] !== pa.base[i])
+                        errors.push('base.cards[' + i + '] does not match plannedAssignments');
+                }
+            }
+        }
+    }
+
+    // All zone card entries must be strings; no card objects or DOM objects
+    let allAssigned = [];
+    for (let z of expectedZones) {
+        if (zones[z] && Array.isArray(zones[z].cards)) {
+            for (let entry of zones[z].cards) {
+                if (typeof entry !== 'string')
+                    errors.push(z + ' zone contains non-string entry: ' + typeof entry);
+                allAssigned.push(entry);
+            }
+        }
+    }
+
+    // One-time assignment: every shuffle ID appears exactly once
+    if (sm && Array.isArray(sm.orderedManifestCardIds)) {
+        let sSet = new Set(sm.orderedManifestCardIds);
+        let seen = new Set();
+        for (let id of allAssigned) {
+            if (!sSet.has(id)) errors.push('unknown manifest ID in zones: ' + id);
+            if (seen.has(id))  errors.push('duplicate manifest ID in zones: ' + id);
+            seen.add(id);
+        }
+        for (let id of sSet) {
+            if (!seen.has(id)) errors.push('missing shuffle ID from zones: ' + id);
+        }
+    }
+
+    // Reject gameplay/dealing fields
+    for (let banned of ['liveDeck', 'deck', 'hands', 'baseCards', 'dealtCards',
+                        'dealingSequence', 'dealing', 'declaration', 'qz',
+                        'scoring', 'tricks', 'play', 'plannedAssignments', 'dealPlan',
+                        'timerHandle', 'botState']) {
+        if (banned in cardState) errors.push('activated cardState must not have field: ' + banned);
+    }
+
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY 3PDA SCAFFOLDING — Note 82: manifest-ID card identity resolver helpers
+// Pure read-only helpers. Do not mutate cardState or zone arrays.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a read-only Map from manifestCardId -> manifest identity record.
+ * Source: cardState.manifestMetadata.cardIdentities (or reconstructed from manifestCardIds).
+ * Validates uniqueness and X/V/W conventions.
+ * Does not mutate cardState.
+ * @param {object} cardState - activated 3PDA live card state
+ * @returns {Map<string,object>}
+ */
+function create3PDAManifestIdentityMap(cardState) {
+    if (!cardState || typeof cardState !== 'object')
+        throw new Error('Note 82: cardState must be an object');
+    let mm = cardState.manifestMetadata;
+    if (!mm || typeof mm !== 'object')
+        throw new Error('Note 82: cardState.manifestMetadata missing');
+    if (!Array.isArray(mm.manifestCardIds))
+        throw new Error('Note 82: manifestMetadata.manifestCardIds must be an array');
+
+    // Prefer full cardIdentities if present (available from raw manifest), else reconstruct
+    // from manifestCardIds using ID parsing.
+    let identities = Array.isArray(mm.cardIdentities) ? mm.cardIdentities : null;
+
+    let map = new Map();
+    if (identities) {
+        // Full identity records available
+        for (let rec of identities) {
+            if (!rec || typeof rec.manifestCardId !== 'string')
+                throw new Error('Note 82: identity record missing manifestCardId string');
+            if (map.has(rec.manifestCardId))
+                throw new Error('Note 82: duplicate manifestCardId in identities: ' + rec.manifestCardId);
+            // Validate rank/joker conventions
+            if (rec.rank === '10')
+                throw new Error('Note 82: rank "10" found; must use "X": ' + rec.manifestCardId);
+            map.set(rec.manifestCardId, Object.freeze(Object.assign({}, rec)));
+        }
+    } else {
+        // Reconstruct from manifestCardIds using ID string format D<d>-<suit>-<rank> or D<d>-V/W
+        for (let id of mm.manifestCardIds) {
+            if (typeof id !== 'string')
+                throw new Error('Note 82: manifestCardIds entry not a string');
+            if (map.has(id))
+                throw new Error('Note 82: duplicate manifestCardId: ' + id);
+            // Parse: D1-h-X  D1-w-V  D1-w-W  D2-s-A
+            let m = id.match(/^D(\d+)-([dchsw])-?(.+)?$/);
+            if (!m) throw new Error('Note 82: cannot parse manifestCardId: ' + id);
+            let deckOrdinal = Number(m[1]);
+            let rawSuit = m[2];
+            let rawRank = m[3] || null;
+            let isJoker = (rawRank === 'V' || rawRank === 'W') && rawSuit === 'w';
+            if (rawRank === '10') throw new Error('Note 82: rank "10" found; must use "X": ' + id);
+            let rec = Object.freeze({
+                manifestCardId: id,
+                deckOrdinal,
+                suit: rawSuit,
+                rank: rawRank,
+                isJoker,
+                jokerKind: isJoker ? (rawRank === 'V' ? 'small' : 'big') : null,
+            });
+            map.set(id, rec);
+        }
+    }
+
+    if (map.size !== mm.manifestCardIds.length)
+        throw new Error('Note 82: map size mismatch (duplicates removed)');
+    return map;
+}
+
+/**
+ * Resolve a single manifest ID to its manifest identity record.
+ * Rejects unknown IDs and non-string IDs.
+ * Does not mutate cardState.
+ * @param {object} cardState
+ * @param {string} manifestCardId
+ * @returns {object} frozen manifest identity record
+ */
+function resolve3PDAManifestCardIdentity(cardState, manifestCardId) {
+    if (typeof manifestCardId !== 'string')
+        throw new Error('Note 82: manifestCardId must be a string, got: ' + typeof manifestCardId);
+    let map = create3PDAManifestIdentityMap(cardState);
+    if (!map.has(manifestCardId))
+        throw new Error('Note 82: unknown manifestCardId: ' + manifestCardId);
+    return map.get(manifestCardId);
+}
+
+const THREE_PDA_VALID_ZONE_IDS = ['N', 'Sw', 'Se', 'Ay', 'base'];
+
+/**
+ * Return the manifest ID list for a zone. Does not mutate zone.cards.
+ * @param {object} cardState
+ * @param {string} zoneId - one of N/Sw/Se/Ay/base
+ * @returns {string[]} copy of zone.cards
+ */
+function get3PDAZoneManifestIds(cardState, zoneId) {
+    if (!THREE_PDA_VALID_ZONE_IDS.includes(zoneId))
+        throw new Error('Note 82: invalid zoneId: ' + zoneId);
+    if (!cardState || !cardState.zones || !cardState.zones[zoneId])
+        throw new Error('Note 82: zone missing: ' + zoneId);
+    let cards = cardState.zones[zoneId].cards;
+    if (!Array.isArray(cards))
+        throw new Error('Note 82: zone.cards not an array for zone: ' + zoneId);
+    return cards.slice(); // copy, never mutate
+}
+
+/**
+ * Resolve all manifest IDs in a zone to manifest identity records.
+ * Rejects unknown IDs and duplicate IDs within the zone.
+ * Does not mutate zone.cards or store objects in zones.
+ * @param {object} cardState
+ * @param {string} zoneId - one of N/Sw/Se/Ay/base
+ * @returns {object[]} array of frozen manifest identity records (same order as zone.cards)
+ */
+function resolve3PDAZoneManifestCardIdentities(cardState, zoneId) {
+    let ids = get3PDAZoneManifestIds(cardState, zoneId);
+    let map = create3PDAManifestIdentityMap(cardState);
+    let seen = new Set();
+    let result = [];
+    for (let id of ids) {
+        if (!map.has(id))
+            throw new Error('Note 82: unknown manifestCardId in zone ' + zoneId + ': ' + id);
+        if (seen.has(id))
+            throw new Error('Note 82: duplicate manifestCardId in zone ' + zoneId + ': ' + id);
+        seen.add(id);
+        result.push(map.get(id));
+    }
+    return result;
+}
+
+/**
+ * Validate resolved zone identities.
+ * Checks: count, order, no unknown IDs, no duplicates, no render/owner/DOM fields.
+ * @param {object} cardState
+ * @param {string} zoneId
+ * @param {object[]} resolvedIdentities
+ * @returns {{ valid: boolean, errors?: string[] }}
+ */
+function validate3PDAResolvedZoneIdentities(cardState, zoneId, resolvedIdentities) {
+    let errors = [];
+    if (!THREE_PDA_VALID_ZONE_IDS.includes(zoneId)) {
+        errors.push('invalid zoneId: ' + zoneId);
+        return { valid: false, errors };
+    }
+    if (!Array.isArray(resolvedIdentities)) {
+        errors.push('resolvedIdentities must be an array');
+        return { valid: false, errors };
+    }
+    let zoneIds;
+    try { zoneIds = get3PDAZoneManifestIds(cardState, zoneId); }
+    catch (e) { errors.push('zone error: ' + e.message); return { valid: false, errors }; }
+
+    if (resolvedIdentities.length !== zoneIds.length)
+        errors.push('resolved count ' + resolvedIdentities.length + ' != zone count ' + zoneIds.length);
+
+    let seenIds = new Set();
+    let map;
+    try { map = create3PDAManifestIdentityMap(cardState); } catch (e) { errors.push('map error: ' + e.message); }
+
+    for (let i = 0; i < resolvedIdentities.length; i++) {
+        let rec = resolvedIdentities[i];
+        if (!rec || typeof rec !== 'object') { errors.push('[' + i + '] not an object'); continue; }
+        // Must have manifestCardId
+        if (typeof rec.manifestCardId !== 'string') { errors.push('[' + i + '] missing manifestCardId string'); continue; }
+        // Must match zone order
+        if (i < zoneIds.length && rec.manifestCardId !== zoneIds[i])
+            errors.push('[' + i + '] manifestCardId ' + rec.manifestCardId + ' != zone ID ' + zoneIds[i]);
+        // No duplicates
+        if (seenIds.has(rec.manifestCardId)) errors.push('[' + i + '] duplicate: ' + rec.manifestCardId);
+        seenIds.add(rec.manifestCardId);
+        // Unknown ID
+        if (map && !map.has(rec.manifestCardId)) errors.push('[' + i + '] unknown ID: ' + rec.manifestCardId);
+        // Forbidden render/owner/DOM fields
+        for (let f of ['owner', 'dealtTo', 'zoneId', 'displayCard', 'selected', 'element',
+                       'innerHTML', 'className', 'style', 'nodeType', 'renderPayload']) {
+            if (f in rec) errors.push('[' + i + '] forbidden field: ' + f);
+        }
+        // Rank must not be "10"
+        if (rec.rank === '10') errors.push('[' + i + '] rank "10" found; must use "X"');
+    }
+    return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+// TEMPORARY 3PDA SCAFFOLDING — Note 83: read-only zone snapshot helpers
+// Pure, non-mutating. No rendering, no selection, no zone conversion.
+
+// Zone-kind metadata (sealed, used only by snapshot helpers).
+const THREE_PDA_ZONE_KIND_META = Object.freeze({
+    N:    Object.freeze({ zoneKind: 'real-player-hand', isActorZone: true,  isRealPlayer: true,  isDummy: false, isBaseZone: false, frameActorId: 'N',   realNaturalPosition: 'N'   }),
+    Sw:   Object.freeze({ zoneKind: 'real-player-hand', isActorZone: true,  isRealPlayer: true,  isDummy: false, isBaseZone: false, frameActorId: 'Sw',  realNaturalPosition: 'Sw'  }),
+    Se:   Object.freeze({ zoneKind: 'real-player-hand', isActorZone: true,  isRealPlayer: true,  isDummy: false, isBaseZone: false, frameActorId: 'Se',  realNaturalPosition: 'Se'  }),
+    Ay:   Object.freeze({ zoneKind: 'dummy-hand',       isActorZone: true,  isRealPlayer: false, isDummy: true,  isBaseZone: false, frameActorId: 'Ay',  realNaturalPosition: null  }),
+    base: Object.freeze({ zoneKind: 'base-bottom',      isActorZone: false, isRealPlayer: false, isDummy: false, isBaseZone: true,  frameActorId: null,  realNaturalPosition: null  }),
+});
+
+/**
+ * create3PDAZoneSnapshot(cardState, zoneId)
+ * Returns a read-only plain snapshot of one zone. Does not mutate cardState.
+ */
+function create3PDAZoneSnapshot(cardState, zoneId) {
+    if (!THREE_PDA_VALID_ZONE_IDS.includes(zoneId)) {
+        throw new Error('create3PDAZoneSnapshot: invalid zoneId: ' + zoneId);
+    }
+    if (!cardState || typeof cardState !== 'object') {
+        throw new Error('create3PDAZoneSnapshot: cardState must be an object');
+    }
+    if (!cardState.zones || !cardState.zones[zoneId]) {
+        throw new Error('create3PDAZoneSnapshot: zone missing: ' + zoneId);
+    }
+    // Use Note 82 resolvers — both return copies, no mutation
+    const manifestCardIds    = get3PDAZoneManifestIds(cardState, zoneId);
+    const resolvedIdentities = resolve3PDAZoneManifestCardIdentities(cardState, zoneId);
+
+    const meta          = THREE_PDA_ZONE_KIND_META[zoneId];
+    const expectedCount = cardState.zones[zoneId].expectedCount;
+
+    return Object.freeze({
+        kind:                  'three-pda-zone-snapshot',
+        snapshotOnly:          true,
+        renderingEnabled:      false,
+
+        zoneId,
+        zoneKind:              meta.zoneKind,
+        isActorZone:           meta.isActorZone,
+        isRealPlayer:          meta.isRealPlayer,
+        isDummy:               meta.isDummy,
+        isBaseZone:            meta.isBaseZone,
+        frameActorId:          meta.frameActorId,
+        realNaturalPosition:   meta.realNaturalPosition,
+
+        expectedCount,
+        actualCount:           manifestCardIds.length,
+
+        payloadKind:           cardState.liveCardPayloadKind || 'manifest-id',
+        manifestCardIds:       Object.freeze(manifestCardIds),
+        resolvedIdentityCount: resolvedIdentities.length,
+        resolvedIdentities:    Object.freeze(resolvedIdentities),
+    });
+}
+
+/**
+ * create3PDAAllZoneSnapshot(cardState)
+ * Returns a read-only snapshot of all five zones in canonical order.
+ * Throws if totalAssignedCount !== cardState.totalCards.
+ * Does not mutate cardState.
+ */
+function create3PDAAllZoneSnapshot(cardState) {
+    if (!cardState || typeof cardState !== 'object') {
+        throw new Error('create3PDAAllZoneSnapshot: cardState must be an object');
+    }
+    const zoneOrder = ['N', 'Sw', 'Se', 'Ay', 'base'];
+    const zones = {};
+    let totalAssignedCount = 0;
+    for (const zid of zoneOrder) {
+        const snap = create3PDAZoneSnapshot(cardState, zid);
+        zones[zid] = snap;
+        totalAssignedCount += snap.actualCount;
+    }
+    const expectedTotalCards = typeof cardState.totalCards === 'number' ? cardState.totalCards : null;
+    if (expectedTotalCards !== null && totalAssignedCount !== expectedTotalCards) {
+        throw new Error(
+            'create3PDAAllZoneSnapshot: totalAssignedCount ' + totalAssignedCount +
+            ' !== expectedTotalCards ' + expectedTotalCards
+        );
+    }
+    return Object.freeze({
+        kind:               'three-pda-all-zone-snapshot',
+        snapshotOnly:       true,
+        renderingEnabled:   false,
+
+        zoneOrder:          Object.freeze(zoneOrder.slice()),
+        zones:              Object.freeze(zones),
+
+        totalAssignedCount,
+        expectedTotalCards,
+    });
+}
+// END Note 83 scaffolding
+
+// TEMPORARY 3PDA SCAFFOLDING — Note 84: card-zone display-placement snapshot helpers
+// Pure, non-mutating. No rendering, no selection, no zone conversion.
+
+/**
+ * create3PDARawCardZoneDisplayPlacementSnapshot(frameModel, cardState, referenceFrameActorId)
+ *
+ * Maps activated card zones to semantic reference-relative display slots.
+ * referenceFrameActorId must be a real player position: N, Sw, or Se (never Ay).
+ * Does not mutate frameModel, cardState, or any zone snapshot.
+ */
+function create3PDARawCardZoneDisplayPlacementSnapshot(frameModel, cardState, referenceFrameActorId) {
+    if (!frameModel || typeof frameModel !== 'object') {
+        throw new Error('create3PDARawCardZoneDisplayPlacementSnapshot: frameModel required');
+    }
+    if (!THREE_PDA_REAL_NATURAL_POSITIONS_SET.has(referenceFrameActorId)) {
+        throw new Error(
+            'create3PDARawCardZoneDisplayPlacementSnapshot: referenceFrameActorId must be N/Sw/Se; got: ' +
+            referenceFrameActorId
+        );
+    }
+
+    // Build all-zone snapshot (Note 83 helper) — copies, no mutation
+    const allZoneSnap = create3PDAAllZoneSnapshot(cardState);
+
+    // Map each actor zone to its reference-relative display slot
+    const actorZoneIds = ['N', 'Sw', 'Se', 'Ay'];
+    const displaySlots = {};
+    for (const frameActorId of actorZoneIds) {
+        const refPos = get3PDAReferencePositionForFrameActor(
+            frameModel, frameActorId, referenceFrameActorId
+        );
+        const zoneSnap = allZoneSnap.zones[frameActorId];
+        displaySlots[refPos] = Object.freeze({
+            frameActorId,
+            zoneId:       frameActorId,
+            zoneSnapshot: zoneSnap,
+            count:        zoneSnap.actualCount,
+        });
+    }
+
+    // Verify all four semantic slots are populated
+    for (const slot of ['reference', 'afterhand', 'opposite', 'forehand']) {
+        if (!displaySlots[slot]) {
+            throw new Error(
+                'create3PDARawCardZoneDisplayPlacementSnapshot: slot "' + slot + '" not populated'
+            );
+        }
+    }
+
+    // Base zone is non-actor metadata only
+    const baseSnap = allZoneSnap.zones.base;
+    const baseZone = Object.freeze({
+        zoneId:          'base',
+        zoneSnapshot:    baseSnap,
+        count:           baseSnap.actualCount,
+        displayAsCards:  false,
+    });
+
+    return Object.freeze({
+        kind:                   'three-pda-card-zone-display-placement-snapshot',
+        snapshotOnly:           true,
+        renderingEnabled:       false,
+        selectionEnabled:       false,
+
+        referenceFrameActorId,
+
+        displaySlots:           Object.freeze(displaySlots),
+        baseZone,
+
+        totalAssignedCount:     allZoneSnap.totalAssignedCount,
+        expectedTotalCards:     allZoneSnap.expectedTotalCards,
+    });
+}
+
+/**
+ * create3PDACardZoneDisplayPlacementSnapshot(shellState)
+ *
+ * Shell-level wrapper. Uses shellState.selected3PDARealNaturalPosition as the
+ * fixed reference (never shellReferenceActorId, which is debug-only).
+ */
+function create3PDACardZoneDisplayPlacementSnapshot(shellState) {
+    if (!shellState || typeof shellState !== 'object') {
+        throw new Error('create3PDACardZoneDisplayPlacementSnapshot: shellState required');
+    }
+    const referenceFrameActorId = get3PDARealGameReferenceActorId(shellState);
+    return create3PDARawCardZoneDisplayPlacementSnapshot(
+        shellState.currentFrameModel,
+        shellState.cardState,
+        referenceFrameActorId
+    );
+}
+// END Note 84 scaffolding
+
+// false = compact/collapsed (default); true = expanded (full details).
+// Must not affect pivot state, frame model, or reference-position mapping.
+let gThreePDAShellPanelExpanded = false;
 
 // ---------------------------------------------------------------------------
 // Card selection state
@@ -675,6 +3429,18 @@ function hideLocalCrossingActionButtons() {
 // ---------------------------------------------------------------------------
 // Hand rendering — only the human player's hand is displayed
 // ---------------------------------------------------------------------------
+
+/**
+ * Note 95a: Clear stale card contents from the reference-hand surface at new-game boundaries,
+ * while preserving the persistent namebar placed by initPersistentNamebars().
+ * Null-safe and idempotent. Does not mutate game engine state.
+ */
+function clearReferenceHandCardsPreservingNamebar() {
+    if (!gReferenceHandSurface) return;
+    const nb = gReferenceHandSurface.querySelector('.desk-namebar');
+    gReferenceHandSurface.innerHTML = '';
+    if (nb) gReferenceHandSurface.appendChild(nb);
+}
 
 function renderAllHands() {
     renderHand(activeHumanPlayer);
@@ -1907,6 +4673,9 @@ function autoPlayAsBot(player) {
 // ---------------------------------------------------------------------------
 
 function startNewGame() {
+    // Note 66: Clear any active 3PDA shell when 4P game starts.
+    clearThreePDAShell();
+
     ensureResolvedSettings();
     applyUserNaturalPositionFor4P(gResolvedGameSettings.displaySettings && gResolvedGameSettings.displaySettings.userNaturalPosition);
 
@@ -2005,9 +4774,20 @@ function startNewGame() {
     // Initialize persistent name bars (§3)
     initPersistentNamebars();
 
+    // Note 95a: Clear stale card contents from the reference-hand surface before the
+    // frame-intermittent delay.  initPersistentNamebars() above has just placed a fresh
+    // namebar, so this call preserves it while removing old hand cards.
+    clearReferenceHandCardsPreservingNamebar();
+
     // Display current denomination level as rank-only (note 51b).
     gLevelDiv.textContent = levelDisplayLabel(game.level);
     setSeatsTopLeftBoxView('seats');
+
+    // Note 95: Clear stale phase/status text immediately, before the 2-second frame-intermittent
+    // delay (LEAK-1, LEAK-2 from Note 94 audit).  runDealingPhase() will overwrite these with
+    // the live dealing-phase text once dealing begins.
+    updatePhaseDisplay(t('phase.initial'));
+    updateStatus(t('status.ready'));
 
     // Frame-start 2s intermittent (note 24 §3)
     runFrameIntermittent();
@@ -4413,8 +7193,59 @@ function renderSeatSettingsPanel(container, readOnly) {
     container.innerHTML = '';
     let grid = document.createElement('div');
     grid.className = 'settings-grid settings-display-grid';
-    grid.appendChild(createUserNaturalPositionSelector(readOnly));
+    // Note 68: show 3PDA seat selector when table format is 3PDA; 4P selector otherwise.
+    let tableFormat = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal-4P';
+    if (tableFormat === 'three-player-dummy-ally') {
+        grid.appendChild(create3PDARealNaturalPositionSelector(readOnly));
+    } else {
+        grid.appendChild(createUserNaturalPositionSelector(readOnly));
+    }
     container.appendChild(grid);
+}
+
+/**
+ * Creates the 3PDA real natural seat selector (N/Sw/Se only — Ay excluded).
+ * Note 68: stored in gSettingsDraftDisplaySettings.user3PDARealNaturalPosition.
+ */
+function create3PDARealNaturalPositionSelector(readOnly) {
+    let wrapper = document.createElement('div');
+    wrapper.className = 'settings-field';
+
+    let label = document.createElement('label');
+    label.textContent = t('settingsDialog.fields.userNaturalPosition3PDA');
+    wrapper.appendChild(label);
+
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    let current = getDraftUser3PDARealNaturalPosition();
+    for (let value of ['N', 'Sw', 'Se']) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'user3PDARealNaturalPosition';
+        radio.value = value;
+        radio.checked = (value === current);
+        radio.disabled = !!readOnly;
+        radio.setAttribute('data-settings-field', 'user3PDARealNaturalPosition');
+
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setDraftUser3PDARealNaturalPosition(value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(get3PDAActorLabel(value)));
+        radioGroup.appendChild(radioLabel);
+    }
+
+    wrapper.appendChild(radioGroup);
+    return wrapper;
 }
 
 function renderDisplaySettingsPanel(container, readOnly) {
@@ -5433,16 +8264,33 @@ function createPresetRuleHint() {
 }
 
 function createTableFormatSelector(readOnly) {
+    let currentFormat = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal-4P';
     let sel = document.createElement('select');
     sel.className = 'settings-table-format-select';
     sel.setAttribute('data-settings-field', 'tableFormat');
-    // Only normal-4P is available in this version; option is always disabled.
-    let op = document.createElement('option');
-    op.value = 'normal-4P';
-    op.textContent = t('settingsDialog.options.normalFourPlayer');
-    sel.appendChild(op);
-    sel.value = 'normal-4P';
-    sel.disabled = true; // only one option exists
+
+    // normal-4P option (always available)
+    let opNormal = document.createElement('option');
+    opNormal.value = 'normal-4P';
+    opNormal.textContent = t('settingsDialog.options.normalFourPlayer');
+    sel.appendChild(opNormal);
+
+    // three-player-dummy-ally option (placeholder in Note 62 — selectable but gameplay is blocked)
+    let op3PDA = document.createElement('option');
+    op3PDA.value = 'three-player-dummy-ally';
+    op3PDA.textContent = t('settingsDialog.options.threePDA');
+    sel.appendChild(op3PDA);
+
+    sel.value = currentFormat;
+    sel.disabled = !!readOnly;
+
+    if (!readOnly) {
+        sel.addEventListener('change', () => {
+            setRuleConfigFieldValue('tableFormat', sel.value);
+            renderSettingsDialog();
+        });
+    }
+
     return sel;
 }
 
@@ -6035,6 +8883,1231 @@ function renderTimingTabBody(container, readOnly) {
     container.appendChild(rows);
 }
 
+// ---------------------------------------------------------------------------
+// Note 65 — 3PDA non-playable frame preview panel
+// Renders inside the settings Table tab when 3PDA is selected.
+// All state is local UI draft; no live game state is created or mutated.
+// ---------------------------------------------------------------------------
+
+/**
+ * Helper: return the i18n label for a 3PDA frame actor (N/Sw/Se/Ay).
+ */
+function get3PDAActorLabel(actorId) {
+    if (actorId === 'Ay') return t('dummyRoles.Ay');
+    return t('naturalPositions3PDA.' + actorId);
+}
+
+/**
+ * Render the 3PDA non-playable frame preview panel into container.
+ * Called from renderTableTabBody when tableFormat === 'three-player-dummy-ally'.
+ * Reads/writes g3PDAPreviewPivot and g3PDAPreviewReference (local draft state).
+ */
+function render3PDAPreviewPanel(container) {
+    let panel = document.createElement('div');
+    panel.className = 'pda3-preview-panel';
+    panel.id = 'pda3-preview-panel';
+
+    // Title
+    let title = document.createElement('div');
+    title.className = 'pda3-preview-title';
+    title.textContent = t('settingsDialog.threePDAPreview.title');
+    panel.appendChild(title);
+
+    // Not-playable notice
+    let notice = document.createElement('div');
+    notice.className = 'pda3-preview-notice';
+    notice.textContent = t('settingsDialog.threePDAPreview.notPlayable');
+    panel.appendChild(notice);
+
+    // Pivot selector
+    let pivotRow = document.createElement('div');
+    pivotRow.className = 'pda3-preview-row';
+    let pivotLbl = document.createElement('label');
+    pivotLbl.className = 'pda3-preview-label';
+    pivotLbl.textContent = t('settingsDialog.threePDAPreview.pivotSelector') + ':';
+    let pivotSel = document.createElement('select');
+    pivotSel.className = 'pda3-preview-select';
+    pivotSel.id = 'pda3-pivot-select';
+    for (let p of THREE_PDA_REAL_NATURAL_POSITIONS) {
+        let op = document.createElement('option');
+        op.value = p;
+        op.textContent = get3PDAActorLabel(p);
+        pivotSel.appendChild(op);
+    }
+    pivotSel.value = g3PDAPreviewPivot;
+    pivotSel.addEventListener('change', () => {
+        g3PDAPreviewPivot = pivotSel.value;
+        // Reset reference to successor of new pivot to keep the example meaningful
+        let frame = create3PDAFrameModel(g3PDAPreviewPivot);
+        g3PDAPreviewReference = frame.roleToActor.successor;
+        // Re-render: just rebuild the panel content
+        let existing = document.getElementById('pda3-preview-panel');
+        if (existing && existing.parentNode) {
+            let parent = existing.parentNode;
+            let newPanel = document.createElement('div');
+            render3PDAPreviewPanel(newPanel);
+            parent.replaceChild(newPanel.firstChild, existing);
+        }
+    });
+    pivotRow.appendChild(pivotLbl);
+    pivotRow.appendChild(pivotSel);
+    panel.appendChild(pivotRow);
+
+    // Build frame model from accepted helper (no live state)
+    let frame = create3PDAFrameModel(g3PDAPreviewPivot);
+
+    // Frame roles table
+    let rolesTable = document.createElement('table');
+    rolesTable.className = 'pda3-preview-table';
+    let roleNames = ['pivot', 'successor', 'ally', 'predecessor'];
+    for (let role of roleNames) {
+        let actorId = frame.roleToActor[role];
+        let tr = document.createElement('tr');
+        let tdRole = document.createElement('td');
+        tdRole.className = 'pda3-preview-role';
+        tdRole.textContent = t('frameRoles.' + role);
+        let tdActor = document.createElement('td');
+        tdActor.className = 'pda3-preview-actor';
+        tdActor.textContent = get3PDAActorLabel(actorId);
+        tr.appendChild(tdRole);
+        tr.appendChild(tdActor);
+        rolesTable.appendChild(tr);
+    }
+    panel.appendChild(rolesTable);
+
+    // Action cycle
+    let cycleRow = document.createElement('div');
+    cycleRow.className = 'pda3-preview-row';
+    let cycleLbl = document.createElement('span');
+    cycleLbl.className = 'pda3-preview-label';
+    cycleLbl.textContent = t('settingsDialog.threePDAPreview.actionCycle') + ':';
+    let cycleVal = document.createElement('span');
+    cycleVal.className = 'pda3-preview-value';
+    cycleVal.textContent = frame.actionCycle.map(get3PDAActorLabel).join(' \u2192 ');
+    cycleRow.appendChild(cycleLbl);
+    cycleRow.appendChild(cycleVal);
+    panel.appendChild(cycleRow);
+
+    // Next pivot
+    let nextPivotRow = document.createElement('div');
+    nextPivotRow.className = 'pda3-preview-row';
+    let nextPivotLbl = document.createElement('span');
+    nextPivotLbl.className = 'pda3-preview-label';
+    nextPivotLbl.textContent = t('settingsDialog.threePDAPreview.nextPivot') + ':';
+    let nextPivotVal = document.createElement('span');
+    nextPivotVal.className = 'pda3-preview-value';
+    nextPivotVal.textContent = get3PDAActorLabel(getNext3PDAPivotNaturalPosition(g3PDAPreviewPivot));
+    nextPivotRow.appendChild(nextPivotLbl);
+    nextPivotRow.appendChild(nextPivotVal);
+    panel.appendChild(nextPivotRow);
+
+    // Reference selector
+    let refRow = document.createElement('div');
+    refRow.className = 'pda3-preview-row';
+    let refLbl = document.createElement('label');
+    refLbl.className = 'pda3-preview-label';
+    refLbl.textContent = t('settingsDialog.threePDAPreview.referenceSelector') + ':';
+    let refSel = document.createElement('select');
+    refSel.className = 'pda3-preview-select';
+    refSel.id = 'pda3-reference-select';
+    for (let actorId of frame.actionCycle) {
+        let op = document.createElement('option');
+        op.value = actorId;
+        op.textContent = get3PDAActorLabel(actorId);
+        refSel.appendChild(op);
+    }
+    // Ensure reference is a valid frame actor for this pivot
+    if (!frame.actorToRole[g3PDAPreviewReference]) {
+        g3PDAPreviewReference = frame.roleToActor.successor;
+    }
+    refSel.value = g3PDAPreviewReference;
+    refSel.addEventListener('change', () => {
+        g3PDAPreviewReference = refSel.value;
+        let existing = document.getElementById('pda3-preview-panel');
+        if (existing && existing.parentNode) {
+            let parent = existing.parentNode;
+            let newPanel = document.createElement('div');
+            render3PDAPreviewPanel(newPanel);
+            parent.replaceChild(newPanel.firstChild, existing);
+        }
+    });
+    refRow.appendChild(refLbl);
+    refRow.appendChild(refSel);
+    panel.appendChild(refRow);
+
+    // Reference-position matrix for current reference selection
+    let refMatTable = document.createElement('table');
+    refMatTable.className = 'pda3-preview-table';
+    let refPositionNames = ['reference', 'afterhand', 'opposite', 'forehand'];
+    // Build actor-to-refPos map
+    for (let actorId of frame.actionCycle) {
+        let refPos = get3PDAReferencePositionForFrameActor(frame, actorId, g3PDAPreviewReference);
+        let tr = document.createElement('tr');
+        let tdActor = document.createElement('td');
+        tdActor.className = 'pda3-preview-actor';
+        tdActor.textContent = get3PDAActorLabel(actorId);
+        let tdRefPos = document.createElement('td');
+        tdRefPos.className = 'pda3-preview-refpos';
+        tdRefPos.textContent = t('referencePositions.' + refPos);
+        tr.appendChild(tdActor);
+        tr.appendChild(tdRefPos);
+        refMatTable.appendChild(tr);
+    }
+    panel.appendChild(refMatTable);
+
+    container.appendChild(panel);
+}
+
+// ---------------------------------------------------------------------------
+// Note 66 — 3PDA non-card live frame shell
+// Creates and renders a distinct shell state separate from 4P engine/game.
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a new 3PDA shell state object.
+ * The shell state is entirely separate from the 4P game engine state.
+ * It contains no hands, deck, base, scoring, or trick state.
+ * @param {string} initialPivot - N, Sw, or Se
+ * @param {string} [selectedRealSeat] - N, Sw, or Se (from user 3PDA seat selection; defaults to 'N')
+ * @returns {Object} shell state (plain mutable object; not frozen)
+ */
+function createThreePDAShellState(initialPivot, selectedRealSeat, options) {
+    normalize3PDAPivotNaturalPosition(initialPivot || 'N');
+    let pivotPassingState = create3PDAPivotPassingState(initialPivot || 'N');
+    let currentPivot = getCurrent3PDAPivotNaturalPosition(pivotPassingState);
+    // Note 68: selected3PDARealNaturalPosition is the fixed real-game reference —
+    // separate from shellReferenceActorId (debug-only) and from successor default.
+    let realSeat = normalize3PDARealNaturalPosition(selectedRealSeat);
+    // Note 96/97: create deal-instance descriptor — owns seed/policy for this scaffold deal/frame.
+    // Default: generated-local policy (Note 97 — new 3PDA game gets a generated seed).
+    // Tests/dev may pass options.seedPolicy='fixed-debug' or 'explicit-test'.
+    let dealInstance = create3PDADealInstance({
+        seedPolicy:       (options && options.seedPolicy) ? options.seedPolicy : 'generated-local',
+        seed:             (options && options.seed != null) ? options.seed : undefined,
+        frameIndex:       1,
+        pivotActorId:     currentPivot,
+        referenceActorId: realSeat,
+    });
+    let diValidation = validate3PDADealInstance(dealInstance);
+    if (!diValidation.valid) {
+        throw new Error('Note 96: deal instance invalid at shell creation: ' + (diValidation.errors || []).join(', '));
+    }
+    // Note 80: create metadata-bearing empty cardState then activate into manifest-ID zone arrays.
+    // Result: zones.*.cards = [manifestCardId, ...], containsLiveCards=true,
+    // liveCardPayloadKind='manifest-id', activationStatus='manifest-ids-in-zones'.
+    // Manifest IDs only — no card objects, no rendering, no phase change.
+    let cardZonePlan = create3PDACardZonePlan({ deckCount: 2 });
+    // Note 96: seed comes from dealInstance, not hard-coded global directly.
+    let metadataCardState = create3PDAMetadataBearingEmptyCardState(cardZonePlan, { seed: dealInstance.seed });
+    let cardState = activate3PDADealPlanMetadataIntoCardState(metadataCardState);
+    // Note 96: attach lightweight deal-instance metadata to cardState for diagnostics/validation.
+    // No raw seed exposed (seedPolicy + dealInstanceId only); no card IDs.
+    cardState = Object.assign({}, cardState, {
+        dealInstanceMetadata: {
+            kind:           dealInstance.kind,
+            dealInstanceId: dealInstance.dealInstanceId,
+            seedPolicy:     dealInstance.seedPolicy,
+            frameIndex:     dealInstance.frameIndex,
+        },
+    });
+    let csValidation = validate3PDAActivatedCardState(cardState);
+    if (!csValidation.valid) {
+        throw new Error('Note 80: activated cardState failed validation at shell creation: ' +
+            (csValidation.errors || []).join(', '));
+    }
+    let shellState = {
+        kind: 'three-player-dummy-ally-shell',
+        tableFormat: 'three-player-dummy-ally',
+        // Note 69: explicit non-card frame-start shell phase.
+        // Distinct from all 4P playable phases (dealing/declaring/basing/playing/counting/paused/game-over).
+        // No cards/deck/hands/scoring/qz/timers are initialized at this boundary.
+        phase: 'three-pda-frame-start-shell',
+        frameIndex: 1,
+        pivotPassingState: pivotPassingState,
+        currentPivotNaturalPosition: currentPivot,
+        currentFrameModel: create3PDAFrameModel(currentPivot),
+        // Note 68: fixed real-game reference — user's selected real natural seat.
+        selected3PDARealNaturalPosition: realSeat,
+        // Debug-only reference for diagnostic matrix in expanded panel (may be any actor incl Ay).
+        shellReferenceActorId: create3PDAFrameModel(currentPivot).roleToActor.successor,
+        // Note 76: empty live card-state container. containsLiveCards=false; zones all cards=null.
+        cardState: cardState,
+        // Note 96: deal-instance descriptor — owns seed/policy for this scaffold deal/frame.
+        dealInstance: dealInstance,
+        createdAt: Date.now(),
+    };
+    // Note 96: validate seed/cardState consistency.
+    let consV = validate3PDAShellDealInstanceConsistency(shellState);
+    if (!consV.valid) {
+        throw new Error('Note 96: deal-instance consistency check failed: ' + (consV.errors || []).join(', '));
+    }
+    // Note 99: instant undealt-to-dealt lifecycle transition.
+    // Synchronous — no animation, no timer, no new top-level phase.
+    let dealLifecycle = create3PDAInstantScaffoldDealLifecycle(dealInstance, cardState);
+    let lcV = validate3PDADealLifecycleState(dealLifecycle);
+    if (!lcV.valid) {
+        throw new Error('Note 99: deal lifecycle invalid at shell creation: ' + (lcV.errors || []).join(', '));
+    }
+    shellState.dealLifecycle = dealLifecycle;
+    let lcConsV = validate3PDAShellDealLifecycleConsistency(shellState);
+    if (!lcConsV.valid) {
+        throw new Error('Note 99: deal lifecycle consistency check failed: ' + (lcConsV.errors || []).join(', '));
+    }
+    // Note 101: attach fresh unresolved qz/declaration state metadata.
+    // Pure metadata — no strain/trump/declarer, no logic/UI/bot, no top-level phase.
+    shellState.qzDeclarationState = create3PDAQZDeclarationState(shellState);
+    let qzConsV = validate3PDAShellQZDeclarationConsistency(shellState);
+    if (!qzConsV.valid) {
+        throw new Error('Note 101: qz/declaration state consistency check failed: ' + (qzConsV.errors || []).join(', '));
+    }
+    // Note 102: attach fresh unresolved basing/bottom state metadata.
+    // Pure metadata — base cards assigned but not revealed, basing actor/control null,
+    // no logic/UI/bot/scoring, no top-level phase.
+    shellState.basingBottomState = create3PDABasingBottomState(shellState);
+    let bsConsV = validate3PDAShellBasingBottomConsistency(shellState);
+    if (!bsConsV.valid) {
+        throw new Error('Note 102: basing/bottom state consistency check failed: ' + (bsConsV.errors || []).join(', '));
+    }
+    return shellState;
+}
+
+/**
+ * Advances the shell state to the next frame.
+ * Mutates the shell state in place (no live game state is touched).
+ * Note 68: selected3PDARealNaturalPosition is preserved unchanged across frame transitions.
+ * Note 98: creates a new dealInstance and regenerates cardState at the next-frame lifecycle boundary.
+ *   options.seed  — optional explicit seed for the next frame; used when seedPolicy is 'explicit-test'.
+ * @param {Object} shellState
+ * @param {{ seed?: string }} [options]
+ */
+function advanceThreePDAShellFrame(shellState, options) {
+    let newPivotState = advance3PDAPivotPassingState(shellState.pivotPassingState);
+    let newPivot = getCurrent3PDAPivotNaturalPosition(newPivotState);
+    shellState.pivotPassingState = newPivotState;
+    shellState.currentPivotNaturalPosition = newPivot;
+    shellState.currentFrameModel = create3PDAFrameModel(newPivot);
+    // Debug reference resets to successor each frame (frame-relative).
+    shellState.shellReferenceActorId = shellState.currentFrameModel.roleToActor.successor;
+    // selected3PDARealNaturalPosition is NOT reset — it is fixed by user real-seat selection.
+    // Note 69: phase is NOT reset — shell next-frame is a debug frame-boundary transition, not a scoring transition.
+    // phase remains 'three-pda-frame-start-shell' across all frame advances.
+    shellState.frameIndex += 1;
+    // Note 96/98: create new deal-instance for the advanced frame, deriving seedPolicy from the
+    // existing shell's dealInstance.
+    // generated-local: new generated seed each frame (via create3PDAGeneratedDealSeed inside create3PDADealInstance).
+    // fixed-debug:     same fixed-debug seed each frame (deterministic).
+    // explicit-test:   caller may supply options.seed for this frame; falls back to prevDealInstance.seed.
+    let prevDealInstance = shellState.dealInstance;
+    let nextSeed = (prevDealInstance && prevDealInstance.seedPolicy === 'explicit-test')
+        ? ((options && options.seed != null) ? options.seed : prevDealInstance.seed)
+        : undefined;
+    let newDealInstance = create3PDADealInstance({
+        seedPolicy:       prevDealInstance ? prevDealInstance.seedPolicy : 'fixed-debug',
+        seed:             nextSeed,
+        frameIndex:       shellState.frameIndex,
+        pivotActorId:     newPivot,
+        referenceActorId: shellState.selected3PDARealNaturalPosition,
+    });
+    shellState.dealInstance = newDealInstance;
+    // Note 80/98: recreate activated manifest-ID cardState for the new frame through the accepted pipeline.
+    // Zones contain manifest ID arrays; containsLiveCards=true; no rendering/phase change.
+    // Note 96/98: seed comes from dealInstance, not hard-coded global directly.
+    let cardZonePlan = create3PDACardZonePlan({ deckCount: 2 });
+    let metadataCardState = create3PDAMetadataBearingEmptyCardState(cardZonePlan, { seed: newDealInstance.seed });
+    let cardState = activate3PDADealPlanMetadataIntoCardState(metadataCardState);
+    // Note 96/98: attach lightweight deal-instance metadata.
+    cardState = Object.assign({}, cardState, {
+        dealInstanceMetadata: {
+            kind:           newDealInstance.kind,
+            dealInstanceId: newDealInstance.dealInstanceId,
+            seedPolicy:     newDealInstance.seedPolicy,
+            frameIndex:     newDealInstance.frameIndex,
+        },
+    });
+    let csv = validate3PDAActivatedCardState(cardState);
+    if (!csv.valid) {
+        throw new Error('Note 80: activated cardState failed validation at frame advance: ' +
+            (csv.errors || []).join(', '));
+    }
+    shellState.cardState = cardState;
+    // Note 98: validate seed/cardState consistency after frame advance (mirrors createThreePDAShellState check).
+    let consV = validate3PDAShellDealInstanceConsistency(shellState);
+    if (!consV.valid) {
+        throw new Error('Note 98: deal-instance consistency check failed after frame advance: ' +
+            (consV.errors || []).join(', '));
+    }
+    // Note 99: instant undealt-to-dealt lifecycle transition for new frame.
+    // Synchronous — no animation, no timer, no new top-level phase.
+    let newDealLifecycle = create3PDAInstantScaffoldDealLifecycle(newDealInstance, shellState.cardState);
+    let lcV = validate3PDADealLifecycleState(newDealLifecycle);
+    if (!lcV.valid) {
+        throw new Error('Note 99: deal lifecycle invalid at frame advance: ' + (lcV.errors || []).join(', '));
+    }
+    shellState.dealLifecycle = newDealLifecycle;
+    let lcConsV = validate3PDAShellDealLifecycleConsistency(shellState);
+    if (!lcConsV.valid) {
+        throw new Error('Note 99: deal lifecycle consistency check failed after frame advance: ' + (lcConsV.errors || []).join(', '));
+    }
+    // Note 101: attach fresh unresolved qz/declaration state for the new frame.
+    shellState.qzDeclarationState = create3PDAQZDeclarationState(shellState);
+    let qzConsV = validate3PDAShellQZDeclarationConsistency(shellState);
+    if (!qzConsV.valid) {
+        throw new Error('Note 101: qz/declaration state consistency check failed after frame advance: ' + (qzConsV.errors || []).join(', '));
+    }
+    // Note 102: attach fresh unresolved basing/bottom state for the new frame.
+    shellState.basingBottomState = create3PDABasingBottomState(shellState);
+    let bsConsV2 = validate3PDAShellBasingBottomConsistency(shellState);
+    if (!bsConsV2.valid) {
+        throw new Error('Note 102: basing/bottom state consistency check failed after frame advance: ' + (bsConsV2.errors || []).join(', '));
+    }
+}
+
+/**
+ * Clears the 3PDA shell: hides the shell host and panel, resets shell state to null.
+ * Note 66a: uses #pda3-shell-host (dedicated container outside desk grid).
+ */
+function clearThreePDAShell() {
+    gThreePDAShellState = null;
+    gThreePDAShellPanelExpanded = false; // Note 67a: reset fold state on clear
+    let host = document.getElementById('pda3-shell-host');
+    if (host) host.classList.remove('pda3-shell-host-active');
+    let panel = document.getElementById('pda3-shell-panel');
+    if (panel) panel.style.display = 'none';
+    // Note 67: also hide the board-position display layer
+    let boardLayer = document.getElementById('pda3-board-shell-layer');
+    if (boardLayer) boardLayer.classList.remove('pda3-board-shell-active');
+    // Note 88: also hide the board-area zone layer
+    let boardZoneLayer = document.getElementById('pda3-board-zone-layer');
+    if (boardZoneLayer) boardZoneLayer.classList.remove('pda3-board-zone-layer-active');
+}
+
+/**
+ * Note 91 — End (deactivate) any active normal 4P game mode before entering 3PDA scaffold.
+ * Cancels active 4P timers, clears visible 4P UI artifacts, and marks the 4P game
+ * phase as idle so no 4P session remains active underneath the 3PDA scaffold.
+ * Null-safe and idempotent: safe to call when 4P was active or when no 4P game is active.
+ * Does not mutate 3PDA cardState, alter 4P rules/dealing/scoring, or add any gameplay.
+ * Called from confirmCreateGameFromSettings() before createThreePDAShellState().
+ */
+function exitNormal4PModeFor3PDAScaffold() {
+    // Cancel active 4P deal-animation and frame-intermittent timers.
+    if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
+    if (gFrameIntermittentTimeout) {
+        clearTimeout(gFrameIntermittentTimeout);
+        gFrameIntermittentTimeout = null;
+        gFrameIntermittentEndsAt = 0;
+    }
+    clearTimers(); // shot clock, timer overlays
+
+    // Clear 4P-only transient interaction state (null-safe, idempotent).
+    gFCInteraction = null;
+    gCrossingState = null;
+    currentDeclaration = null;
+    gAutoStrain3rdTriggerCard = null;
+    gAutoStrain3rdTriggered = false;
+    pendingNextFrame = null;
+
+    // Clear crossing/forehand UI artifacts (idempotent).
+    hideLocalCrossingActionButtons();
+    clearCrossingSeatStatuses();
+
+    // Clear pause protocol UI (null-safe via internal guard).
+    clearPauseProtocolStateToIdle();
+
+    // Clear visible 4P card/hand/desk artifacts.
+    clearSelection();
+    clearDesk();
+    // Clear the reference hand surface (human player hand cards), including any persistent namebar.
+    if (gReferenceHandSurface) {
+        gReferenceHandSurface.innerHTML = '';
+    }
+
+    // Note 91a: Hide persistent 4P namebars so they do not remain visible underneath 3PDA.
+    // gDeskNamebars entries live inside desk slots (mounted by initPersistentNamebars).
+    // Hiding avoids DOM removal; initPersistentNamebars() will recreate/show them on next 4P start.
+    if (Array.isArray(gDeskNamebars)) {
+        for (let i = 0; i < gDeskNamebars.length; i++) {
+            if (gDeskNamebars[i]) {
+                gDeskNamebars[i].style.display = 'none';
+            }
+        }
+    }
+    // Also hide any .desk-namebar elements left in desk slots (null-safe fallback).
+    for (let i = 0; i < gDeskSlots.length; i++) {
+        if (gDeskSlots[i]) {
+            gDeskSlots[i].querySelectorAll('.desk-namebar').forEach(function(el) {
+                el.style.display = 'none';
+            });
+        }
+    }
+
+    // Hide 4P-specific UI controls.
+    gDeclareMatrix.style.display = 'none';
+    gBtnPlay.disabled = true;
+    hideCountingDialog();
+    if (gBtnShowBase) gBtnShowBase.style.display = 'none';
+    if (gBasePreview) gBasePreview.innerHTML = '';
+
+    // Note 95: Clear stale shared 4P UI surfaces before entering 3PDA scaffold
+    // (LEAK-1 through LEAK-4 from Note 94 audit).
+    updatePhaseDisplay(t('phase.initial'));
+    updateStatus(t('status.ready'));
+    if (gDenomArea) gDenomArea.removeAttribute('strain');   // LEAK-3
+    if (gStrainDiv) gStrainDiv.innerHTML = '';              // LEAK-3
+    if (gDeclareSp) gDeclareSp.textContent = '';           // LEAK-3
+    if (gDeclMethodSp) gDeclMethodSp.textContent = '';     // LEAK-3
+    resetDeclarationHistoryRows();                          // LEAK-4
+
+    // Mark 4P game session as idle/inactive. game is always non-null (global in shengji_engine.js).
+    // Setting game.phase to IDLE establishes the invariant: no 4P session is active under 3PDA.
+    if (game.phase !== GamePhase.IDLE) {
+        game.phase = GamePhase.IDLE;
+    }
+}
+
+/**
+ * Renders the 3PDA non-card live frame shell panel into desk-center.
+ * Shows frame model, action cycle, next pivot, reference preview, and
+ * a "Next shell frame" button. Does not render cards/hands/desks.
+ */
+function renderThreePDAShell() {
+    if (!gThreePDAShellState) return;
+    let shell = gThreePDAShellState;
+    let frame = shell.currentFrameModel;
+
+    // Note 66a/b: render into #pda3-shell-host (dedicated container outside desk grid),
+    // which ensures the panel is not clipped or overlapped by desk-slot grid cells.
+    // Note 66b: use active class (not style.display='') so the CSS display:none is overridden.
+    let host = document.getElementById('pda3-shell-host');
+    if (host) {
+        host.classList.add('pda3-shell-host-active');
+    }
+
+    let existing = document.getElementById('pda3-shell-panel');
+    let panel;
+    if (existing) {
+        panel = existing;
+        panel.innerHTML = '';
+        panel.style.display = '';
+    } else {
+        panel = document.createElement('div');
+        panel.id = 'pda3-shell-panel';
+        let target = host || document.getElementById('desk-center') || document.body;
+        target.appendChild(panel);
+    }
+
+    // Note 67a: compact/foldable panel
+    // The panel has a slim compact bar always visible.
+    // Expanded details are shown/hidden via gThreePDAShellPanelExpanded.
+    if (gThreePDAShellPanelExpanded) {
+        panel.className = 'pda3-shell-panel';
+    } else {
+        panel.className = 'pda3-shell-panel pda3-shell-compact';
+    }
+
+    // --- Compact bar (always rendered) ---
+    let bar = document.createElement('div');
+    bar.className = 'pda3-shell-compact-bar';
+
+    let barTitle = document.createElement('span');
+    barTitle.className = 'pda3-shell-compact-title';
+    barTitle.textContent = t('settingsDialog.threePDAShell.title');
+    bar.appendChild(barTitle);
+
+    let barFrame = document.createElement('span');
+    barFrame.className = 'pda3-shell-compact-item';
+    barFrame.innerHTML = t('settingsDialog.threePDAShell.frameIndex') + '\u00a0<span>' + shell.frameIndex + '</span>';
+    bar.appendChild(barFrame);
+
+    let barPivot = document.createElement('span');
+    barPivot.className = 'pda3-shell-compact-item';
+    barPivot.innerHTML = t('settingsDialog.threePDAShell.currentPivot') + '\u00a0<span>' + get3PDAActorLabel(shell.currentPivotNaturalPosition) + '</span>';
+    bar.appendChild(barPivot);
+
+    let barNextPivot = document.createElement('span');
+    barNextPivot.className = 'pda3-shell-compact-item';
+    barNextPivot.innerHTML = t('settingsDialog.threePDAShell.nextPivot') + '\u00a0<span>' + get3PDAActorLabel(getNext3PDAPivotNaturalPosition(shell.currentPivotNaturalPosition)) + '</span>';
+    bar.appendChild(barNextPivot);
+
+    // Note 69: phase/status display in compact bar
+    let barPhase = document.createElement('span');
+    barPhase.className = 'pda3-shell-compact-item';
+    barPhase.innerHTML = t('settingsDialog.threePDAShell.phaseLabel') + '\u00a0<span>' + t('settingsDialog.threePDAShell.phaseFrameStartShell') + '</span>';
+    bar.appendChild(barPhase);
+
+    let btnNext = document.createElement('button');
+    btnNext.type = 'button'; // Note 66a: explicit type prevents unintended form submission
+    btnNext.className = 'pda3-shell-compact-btn';
+    btnNext.textContent = t('settingsDialog.threePDAShell.nextShellFrame');
+    btnNext.addEventListener('click', () => {
+        advanceThreePDAShellFrame(gThreePDAShellState);
+        renderThreePDAShell();
+    });
+    bar.appendChild(btnNext);
+
+    let btnToggle = document.createElement('button');
+    btnToggle.type = 'button';
+    btnToggle.className = 'pda3-shell-compact-btn';
+    btnToggle.textContent = gThreePDAShellPanelExpanded
+        ? t('settingsDialog.threePDAShell.collapseDetails')
+        : t('settingsDialog.threePDAShell.expandDetails');
+    btnToggle.addEventListener('click', () => {
+        gThreePDAShellPanelExpanded = !gThreePDAShellPanelExpanded;
+        renderThreePDAShell();
+    });
+    bar.appendChild(btnToggle);
+
+    panel.appendChild(bar);
+
+    // --- Expanded details (only when expanded) ---
+    if (gThreePDAShellPanelExpanded) {
+        let details = document.createElement('div');
+        details.className = 'pda3-shell-details';
+
+        // Subtitle (non-playable notice)
+        let subtitle = document.createElement('div');
+        subtitle.className = 'pda3-shell-subtitle';
+        subtitle.textContent = t('settingsDialog.threePDAShell.subtitle');
+        details.appendChild(subtitle);
+
+        // Frame roles table
+        let rolesTable = document.createElement('table');
+        rolesTable.className = 'pda3-shell-table';
+        let roleNames = ['pivot', 'successor', 'ally', 'predecessor'];
+        for (let role of roleNames) {
+            let actorId = frame.roleToActor[role];
+            let tr = document.createElement('tr');
+            let tdRole = document.createElement('td');
+            tdRole.className = 'pda3-shell-role';
+            tdRole.textContent = t('frameRoles.' + role);
+            let tdActor = document.createElement('td');
+            tdActor.className = 'pda3-shell-actor';
+            tdActor.textContent = get3PDAActorLabel(actorId);
+            tr.appendChild(tdRole);
+            tr.appendChild(tdActor);
+            rolesTable.appendChild(tr);
+        }
+        details.appendChild(rolesTable);
+
+        // Action cycle
+        let cycleRow = document.createElement('div');
+        cycleRow.className = 'pda3-shell-row';
+        let cycleLbl = document.createElement('span');
+        cycleLbl.className = 'pda3-shell-label';
+        cycleLbl.textContent = t('settingsDialog.threePDAShell.actionCycle') + ':';
+        let cycleVal = document.createElement('span');
+        cycleVal.className = 'pda3-shell-value';
+        cycleVal.textContent = frame.actionCycle.map(get3PDAActorLabel).join(' \u2192 ');
+        cycleRow.appendChild(cycleLbl);
+        cycleRow.appendChild(cycleVal);
+        details.appendChild(cycleRow);
+
+        // Reference preview section title
+        let refTitle = document.createElement('div');
+        refTitle.className = 'pda3-shell-section-title';
+        refTitle.textContent = t('settingsDialog.threePDAShell.referencePreview');
+        details.appendChild(refTitle);
+
+        // Reference selector
+        let refSelRow = document.createElement('div');
+        refSelRow.className = 'pda3-shell-row';
+        let refLbl = document.createElement('label');
+        refLbl.className = 'pda3-shell-label';
+        refLbl.textContent = t('settingsDialog.threePDAPreview.referenceSelector') + ':';
+        let refSel = document.createElement('select');
+        refSel.className = 'pda3-shell-select';
+        for (let actorId of frame.actionCycle) {
+            let op = document.createElement('option');
+            op.value = actorId;
+            op.textContent = get3PDAActorLabel(actorId);
+            refSel.appendChild(op);
+        }
+        if (!frame.actorToRole[shell.shellReferenceActorId]) {
+            shell.shellReferenceActorId = frame.roleToActor.successor;
+        }
+        refSel.value = shell.shellReferenceActorId;
+        refSel.addEventListener('change', () => {
+            shell.shellReferenceActorId = refSel.value;
+            renderThreePDAShell();
+        });
+        refSelRow.appendChild(refLbl);
+        refSelRow.appendChild(refSel);
+        details.appendChild(refSelRow);
+
+        // Reference-position matrix
+        let refMatTable = document.createElement('table');
+        refMatTable.className = 'pda3-shell-table';
+        for (let actorId of frame.actionCycle) {
+            let refPos = get3PDAReferencePositionForFrameActor(frame, actorId, shell.shellReferenceActorId);
+            let tr = document.createElement('tr');
+            let tdActor = document.createElement('td');
+            tdActor.className = 'pda3-shell-actor';
+            tdActor.textContent = get3PDAActorLabel(actorId);
+            let tdRefPos = document.createElement('td');
+            tdRefPos.className = 'pda3-shell-refpos';
+            tdRefPos.textContent = t('referencePositions.' + refPos);
+            tr.appendChild(tdActor);
+            tr.appendChild(tdRefPos);
+            refMatTable.appendChild(tr);
+        }
+        details.appendChild(refMatTable);
+
+        // Note 81: count-only cardState diagnostic (no card rendering)
+        let csTitle = document.createElement('div');
+        csTitle.className = 'pda3-shell-section-title';
+        csTitle.textContent = t('settingsDialog.threePDAShell.cardStateStatus');
+        details.appendChild(csTitle);
+
+        let cs = shell.cardState;
+        let csActive = cs && cs.containsLiveCards && cs.activationStatus === 'manifest-ids-in-zones';
+
+        let csStatusRow = document.createElement('div');
+        csStatusRow.className = 'pda3-shell-row';
+        let csStatusLbl = document.createElement('span');
+        csStatusLbl.className = 'pda3-shell-label';
+        csStatusLbl.textContent = t('settingsDialog.threePDAShell.cardStateStatus') + ':';
+        let csStatusVal = document.createElement('span');
+        csStatusVal.className = 'pda3-shell-value';
+        csStatusVal.textContent = csActive
+            ? t('settingsDialog.threePDAShell.cardStateActiveManifestIds')
+            : (cs && cs.containsLiveCards === false ? 'empty' : '\u2014');
+        csStatusRow.appendChild(csStatusLbl);
+        csStatusRow.appendChild(csStatusVal);
+        details.appendChild(csStatusRow);
+
+        let csPayloadRow = document.createElement('div');
+        csPayloadRow.className = 'pda3-shell-row';
+        let csPayloadLbl = document.createElement('span');
+        csPayloadLbl.className = 'pda3-shell-label';
+        csPayloadLbl.textContent = t('settingsDialog.threePDAShell.cardStatePayload') + ':';
+        let csPayloadVal = document.createElement('span');
+        csPayloadVal.className = 'pda3-shell-value';
+        csPayloadVal.textContent = (cs && cs.liveCardPayloadKind) ? cs.liveCardPayloadKind : '\u2014';
+        csPayloadRow.appendChild(csPayloadLbl);
+        csPayloadRow.appendChild(csPayloadVal);
+        details.appendChild(csPayloadRow);
+
+        let csZonesRow = document.createElement('div');
+        csZonesRow.className = 'pda3-shell-row';
+        let csZonesLbl = document.createElement('span');
+        csZonesLbl.className = 'pda3-shell-label';
+        csZonesLbl.textContent = t('settingsDialog.threePDAShell.cardStateZones') + ':';
+        let csZonesVal = document.createElement('span');
+        csZonesVal.className = 'pda3-shell-value';
+        let csZoneText = '\u2014';
+        if (cs && cs.zones) {
+            let zn = function(z) {
+                return cs.zones[z] && Array.isArray(cs.zones[z].cards) ? cs.zones[z].cards.length : 0;
+            };
+            csZoneText = [
+                get3PDAActorLabel('N')  + '\u00a0' + zn('N'),
+                get3PDAActorLabel('Sw') + '\u00a0' + zn('Sw'),
+                get3PDAActorLabel('Se') + '\u00a0' + zn('Se'),
+                get3PDAActorLabel('Ay') + '\u00a0' + zn('Ay'),
+                t('settingsDialog.threePDAShell.baseZone') + '\u00a0' + zn('base'),
+            ].join(' / ');
+        }
+        csZonesVal.textContent = csZoneText;
+        csZonesRow.appendChild(csZonesLbl);
+        csZonesRow.appendChild(csZonesVal);
+        details.appendChild(csZonesRow);
+
+        let csAssignedRow = document.createElement('div');
+        csAssignedRow.className = 'pda3-shell-row';
+        let csAssignedLbl = document.createElement('span');
+        csAssignedLbl.className = 'pda3-shell-label';
+        csAssignedLbl.textContent = t('settingsDialog.threePDAShell.cardStateAssigned') + ':';
+        let csAssignedVal = document.createElement('span');
+        csAssignedVal.className = 'pda3-shell-value';
+        let csAssignedText = '\u2014';
+        if (cs && cs.zones) {
+            let csTotal = 0;
+            for (let cz of ['N', 'Sw', 'Se', 'Ay', 'base'])
+                csTotal += (cs.zones[cz] && Array.isArray(cs.zones[cz].cards)) ? cs.zones[cz].cards.length : 0;
+            let csExpected = (cs && cs.totalCards) ? cs.totalCards : '?';
+            csAssignedText = csTotal + ' / ' + csExpected;
+        }
+        csAssignedVal.textContent = csAssignedText;
+        csAssignedRow.appendChild(csAssignedLbl);
+        csAssignedRow.appendChild(csAssignedVal);
+        details.appendChild(csAssignedRow);
+
+        // Note 86: card-zone containers — reference-relative zone display, container-only, no cards
+        let czTitle = document.createElement('div');
+        czTitle.className = 'pda3-shell-section-title';
+        czTitle.textContent = t('settingsDialog.threePDAShell.cardZoneContainers');
+        details.appendChild(czTitle);
+
+        let czLayer = document.createElement('div');
+        czLayer.className = 'pda3-card-zone-layer';
+        try {
+            let placement = create3PDACardZoneDisplayPlacementSnapshot(shell);
+            let actorSlots = [
+                { slotName: 'reference', labelKey: 'slotReference', slot: placement.displaySlots.reference },
+                { slotName: 'afterhand', labelKey: 'slotAfterhand', slot: placement.displaySlots.afterhand },
+                { slotName: 'opposite',  labelKey: 'slotOpposite',  slot: placement.displaySlots.opposite  },
+                { slotName: 'forehand',  labelKey: 'slotForehand',  slot: placement.displaySlots.forehand  },
+            ];
+            for (let { slotName, labelKey, slot } of actorSlots) {
+                let container = document.createElement('div');
+                container.className = 'pda3-card-zone-container pda3-card-zone-slot-' + slotName;
+                container.dataset.slotName = slotName;
+                container.dataset.zoneId   = slot.zoneId;
+                let slotLbl = document.createElement('span');
+                slotLbl.className = 'pda3-cz-slot-label';
+                slotLbl.textContent = t('settingsDialog.threePDAShell.' + labelKey);
+                let sep1 = document.createElement('span');
+                sep1.className = 'pda3-cz-sep';
+                sep1.textContent = '\u2014';
+                let actorLbl = document.createElement('span');
+                actorLbl.className = 'pda3-cz-actor-label';
+                actorLbl.textContent = get3PDAActorLabel(slot.zoneId);
+                let sep2 = document.createElement('span');
+                sep2.className = 'pda3-cz-sep';
+                sep2.textContent = '\u2014';
+                let countLbl = document.createElement('span');
+                countLbl.className = 'pda3-cz-count-label';
+                countLbl.textContent = String(slot.count);
+                container.appendChild(slotLbl);
+                container.appendChild(sep1);
+                container.appendChild(actorLbl);
+                container.appendChild(sep2);
+                container.appendChild(countLbl);
+                // Note 87: zone-level count badge (one per container, not per card)
+                let badge = document.createElement('span');
+                badge.className = 'pda3-card-zone-count-badge';
+                badge.textContent = String(slot.count) + '\u00a0' + t('settingsDialog.threePDAShell.zoneCardsShort');
+                container.appendChild(badge);
+                czLayer.appendChild(container);
+            }
+            // Base zone container
+            let baseContainer = document.createElement('div');
+            baseContainer.className = 'pda3-card-zone-container pda3-card-zone-slot-base';
+            baseContainer.dataset.slotName = 'base';
+            baseContainer.dataset.zoneId   = 'base';
+            let baseLbl = document.createElement('span');
+            baseLbl.className = 'pda3-cz-slot-label';
+            baseLbl.textContent = t('settingsDialog.threePDAShell.slotBase');
+            let baseSep1 = document.createElement('span');
+            baseSep1.className = 'pda3-cz-sep';
+            baseSep1.textContent = '\u2014';
+            let baseActorLbl = document.createElement('span');
+            baseActorLbl.className = 'pda3-cz-actor-label';
+            baseActorLbl.textContent = t('settingsDialog.threePDAShell.baseZone');
+            let baseSep2 = document.createElement('span');
+            baseSep2.className = 'pda3-cz-sep';
+            baseSep2.textContent = '\u2014';
+            let baseCountLbl = document.createElement('span');
+            baseCountLbl.className = 'pda3-cz-count-label';
+            baseCountLbl.textContent = String(placement.baseZone.count);
+            baseContainer.appendChild(baseLbl);
+            baseContainer.appendChild(baseSep1);
+            baseContainer.appendChild(baseActorLbl);
+            baseContainer.appendChild(baseSep2);
+            baseContainer.appendChild(baseCountLbl);
+            // Note 87: zone-level count badge for base zone
+            let baseBadge = document.createElement('span');
+            baseBadge.className = 'pda3-card-zone-count-badge';
+            baseBadge.textContent = String(placement.baseZone.count) + '\u00a0' + t('settingsDialog.threePDAShell.zoneCardsShort');
+            baseContainer.appendChild(baseBadge);
+            czLayer.appendChild(baseContainer);
+        } catch (e) {
+            let czErr = document.createElement('div');
+            czErr.className = 'pda3-cz-error';
+            czErr.textContent = 'card-zone snapshot error: ' + e.message;
+            czLayer.appendChild(czErr);
+        }
+        details.appendChild(czLayer);
+
+        // Note 93: read-only reference-hand layout diagnostics
+        let rhDiagTitle = document.createElement('div');
+        rhDiagTitle.className = 'pda3-shell-section-title';
+        rhDiagTitle.textContent = t('settingsDialog.threePDAShell.refHandDiagTitle');
+        details.appendChild(rhDiagTitle);
+
+        try {
+            let rhPlacement = create3PDACardZoneDisplayPlacementSnapshot(shell);
+            let rhRefSlot   = rhPlacement && rhPlacement.displaySlots && rhPlacement.displaySlots.reference;
+            let rhSorted    = rhRefSlot && rhRefSlot.zoneSnapshot && rhRefSlot.zoneSnapshot.resolvedIdentities
+                ? create3PDAReferenceZoneDisplaySortedIdentities(rhRefSlot.zoneSnapshot.resolvedIdentities)
+                : null;
+            let rhDiag = create3PDAReferenceHandRenderDiagnostic(rhPlacement, rhSorted);
+
+            function makeRhRow(labelKey, valueText) {
+                let row = document.createElement('div');
+                row.className = 'pda3-shell-row';
+                let lbl = document.createElement('span');
+                lbl.className = 'pda3-shell-label';
+                lbl.textContent = t('settingsDialog.threePDAShell.' + labelKey) + ':';
+                let val = document.createElement('span');
+                val.className = 'pda3-shell-value';
+                val.textContent = valueText != null ? String(valueText) : '\u2014';
+                row.appendChild(lbl);
+                row.appendChild(val);
+                return row;
+            }
+
+            details.appendChild(makeRhRow('refHandDiagActor',         rhDiag.zoneId != null ? get3PDAActorLabel(rhDiag.zoneId) + '\u00a0(' + rhDiag.zoneId + ')' : '\u2014'));
+            details.appendChild(makeRhRow('refHandDiagExpected',      rhDiag.expectedCount));
+            details.appendChild(makeRhRow('refHandDiagRendered',      rhDiag.renderedCount));
+            details.appendChild(makeRhRow('refHandDiagVisibleNote',   t('settingsDialog.threePDAShell.refHandDiagVisibleNoteVal')));
+            details.appendChild(makeRhRow('refHandDiagDisplayOrder',  t('settingsDialog.threePDAShell.refHandDiagDisplayOrderVal')));
+            details.appendChild(makeRhRow('refHandDiagDirection',     t('settingsDialog.threePDAShell.refHandDiagDirectionVal')));
+            details.appendChild(makeRhRow('refHandDiagMutation',      t('settingsDialog.threePDAShell.refHandDiagMutationVal')));
+            details.appendChild(makeRhRow('refHandDiagDeterministic', t('settingsDialog.threePDAShell.refHandDiagDeterministicVal')));
+
+            if (rhDiag.nonRefCounts) {
+                let nc = rhDiag.nonRefCounts;
+                let nonRefRow = document.createElement('div');
+                nonRefRow.className = 'pda3-shell-row';
+                let nonRefLbl = document.createElement('span');
+                nonRefLbl.className = 'pda3-shell-label';
+                nonRefLbl.textContent = t('settingsDialog.threePDAShell.refHandDiagNonRef') + ':';
+                let nonRefVal = document.createElement('span');
+                nonRefVal.className = 'pda3-shell-value';
+                nonRefVal.textContent = [
+                    t('settingsDialog.threePDAShell.slotAfterhand') + '\u00a0' + (nc.afterhand != null ? nc.afterhand : '\u2014'),
+                    t('settingsDialog.threePDAShell.slotOpposite')  + '\u00a0' + (nc.opposite  != null ? nc.opposite  : '\u2014'),
+                    t('settingsDialog.threePDAShell.slotForehand')  + '\u00a0' + (nc.forehand  != null ? nc.forehand  : '\u2014'),
+                    t('settingsDialog.threePDAShell.slotBase')      + '\u00a0' + (nc.base      != null ? nc.base      : '\u2014'),
+                ].join(' / ');
+                nonRefRow.appendChild(nonRefLbl);
+                nonRefRow.appendChild(nonRefVal);
+                details.appendChild(nonRefRow);
+            }
+        } catch (e) {
+            let rhErr = document.createElement('div');
+            rhErr.className = 'pda3-cz-error';
+            rhErr.textContent = 'ref-hand diagnostic error: ' + e.message;
+            details.appendChild(rhErr);
+        }
+
+        panel.appendChild(details);
+    }
+
+    // Note 67: also render board-position display layer (Note 88a: count badges integrated here)
+    renderThreePDABoardShell();
+}
+
+/**
+ * Note 93 — Returns a read-only diagnostic record for the reference-zone rendering state.
+ * Pure/null-safe: does not mutate placement, sortedIdentities, cardState, or zone arrays.
+ * @param {object|null} placement  — result of create3PDACardZoneDisplayPlacementSnapshot, or null.
+ * @param {object[]|null} sortedIdentities — display-sorted copy from create3PDAReferenceZoneDisplaySortedIdentities, or null.
+ * @returns {object} diagnostic record with aggregate fields only (no manifest IDs / deck ordinals / identity JSON).
+ */
+function create3PDAReferenceHandRenderDiagnostic(placement, sortedIdentities) {
+    let refSlot = placement && placement.displaySlots && placement.displaySlots.reference;
+    let expectedCount  = (refSlot && typeof refSlot.count === 'number') ? refSlot.count : null;
+    let zoneId         = (refSlot && refSlot.zoneId) ? refSlot.zoneId : null;
+    let renderedCount  = (sortedIdentities && Array.isArray(sortedIdentities)) ? sortedIdentities.length : null;
+    let nonRefCounts = null;
+    if (placement && placement.displaySlots) {
+        let s = placement.displaySlots;
+        nonRefCounts = {
+            afterhand: (s.afterhand && typeof s.afterhand.count === 'number') ? s.afterhand.count : null,
+            opposite:  (s.opposite  && typeof s.opposite.count  === 'number') ? s.opposite.count  : null,
+            forehand:  (s.forehand  && typeof s.forehand.count  === 'number') ? s.forehand.count  : null,
+            base:      (placement.baseZone && typeof placement.baseZone.count === 'number') ? placement.baseZone.count : null,
+        };
+    }
+    return {
+        zoneId:          zoneId,
+        expectedCount:   expectedCount,
+        renderedCount:   renderedCount,
+        displayOrder:    'read-only sorted',
+        displayDirection:'high-left',
+        stateMutation:   'none; display-only',
+        deterministicScaffold: 'enabled',
+        nonRefCounts:    nonRefCounts,
+    };
+}
+
+/**
+ * Note 92 — Returns a display-sorted copy of reference-zone resolved identities.
+ * PROVISIONAL/SCAFFOLD: display-only sorting until real 3PDA qz/declaration/trump lifecycle exists.
+ * Does NOT mutate the source array, cardState, zone arrays, or manifest/deal metadata.
+ * Sort order (provisional):
+ *   1. Non-joker suited cards, grouped by suit (d/c/h/s), then ascending rank within suit.
+ *   2. Jokers last: V (small) then W (big).
+ * Tie-break for duplicate same-identity cards: deckOrdinal then manifestCardId (hidden, display-stable).
+ * @param {ReadonlyArray} referenceIdentities — frozen resolvedIdentities from zoneSnapshot.
+ * @returns {object[]} new sorted array (copy); source is not modified.
+ */
+function create3PDAReferenceZoneDisplaySortedIdentities(referenceIdentities) {
+    // Provisional display sort context (read-only display order, not final trump sorting).
+    const SUIT_ORDER = { d: 0, c: 1, h: 2, s: 3 }; // aligns with THREE_PDA_MANIFEST_SUITS
+    const RANK_ORDER = { '2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6,
+                         '9': 7, 'X': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12,
+                         'V': 13, 'W': 14 };
+    return referenceIdentities.slice().sort(function(a, b) {
+        let aJoker = a.isJoker ? 1 : 0;
+        let bJoker = b.isJoker ? 1 : 0;
+        if (aJoker !== bJoker) return aJoker - bJoker; // jokers last
+        // Same joker/non-joker bucket
+        if (!a.isJoker) {
+            // Group by suit first
+            let aSuit = (SUIT_ORDER[a.suit] !== undefined) ? SUIT_ORDER[a.suit] : 99;
+            let bSuit = (SUIT_ORDER[b.suit] !== undefined) ? SUIT_ORDER[b.suit] : 99;
+            if (aSuit !== bSuit) return aSuit - bSuit;
+        }
+        // Within suit (or within jokers): sort by rank
+        let aRank = (RANK_ORDER[a.rank] !== undefined) ? RANK_ORDER[a.rank] : 99;
+        let bRank = (RANK_ORDER[b.rank] !== undefined) ? RANK_ORDER[b.rank] : 99;
+        if (aRank !== bRank) return aRank - bRank;
+        // Stable tie-breaker for duplicates: deckOrdinal then manifestCardId (hidden from display)
+        let aDeck = typeof a.deckOrdinal === 'number' ? a.deckOrdinal : 0;
+        let bDeck = typeof b.deckOrdinal === 'number' ? b.deckOrdinal : 0;
+        if (aDeck !== bDeck) return aDeck - bDeck;
+        let aId = typeof a.manifestCardId === 'string' ? a.manifestCardId : '';
+        let bId = typeof b.manifestCardId === 'string' ? b.manifestCardId : '';
+        return aId < bId ? -1 : aId > bId ? 1 : 0;
+    }).reverse(); // Note 92a: reversed to match live 4P high-left convention (highest/jokers on the left).
+}
+
+/**
+ * Note 90 — Creates a single non-interactive 3PDA reference-zone card face element.
+ * Scoped to 3PDA only. Does not affect 4P card rendering.
+ * pointer-events: none (enforced by CSS .pda3-ref-card-face).
+ * No click/hover/drag/selection handlers. No playability markers.
+ * @param {Object} identity — resolved manifest identity record (Note 82).
+ *   Required fields: rank (string), suit (string), isJoker (boolean)
+ * @returns {HTMLElement}
+ */
+function create3PDAReferenceZoneCardFaceEl(identity) {
+    let suitIdx = numberToSuitName.indexOf(identity.suit);
+    let el = document.createElement('span');
+    el.className = 'pda3-ref-card-face';
+    el.setAttribute('data-suit', identity.suit);
+    el.setAttribute('data-rank', identity.rank);
+
+    let rankEl = document.createElement('span');
+    rankEl.className = 'pda3-ref-card-rank';
+    rankEl.textContent = identity.rank === 'X' ? '10' : identity.rank;
+
+    let suitEl = document.createElement('span');
+    suitEl.className = 'pda3-ref-card-suit';
+    if (identity.isJoker) {
+        suitEl.innerHTML = jokerHtml;
+    } else {
+        suitEl.innerHTML = suitTexts[suitIdx >= 0 ? suitIdx : 4];
+    }
+
+    el.appendChild(rankEl);
+    el.appendChild(suitEl);
+    return el;
+}
+
+/**
+ * Renders the 3PDA non-card board-position display layer (#pda3-board-shell-layer).
+ * Shows one label box per actor in each board display slot (top/left/right/bottom)
+ * indicating: actor name, frame role, reference position, real/dummy status.
+ * Called from renderThreePDAShell(); cleared by clearThreePDAShell().
+ * Note 67: no cards, no hands, no dealing — shell-only display.
+ * Note 90: reference slot renders card faces; all other slots keep empty placeholders.
+ */
+function renderThreePDABoardShell() {
+    let layer = document.getElementById('pda3-board-shell-layer');
+    if (!layer) return;
+
+    if (!gThreePDAShellState) {
+        layer.classList.remove('pda3-board-shell-active');
+        return;
+    }
+
+    let shell = gThreePDAShellState;
+    let frame = shell.currentFrameModel;
+    // Note 68: board shell uses fixed real-game reference (selected 3PDA natural seat),
+    // NOT the debug shellReferenceActorId (which is for diagnostic matrix only).
+    let refId = get3PDARealGameReferenceActorId(shell);
+
+    layer.classList.add('pda3-board-shell-active');
+    layer.innerHTML = '';
+
+    // Note 88a: get placement snapshot to integrate count badges into shell slots (no separate overlay layer)
+    let placement = null;
+    try { placement = create3PDACardZoneDisplayPlacementSnapshot(shell); } catch (_) { /* ignore */ }
+
+    for (let actorId of frame.actionCycle) {
+        let refPos = get3PDAReferencePositionForFrameActor(frame, actorId, refId);
+        let dispPos = getDisplayPositionForReferencePosition(refPos);
+        let isDummy = (actorId === 'Ay');
+
+        let box = document.createElement('div');
+        box.className = 'pda3-board-label pda3-board-label-' + dispPos;
+        box.dataset.displayPosition = dispPos;
+
+        let nameEl = document.createElement('div');
+        nameEl.className = 'pda3-board-label-name';
+        nameEl.textContent = get3PDAActorLabel(actorId);
+        box.appendChild(nameEl);
+
+        let roleEl = document.createElement('div');
+        roleEl.className = 'pda3-board-label-role';
+        roleEl.textContent = t('frameRoles.' + frame.actorToRole[actorId]);
+        box.appendChild(roleEl);
+
+        let refPosEl = document.createElement('div');
+        refPosEl.className = 'pda3-board-label-refpos';
+        refPosEl.textContent = t('referencePositions.' + refPos);
+        box.appendChild(refPosEl);
+
+        let kindEl = document.createElement('div');
+        kindEl.className = 'pda3-board-label-kind';
+        kindEl.textContent = isDummy
+            ? t('settingsDialog.threePDABoardShell.dummyActor')
+            : t('settingsDialog.threePDABoardShell.realActor');
+        box.appendChild(kindEl);
+
+        // Note 88a: integrated count badge from placement snapshot
+        if (placement && placement.displaySlots[refPos]) {
+            let badge = document.createElement('span');
+            badge.className = 'pda3-board-zone-count-badge';
+            badge.textContent = String(placement.displaySlots[refPos].count) + '\u00a0' + t('settingsDialog.threePDAShell.zoneCardsShort');
+            box.appendChild(badge);
+
+            // Note 90: reference slot → card faces; other slots → empty placeholders (Note 89).
+            let slotData = placement.displaySlots[refPos];
+            if (refPos === 'reference') {
+                // Note 90a: dedicated readable reference hand strip (not a placeholder strip).
+                // Source: placement/snapshot/resolver pipeline (Note 82/83/84).
+                // Note 92: use display-sorted copy (provisional read-only display order, no mutation).
+                let strip = document.createElement('div');
+                strip.className = 'pda3-ref-hand-strip';
+                let identities = create3PDAReferenceZoneDisplaySortedIdentities(
+                    slotData.zoneSnapshot.resolvedIdentities);
+                for (let i = 0; i < identities.length; i++) {
+                    strip.appendChild(create3PDAReferenceZoneCardFaceEl(identities[i]));
+                }
+                box.appendChild(strip);
+            } else {
+                // Note 89: empty placeholder strip for afterhand/opposite/forehand.
+                let count = slotData.count;
+                let strip = document.createElement('div');
+                strip.className = 'pda3-board-zone-slot-placeholder-strip pda3-board-zone-slot-placeholder-hand';
+                for (let i = 0; i < count; i++) {
+                    let ph = document.createElement('span');
+                    ph.className = 'pda3-board-zone-slot-placeholder';
+                    strip.appendChild(ph);
+                }
+                box.appendChild(strip);
+            }
+        }
+
+        layer.appendChild(box);
+    }
+
+    // Note 88a: integrated base zone box in center (no separate overlay layer)
+    if (placement) {
+        let baseBox = document.createElement('div');
+        baseBox.className = 'pda3-board-label pda3-board-label-center';
+        baseBox.dataset.displayPosition = 'center';
+        let baseLbl = document.createElement('div');
+        baseLbl.className = 'pda3-board-label-name';
+        baseLbl.textContent = t('settingsDialog.threePDAShell.slotBase');
+        baseBox.appendChild(baseLbl);
+        let baseBadge = document.createElement('span');
+        baseBadge.className = 'pda3-board-zone-count-badge';
+        baseBadge.textContent = String(placement.baseZone.count) + '\u00a0' + t('settingsDialog.threePDAShell.zoneCardsShort');
+        baseBox.appendChild(baseBadge);
+        // Note 89: per-zone empty slot placeholders for base
+        let baseCount = placement.baseZone.count;
+        let baseStrip = document.createElement('div');
+        baseStrip.className = 'pda3-board-zone-slot-placeholder-strip pda3-board-zone-slot-placeholder-base';
+        for (let i = 0; i < baseCount; i++) {
+            let ph = document.createElement('span');
+            ph.className = 'pda3-board-zone-slot-placeholder';
+            baseStrip.appendChild(ph);
+        }
+        baseBox.appendChild(baseStrip);
+        layer.appendChild(baseBox);
+    }
+}
+
+/**
+ * Note 88 — Renders 3PDA board-area zone containers/placeholders (no cards, no per-card slots, no selection).
+ * Creates or reuses #pda3-board-zone-layer (sibling of #pda3-board-shell-layer).
+ * Shows one semantic zone container per reference-relative slot: reference/afterhand/opposite/forehand/base.
+ * Uses create3PDACardZoneDisplayPlacementSnapshot for rendering input.
+ */
+function renderThreePDABoardZoneLayer() {
+    // Find or create #pda3-board-zone-layer as sibling of #pda3-board-shell-layer
+    let shellLayer = document.getElementById('pda3-board-shell-layer');
+    let parent = shellLayer ? shellLayer.parentNode : null;
+    if (!parent) return;
+    let layer = document.getElementById('pda3-board-zone-layer');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'pda3-board-zone-layer';
+        parent.appendChild(layer);
+    }
+    layer.innerHTML = '';
+    if (!gThreePDAShellState) {
+        layer.classList.remove('pda3-board-zone-layer-active');
+        return;
+    }
+    try {
+        let placement = create3PDACardZoneDisplayPlacementSnapshot(gThreePDAShellState);
+        layer.classList.add('pda3-board-zone-layer-active');
+        let actorSlots = [
+            { slotName: 'reference', labelKey: 'slotReference', slot: placement.displaySlots.reference },
+            { slotName: 'afterhand', labelKey: 'slotAfterhand', slot: placement.displaySlots.afterhand },
+            { slotName: 'opposite',  labelKey: 'slotOpposite',  slot: placement.displaySlots.opposite  },
+            { slotName: 'forehand',  labelKey: 'slotForehand',  slot: placement.displaySlots.forehand  },
+        ];
+        let shell = gThreePDAShellState;
+        let frame = shell.currentFrameModel;
+        let refId  = get3PDARealGameReferenceActorId(shell);
+        for (let { slotName, labelKey, slot } of actorSlots) {
+            let refPos  = get3PDAReferencePositionForFrameActor(frame, slot.zoneId, refId);
+            let dispPos = getDisplayPositionForReferencePosition(refPos);
+            let ctr = document.createElement('div');
+            ctr.className = 'pda3-board-zone-container pda3-board-zone-slot-' + slotName;
+            ctr.dataset.slotName = slotName;
+            ctr.dataset.zoneId   = slot.zoneId;
+            ctr.dataset.displayPosition = dispPos;
+            let slotLbl = document.createElement('span');
+            slotLbl.className = 'pda3-bz-slot-label';
+            slotLbl.textContent = t('settingsDialog.threePDAShell.' + labelKey);
+            ctr.appendChild(slotLbl);
+            let actorLbl = document.createElement('span');
+            actorLbl.className = 'pda3-bz-actor-label';
+            actorLbl.textContent = get3PDAActorLabel(slot.zoneId);
+            ctr.appendChild(actorLbl);
+            let badge = document.createElement('span');
+            badge.className = 'pda3-board-zone-count-badge';
+            badge.textContent = String(slot.count) + '\u00a0' + t('settingsDialog.threePDAShell.zoneCardsShort');
+            ctr.appendChild(badge);
+            layer.appendChild(ctr);
+        }
+        // Base zone container
+        let baseCtr = document.createElement('div');
+        baseCtr.className = 'pda3-board-zone-container pda3-board-zone-slot-base';
+        baseCtr.dataset.slotName = 'base';
+        baseCtr.dataset.zoneId   = 'base';
+        baseCtr.dataset.displayPosition = 'center';
+        let baseLbl = document.createElement('span');
+        baseLbl.className = 'pda3-bz-slot-label';
+        baseLbl.textContent = t('settingsDialog.threePDAShell.slotBase');
+        baseCtr.appendChild(baseLbl);
+        let baseActorLbl = document.createElement('span');
+        baseActorLbl.className = 'pda3-bz-actor-label';
+        baseActorLbl.textContent = t('settingsDialog.threePDAShell.baseZone');
+        baseCtr.appendChild(baseActorLbl);
+        let baseBadge = document.createElement('span');
+        baseBadge.className = 'pda3-board-zone-count-badge';
+        baseBadge.textContent = String(placement.baseZone.count) + '\u00a0' + t('settingsDialog.threePDAShell.zoneCardsShort');
+        baseCtr.appendChild(baseBadge);
+        layer.appendChild(baseCtr);
+    } catch (e) {
+        layer.classList.add('pda3-board-zone-layer-active');
+        let errDiv = document.createElement('div');
+        errDiv.className = 'pda3-bz-error';
+        errDiv.textContent = 'board zone error: ' + e.message;
+        layer.appendChild(errDiv);
+    }
+}
+
 function renderTableTabBody(container, readOnly) {
     let rows = document.createElement('div');
     rows.className = 'table-tab-rows';
@@ -6087,6 +10160,15 @@ function renderTableTabBody(container, readOnly) {
     tableFormatField.appendChild(createTableFormatSelector(readOnly));
     row2.appendChild(tableFormatField);
     rows.appendChild(row2);
+
+    // Note 65: 3PDA non-playable preview panel — appears only when 3PDA is selected.
+    let currentTableFormat = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal-4P';
+    if (currentTableFormat === 'three-player-dummy-ally') {
+        let previewRow = document.createElement('div');
+        previewRow.className = 'table-row pda3-preview-row-wrapper';
+        render3PDAPreviewPanel(previewRow);
+        rows.appendChild(previewRow);
+    }
 
     // Row 3: pivot-pass mode radios.
     let row3 = document.createElement('div');
@@ -6221,6 +10303,20 @@ function closeSettingsDialog() {
 function confirmCreateGameFromSettings() {
     if (gSettingsMode !== 'create') {
         closeSettingsDialog();
+        return;
+    }
+
+    // Note 66: Route 3PDA to non-card live frame shell (replaces Note 62 placeholder block).
+    let tableFormat = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal-4P';
+    if (tableFormat === 'three-player-dummy-ally') {
+        // Note 91: End any active normal 4P game mode before entering 3PDA scaffold.
+        exitNormal4PModeFor3PDAScaffold();
+        // Note 68: read user's selected 3PDA real natural seat from settings draft.
+        let selectedRealSeat = getDraftUser3PDARealNaturalPosition();
+        gThreePDAShellState = createThreePDAShellState('N', selectedRealSeat);
+        gThreePDAShellPanelExpanded = false; // Note 67a: default to compact on new shell start
+        closeSettingsDialog();
+        renderThreePDAShell();
         return;
     }
 

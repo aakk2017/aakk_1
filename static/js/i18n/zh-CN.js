@@ -178,46 +178,46 @@ const messages_zhCN = {
     multiplay:'甩牌',
   },
 
-  // ── Player names ──
+  // ── Player ownership labels (ownership only — no natural position encoded) ──
   players: {
-    south: '南 (你)',
-    east:  '东 (Bot)',
-    north: '北 (Bot)',
-    west:  '西 (Bot)',
     youShort: '你',
     botShort: 'Bot',
   },
 
-  // ── Position labels ──
-  positions: {
+  // ── 4P natural-position labels (canonical, merged from positions + natural) ──
+  naturalPositions4P: {
     south: '南',
     east:  '东',
     north: '北',
     west:  '西',
   },
 
-  // ── Seat labels (game-relative) ──
-  seats: {
+  // ── 3PDA real natural-position labels (real players only; Ay/dummy excluded) ──
+  naturalPositions3PDA: {
+    N:  '子',
+    Sw: '申',
+    Se: '辰',
+  },
+
+  // ── Dummy / Ay role label ──
+  dummyRoles: {
+    Ay: '明',
+  },
+
+  // ── Frame-role labels (game-relative; renamed from seats) ──
+  frameRoles: {
     pivot:       '庄家',
     successor:   '右家',
     ally:        '前家',
     predecessor: '左家',
   },
 
-  // ── Relative positions ──
-  relative: {
-    self:      '本家',
+  // ── Reference-position labels (renamed from relative; self -> reference) ──
+  referencePositions: {
+    reference: '本家',
     afterhand: '下家',
     opposite:  '对家',
     forehand:  '上家',
-  },
-
-  // ── Natural positions (for recap) ──
-  natural: {
-    east:  '东',
-    north: '北',
-    west:  '西',
-    south: '南',
   },
 
   // ── Error messages ──
@@ -261,6 +261,63 @@ const messages_zhCN = {
     cancel: '取消',
     close: '关闭',
     confirm: '开始对局',
+    threePDANotImplemented: '三人明手模式尚未实现，请选择普通四人模式。',
+    threePDAPreview: {
+      title:             '三人明手局面预览',
+      pivotSelector:     '预览庄家',
+      referenceSelector: '预览本家',
+      actionCycle:       '行牌顺序',
+      nextPivot:         '下局庄家',
+      notPlayable:       '仅供预览 — 三人明手对局尚未实现。',
+    },
+    threePDAShell: {
+      title:            '三人明手框架',
+      subtitle:         '仅预览局面模型，尚未实现发牌/行牌。',
+      frameIndex:       '局数',
+      currentPivot:     '当前庄家',
+      nextPivot:        '下局庄家',
+      actionCycle:      '行牌顺序',
+      referencePreview: '本家预览',
+      nextShellFrame:   '下一框架局',
+      expandDetails:    '展开详情',
+      collapseDetails:  '收起详情',
+      phaseLabel:       '状态',
+      phaseFrameStartShell: '局面起始框架',
+      cardStateStatus:            '牌状态',
+      cardStateActiveManifestIds: '已激活编号',
+      cardStatePayload:           '载荷',
+      cardStateZones:             '分区',
+      cardStateAssigned:          '已分配',
+      baseZone:                   '底',
+      cardZoneContainers:         '牌区容器',
+      slotReference:              '本家',
+      slotAfterhand:              '下家',
+      slotOpposite:               '对家',
+      slotForehand:               '上家',
+      slotBase:                   '底牌区',
+      zoneCount:                  '张数',
+      zoneCardsShort:             '张',
+      refHandDiagTitle:             '本家手牌诊断',
+      refHandDiagActor:             '本家角色/区域',
+      refHandDiagExpected:          '期望张数',
+      refHandDiagRendered:          '已渲染牌面',
+      refHandDiagVisibleNote:       '可见牌面（说明）',
+      refHandDiagVisibleNoteVal:    '25（仅浏览器测量）',
+      refHandDiagDisplayOrder:      '显示排序',
+      refHandDiagDisplayOrderVal:   '只读排序',
+      refHandDiagDirection:         '显示方向',
+      refHandDiagDirectionVal:      '大牌在左（符合四人规则）',
+      refHandDiagMutation:          '状态变更',
+      refHandDiagMutationVal:       '无；仅用于显示',
+      refHandDiagDeterministic:     '确定性脚手架',
+      refHandDiagDeterministicVal:  '已启用',
+      refHandDiagNonRef:            '非本家占位格',
+    },
+    threePDABoardShell: {
+      realActor:  '真人',
+      dummyActor: '明手',
+      shellOnly:  '框架预览',
+    },
     displayPlaceholder: '显示设置（预留）：结构已保留，后续可加入局内可编辑显示项。',
     tabs: {
       table: '牌桌',
@@ -306,8 +363,7 @@ const messages_zhCN = {
       mustStopLevels: '必停',
       knockBackLevels: '勾级',
       skipLevels: '跳过',
-      userNaturalPosition: '选座',
-      knockBackCondition: '勾回条件',
+      userNaturalPosition: '选座',      userNaturalPosition3PDA: '三人明手选坐',      knockBackCondition: '勾回条件',
       gameMode: '循环方式',
       timingPreset: '预设计时方案',
       timingMode: '计时方式',
@@ -355,6 +411,7 @@ const messages_zhCN = {
       eightFourFour: '8-4-4',
       noPreset: '(无)',
       normalFourPlayer: '普通四人',
+      threePDA: '三人明手',
       // 级别预设
       skip468: '跳468',
       singleT: '单T抠底',

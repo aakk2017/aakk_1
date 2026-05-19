@@ -72,7 +72,11 @@
             </div>
             <div id="desk-right"  class="desk-slot"></div>
             <div id="desk-bottom" class="desk-slot"></div>
+            <!-- Note 67: 3PDA non-card board-position display layer — positioned over desk grid -->
+            <div id="pda3-board-shell-layer"></div>
         </div>
+        <!-- Note 66a: Dedicated host for 3PDA shell panel — outside the desk grid so controls receive pointer events reliably -->
+        <div id="pda3-shell-host"></div>
         <div class="tbrow" id="row-bottom">
             <div class="corner" id="corner-lb">
                 <div id="game-actions">

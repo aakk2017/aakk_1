@@ -39,6 +39,7 @@
     width: 175vh;
     height: 60vh;
     margin: 0;
+    position: relative; /* Note 67: enables absolute overlay positioning for #pda3-board-shell-layer */
     grid-template-areas:
         ".     north  ."
         "west  center east"
@@ -1902,6 +1903,339 @@
     max-width: 58vh;
 }
 
+/* Note 67 — 3PDA non-card board-position display shell layer
+   Sits inside .game-desk-container (position:relative) as an absolute overlay.
+   Mirrors the desk grid layout so labels appear over the correct board slots.
+   pointer-events:none so clicks still reach the desk and the shell panel above. */
+#pda3-board-shell-layer {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    grid-template-areas:
+        ".     north  ."
+        "west  center east"
+        ".     south  .";
+    grid-template-columns: 1fr 80vh 1fr;
+    grid-template-rows: 20vh 20vh 20vh;
+}
+
+#pda3-board-shell-layer.pda3-board-shell-active {
+    display: grid;
+}
+
+.pda3-board-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(247, 246, 241, 0.92);
+    border: 1.5px solid #b5a96a;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 10px auto;
+    width: fit-content;
+    max-width: 90%;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.pda3-board-label[data-display-position="top"]    { grid-area: north; }
+.pda3-board-label[data-display-position="left"]   { grid-area: west; }
+.pda3-board-label[data-display-position="right"]  { grid-area: east; }
+.pda3-board-label[data-display-position="bottom"] { grid-area: south; align-self: start; } /* Note 92a: size to content so strip rows are not clipped */
+/* Note 88a: base zone box placed in center grid area */
+.pda3-board-label[data-display-position="center"] { grid-area: center; }
+
+.pda3-board-label-name {
+    font-size: 2.8vh;
+    font-weight: 700;
+    color: #4a3c00;
+    margin-bottom: 2px;
+    font-family: "Roboto Mono", "Noto Sans SC";
+}
+
+.pda3-board-label-role {
+    font-size: 1.4vh;
+    color: #665522;
+    font-weight: 600;
+    font-family: "Noto Sans SC", "Roboto";
+}
+
+.pda3-board-label-refpos {
+    font-size: 1.3vh;
+    color: #556677;
+    font-family: "Noto Sans SC", "Roboto";
+}
+
+.pda3-board-label-kind {
+    font-size: 1.1vh;
+    color: #888;
+    font-style: italic;
+    font-family: "Noto Sans SC", "Roboto";
+}
+
+/* Note 86 — 3PDA reference-relative card-zone containers (container-only, no cards, no backs, no slots) */
+.pda3-card-zone-layer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 4px 0;
+}
+
+.pda3-card-zone-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(247, 246, 241, 0.96);
+    border: 1.5px solid #b5a96a;
+    border-radius: 7px;
+    padding: 5px 12px;
+    min-width: 80px;
+    font-family: "Noto Sans SC", "Roboto", sans-serif;
+    box-sizing: border-box;
+}
+
+.pda3-card-zone-slot-reference { border-color: #6a9ab5; background: rgba(220, 235, 245, 0.97); }
+.pda3-card-zone-slot-afterhand  { border-color: #b5a96a; }
+.pda3-card-zone-slot-opposite   { border-color: #9ab56a; background: rgba(235, 245, 220, 0.97); }
+.pda3-card-zone-slot-forehand   { border-color: #b5a96a; }
+.pda3-card-zone-slot-base       { border-color: #a09090; background: rgba(240, 235, 235, 0.97); }
+
+.pda3-cz-slot-label {
+    font-size: 0.85em;
+    font-weight: 700;
+    color: #4a3c00;
+    white-space: nowrap;
+}
+
+.pda3-cz-sep {
+    color: #bba;
+    font-size: 0.85em;
+}
+
+.pda3-cz-actor-label {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: #222;
+    white-space: nowrap;
+}
+
+.pda3-cz-count-label {
+    font-size: 0.85em;
+    color: #556;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.pda3-cz-error {
+    color: #c00;
+    font-size: 0.85em;
+}
+
+/* Note 87 — zone-level count badge (pill/capsule, not card-like) */
+.pda3-card-zone-count-badge {
+    display: inline-block;
+    background: rgba(80, 80, 120, 0.12);
+    border: 1px solid rgba(80, 80, 120, 0.25);
+    border-radius: 999px;
+    padding: 1px 9px;
+    font-size: 0.82em;
+    font-weight: 600;
+    color: #334;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+    margin-left: 4px;
+}
+
+/* Note 88 — 3PDA board-area zone containers/placeholders (no cards, no per-card slots, no selection)
+   #pda3-board-zone-layer is created dynamically by JS as a sibling of #pda3-board-shell-layer. */
+#pda3-board-zone-layer {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 12;
+    pointer-events: none;
+    grid-template-areas:
+        ".     north  ."
+        "west  center east"
+        ".     south  .";
+    grid-template-columns: 1fr 80vh 1fr;
+    grid-template-rows: 20vh 20vh 20vh;
+}
+
+#pda3-board-zone-layer.pda3-board-zone-layer-active {
+    display: grid;
+}
+
+.pda3-board-zone-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: rgba(235, 245, 255, 0.90);
+    border: 1.5px solid #70a8d0;
+    border-radius: 8px;
+    padding: 5px 14px;
+    width: fit-content;
+    max-width: 92%;
+    margin: auto;
+    margin-top: 44px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+    pointer-events: none;
+    box-sizing: border-box;
+    font-family: "Noto Sans SC", "Roboto", sans-serif;
+}
+
+.pda3-board-zone-container[data-display-position="top"]    { grid-area: north; }
+.pda3-board-zone-container[data-display-position="left"]   { grid-area: west; }
+.pda3-board-zone-container[data-display-position="right"]  { grid-area: east; }
+.pda3-board-zone-container[data-display-position="bottom"] { grid-area: south; }
+.pda3-board-zone-container[data-display-position="center"] { grid-area: center; margin-top: auto; }
+
+.pda3-board-zone-slot-reference { border-color: #6a9ab5; background: rgba(210, 228, 245, 0.92); }
+.pda3-board-zone-slot-afterhand  { border-color: #b5a96a; background: rgba(248, 242, 220, 0.92); }
+.pda3-board-zone-slot-opposite   { border-color: #9ab56a; background: rgba(228, 245, 216, 0.92); }
+.pda3-board-zone-slot-forehand   { border-color: #b5a96a; background: rgba(248, 242, 220, 0.92); }
+.pda3-board-zone-slot-base       { border-color: #a09090; background: rgba(238, 230, 230, 0.92); }
+
+.pda3-bz-slot-label {
+    font-size: 1.5vh;
+    font-weight: 700;
+    color: #4a3c00;
+    white-space: nowrap;
+}
+
+.pda3-bz-actor-label {
+    font-size: 1.8vh;
+    font-weight: 600;
+    color: #222;
+    white-space: nowrap;
+}
+
+.pda3-board-zone-count-badge {
+    display: inline-block;
+    background: rgba(80, 80, 120, 0.13);
+    border: 1px solid rgba(80, 80, 120, 0.22);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 1.3vh;
+    font-weight: 600;
+    color: #334;
+    white-space: nowrap;
+}
+
+.pda3-bz-error {
+    color: #c00;
+    font-size: 0.85em;
+    font-family: sans-serif;
+}
+
+/* Note 89 — 3PDA board-area per-zone empty slot placeholders (count-matching, no card data, no selection) */
+.pda3-board-zone-slot-placeholder-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    justify-content: center;
+    margin-top: 4px;
+    pointer-events: none;
+    max-width: 100%;
+}
+
+.pda3-board-zone-slot-placeholder {
+    display: inline-block;
+    width: 8px;
+    height: 12px;
+    background: rgba(100, 110, 130, 0.18);
+    border: 1px solid rgba(100, 110, 130, 0.28);
+    border-radius: 2px;
+    pointer-events: none;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.pda3-board-zone-slot-placeholder-base .pda3-board-zone-slot-placeholder {
+    background: rgba(120, 80, 80, 0.18);
+    border-color: rgba(120, 80, 80, 0.28);
+}
+
+/* Note 90a — 3PDA reference-zone readable card faces.
+   Replaces Note 90 mini-faces with a dedicated non-placeholder hand strip.
+   Scoped to pda3-ref-* only. Does not affect 4P card styles.
+   pointer-events: none enforces no-selection/no-click/no-hover/no-drag.
+   Note 90a deterministic behavior: shell-only Next frame keeps same reference hand
+   because cardState uses a dry-run manifest; no real per-frame dealing is performed. */
+
+/* Dedicated reference hand strip — NOT a placeholder strip. */
+.pda3-ref-hand-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    justify-content: flex-start;
+    align-content: flex-start;
+    margin-top: 4px;
+    padding: 2px;
+    pointer-events: none;
+    max-width: 100%;
+    overflow: visible; /* Note 92a: allow wrapped rows to show even if label is constrained */
+    flex-shrink: 0;    /* Note 92a: prevent strip from shrinking below its wrapped-content height */
+}
+
+.pda3-ref-card-face {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 2px;
+    width: 30px;
+    height: 44px;
+    background: #fff;
+    border: 1px solid rgba(60, 60, 100, 0.50);
+    border-radius: 3px;
+    box-sizing: border-box;
+    pointer-events: none;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+    flex-shrink: 0;
+    overflow: hidden;
+    line-height: 1;
+}
+
+.pda3-ref-card-rank {
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #222;
+}
+
+.pda3-ref-card-suit {
+    font-size: 11px;
+    line-height: 1.1;
+    color: #222;
+}
+
+.pda3-ref-card-face[data-suit="d"] .pda3-ref-card-suit,
+.pda3-ref-card-face[data-suit="d"] .pda3-ref-card-rank,
+.pda3-ref-card-face[data-suit="h"] .pda3-ref-card-suit,
+.pda3-ref-card-face[data-suit="h"] .pda3-ref-card-rank {
+    color: #c00;
+}
+
+.pda3-ref-card-face[data-suit="w"] .pda3-ref-card-rank,
+.pda3-ref-card-face[data-suit="w"] .pda3-ref-card-suit {
+    color: #555;
+}
+
+/* Joker suit glyph hidden — rank letter (V/W) shown instead */
+.pda3-ref-card-face .joker {
+    display: none;
+}
+
 .settings-radio-option input[type="radio"] {
     accent-color: #3a6;
     cursor: pointer;
@@ -1932,4 +2266,235 @@
     border-radius: var(--radius);
     padding: 0.5vh 0.8vh;
     margin-top: -0.2vh;
+}
+
+/* ── Note 65: 3PDA non-playable frame preview panel ── */
+.pda3-preview-panel {
+    margin-top: 1vh;
+    padding: 1vh 1.2vh;
+    background: #f5f8ff;
+    border: 1px solid #aac;
+    border-radius: var(--radius);
+    font-family: "Noto Sans SC", "Roboto", sans-serif;
+    font-size: 1.5vh;
+    max-width: 42vh;
+}
+.pda3-preview-title {
+    font-weight: bold;
+    font-size: 1.6vh;
+    margin-bottom: 0.5vh;
+    color: #335;
+}
+.pda3-preview-notice {
+    font-size: 1.3vh;
+    color: #888;
+    margin-bottom: 0.8vh;
+    font-style: italic;
+}
+.pda3-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6vh;
+    margin-bottom: 0.4vh;
+}
+.pda3-preview-label {
+    min-width: 11vh;
+    color: #446;
+    font-size: 1.4vh;
+}
+.pda3-preview-value {
+    color: #224;
+}
+.pda3-preview-select {
+    font-size: 1.4vh;
+    padding: 0.1vh 0.3vh;
+}
+.pda3-preview-table {
+    border-collapse: collapse;
+    margin: 0.4vh 0;
+    width: 100%;
+}
+.pda3-preview-table td {
+    padding: 0.15vh 0.6vh;
+    font-size: 1.4vh;
+}
+.pda3-preview-role {
+    color: #446;
+    min-width: 10vh;
+}
+.pda3-preview-actor {
+    color: #224;
+    font-weight: 600;
+}
+.pda3-preview-refpos {
+    color: #556;
+}
+
+/* Note 66a/66d — Dedicated shell host: outside the desk grid (no hit-testing conflict).
+   Note 66d: active state uses position:fixed so the panel floats above the board
+   and is fully visible without requiring browser zoom-out. */
+#pda3-shell-host {
+    display: none; /* shown only when 3PDA shell is active */
+    box-sizing: border-box;
+    pointer-events: none; /* no events when hidden */
+}
+
+#pda3-shell-host.pda3-shell-host-active {
+    display: block;
+    position: fixed;
+    left: 50%;
+    top: 8px;
+    transform: translateX(-50%);
+    z-index: 1000;
+    width: min(760px, calc(100vw - 32px));
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    pointer-events: auto;
+}
+
+/* Note 67a — 3PDA shell compact (collapsed) mode */
+.pda3-shell-panel.pda3-shell-compact {
+    padding: 6px 12px;
+}
+
+.pda3-shell-compact-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    min-height: 32px;
+}
+
+.pda3-shell-compact-title {
+    font-size: 1em;
+    font-weight: 700;
+    color: #4a3c00;
+    white-space: nowrap;
+}
+
+.pda3-shell-compact-item {
+    font-size: 0.9em;
+    color: #5a4a10;
+    white-space: nowrap;
+}
+
+.pda3-shell-compact-item span {
+    color: #222;
+    font-weight: 600;
+}
+
+.pda3-shell-compact-btn {
+    background: #b5a96a;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 3px 12px;
+    cursor: pointer;
+    font-size: 0.88em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.pda3-shell-compact-btn:hover {
+    background: #8a7a3a;
+}
+
+/* Note 67a — expandable details section */
+.pda3-shell-details {
+    margin-top: 8px;
+    border-top: 1px solid #d8cc99;
+    padding-top: 8px;
+}
+
+/* Note 66 — 3PDA non-card live frame shell panel */
+.pda3-shell-panel {
+    background: #f7f6f1;
+    border: 1.5px solid #b5a96a;
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 0.97em;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+    position: relative;
+    pointer-events: auto;
+}
+.pda3-shell-panel * {
+    pointer-events: auto;
+}
+.pda3-shell-title {
+    font-size: 1.13em;
+    font-weight: 700;
+    color: #4a3c00;
+    margin-bottom: 4px;
+}
+.pda3-shell-subtitle {
+    font-size: 0.88em;
+    color: #888;
+    font-style: italic;
+    margin-bottom: 10px;
+}
+.pda3-shell-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+.pda3-shell-label {
+    font-weight: 600;
+    color: #5a4a10;
+    min-width: 120px;
+}
+.pda3-shell-value {
+    color: #222;
+}
+.pda3-shell-select {
+    font-size: 0.96em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #bbb;
+}
+.pda3-shell-section-title {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: #5a4a10;
+    margin-top: 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #d8cc99;
+    padding-bottom: 2px;
+}
+.pda3-shell-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+}
+.pda3-shell-table td {
+    padding: 2px 8px;
+    border-bottom: 1px solid #e8e2c0;
+}
+.pda3-shell-role {
+    color: #665522;
+    font-weight: 600;
+    width: 40%;
+}
+.pda3-shell-actor {
+    color: #222;
+}
+.pda3-shell-refpos {
+    color: #556;
+}
+.pda3-shell-btn-row {
+    margin-top: 12px;
+    justify-content: center;
+}
+.pda3-shell-btn {
+    background: #b5a96a;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 6px 18px;
+    cursor: pointer;
+    font-size: 0.97em;
+    font-weight: 600;
+}
+.pda3-shell-btn:hover {
+    background: #8a7a3a;
 }

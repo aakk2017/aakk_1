@@ -119,11 +119,12 @@ const TIMING_CONFIG = {
     overbaseWindow:      10,   // seconds — overbase calling window after set-base
 };
 
-// Player labels (indexed by position)
-const PLAYER_NAMES = [t('players.south'), t('players.east'), t('players.north'), t('players.west')];
+// Player labels (indexed by natural position: south=0, east=1, north=2, west=3)
+// Now uses naturalPositions4P — ownership-free natural position labels.
+const PLAYER_NAMES = [t('naturalPositions4P.south'), t('naturalPositions4P.east'), t('naturalPositions4P.north'), t('naturalPositions4P.west')];
 
-// Position text relative to South
-const POSITION_LABELS = [t('positions.south'), t('positions.east'), t('positions.north'), t('positions.west')];
+// Position text relative to South (same source as PLAYER_NAMES — canonical naturalPositions4P)
+const POSITION_LABELS = [t('naturalPositions4P.south'), t('naturalPositions4P.east'), t('naturalPositions4P.north'), t('naturalPositions4P.west')];
 
 const UNDETERMINED_PIVOT = -1;
 

@@ -178,46 +178,46 @@ const messages_en = {
     multiplay:'multiplay',
   },
 
-  // ── Player names ──
+  // ── Player ownership labels (ownership only — no natural position encoded) ──
   players: {
-    south: 'South (You)',
-    east:  'East (Bot)',
-    north: 'North (Bot)',
-    west:  'West (Bot)',
     youShort: 'You',
     botShort: 'Bot',
   },
 
-  // ── Position labels ──
-  positions: {
+  // ── 4P natural-position labels (canonical, merged from positions + natural) ──
+  naturalPositions4P: {
     south: 'S',
     east:  'E',
     north: 'N',
     west:  'W',
   },
 
-  // ── Seat labels (game-relative) ──
-  seats: {
+  // ── 3PDA real natural-position labels (real players only; Ay/dummy excluded) ──
+  naturalPositions3PDA: {
+    N:  'N',
+    Sw: 'Sw',
+    Se: 'Se',
+  },
+
+  // ── Dummy / Ay role label ──
+  dummyRoles: {
+    Ay: 'Ay',
+  },
+
+  // ── Frame-role labels (game-relative; renamed from seats) ──
+  frameRoles: {
     pivot:       'Pivot',
     successor:   'Successor',
     ally:        'Ally',
     predecessor: 'Predecessor',
   },
 
-  // ── Relative positions ──
-  relative: {
-    self:      'Self',
+  // ── Reference-position labels (renamed from relative; self -> reference) ──
+  referencePositions: {
+    reference: 'Self',
     afterhand: 'Afterhand',
     opposite:  'Opposite',
     forehand:  'Forehand',
-  },
-
-  // ── Natural positions (for recap) ──
-  natural: {
-    east:  'E',
-    north: 'N',
-    west:  'W',
-    south: 'S',
   },
 
   // ── Error messages ──
@@ -261,6 +261,63 @@ const messages_en = {
     cancel: 'Cancel',
     close: 'Close',
     confirm: 'Start Game',
+    threePDANotImplemented: '3P dummy-ally is not yet implemented. Please select normal 4P.',
+    threePDAPreview: {
+      title:             '3PDA frame preview',
+      pivotSelector:     'Preview pivot',
+      referenceSelector: 'Preview reference',
+      actionCycle:       'Action cycle',
+      nextPivot:         'Next pivot',
+      notPlayable:       'Preview only — 3PDA gameplay is not implemented yet.',
+    },
+    threePDAShell: {
+      title:            '3PDA shell',
+      subtitle:         'Frame model preview only — dealing/play not implemented yet.',
+      frameIndex:       'Frame',
+      currentPivot:     'Current pivot',
+      nextPivot:        'Next pivot',
+      actionCycle:      'Action cycle',
+      referencePreview: 'Reference preview',
+      nextShellFrame:   'Next shell frame',
+      expandDetails:         'Expand details',
+      collapseDetails:        'Collapse details',
+      phaseLabel:             'Status',
+      phaseFrameStartShell:   'Frame-start shell',
+      cardStateStatus:            'Card state',
+      cardStateActiveManifestIds: 'Active manifest IDs',
+      cardStatePayload:           'Payload',
+      cardStateZones:             'Zones',
+      cardStateAssigned:          'Assigned',
+      baseZone:                   'base',
+      cardZoneContainers:         'Card-zone containers',
+      slotReference:              'Reference',
+      slotAfterhand:              'Afterhand',
+      slotOpposite:               'Opposite',
+      slotForehand:               'Forehand',
+      slotBase:                   'Base',
+      zoneCount:                  'Count',
+      zoneCardsShort:             'cards',
+      refHandDiagTitle:             'Reference hand diagnostics',
+      refHandDiagActor:             'Reference actor/zone',
+      refHandDiagExpected:          'Expected count',
+      refHandDiagRendered:          'Rendered faces',
+      refHandDiagVisibleNote:       'Visible faces (note)',
+      refHandDiagVisibleNoteVal:    '25 (browser-measured only)',
+      refHandDiagDisplayOrder:      'Display order',
+      refHandDiagDisplayOrderVal:   'read-only sorted',
+      refHandDiagDirection:         'Display direction',
+      refHandDiagDirectionVal:      'high-left (matches 4P convention)',
+      refHandDiagMutation:          'State mutation',
+      refHandDiagMutationVal:       'none; display-only',
+      refHandDiagDeterministic:     'Deterministic scaffold',
+      refHandDiagDeterministicVal:  'enabled',
+      refHandDiagNonRef:            'Non-reference placeholders',
+    },
+    threePDABoardShell: {
+      realActor:  'Real',
+      dummyActor: 'Dummy',
+      shellOnly:  'Shell only',
+    },
     displayPlaceholder: 'Display settings (reserved): structure ready, in-game editable options can be added later.',
     tabs: {
       table: 'Table',
@@ -306,6 +363,7 @@ const messages_en = {
       mustStopLevels: 'must-stop',
       knockBackLevels: 'knock-back',
       userNaturalPosition: 'Your seat',
+      userNaturalPosition3PDA: 'Your 3PDA seat',
       knockBackCondition: 'knock-back condition',
       gameMode: 'level cycle mode',
       timingPreset: 'preset timing scheme',
@@ -354,6 +412,7 @@ const messages_en = {
       eightFourFour: '8-4-4',
       noPreset: '(none)',
       normalFourPlayer: 'normal 4P',
+      threePDA: '3P dummy-ally',
       // levels presets
       slow: 'Slow',
       short: 'Short',

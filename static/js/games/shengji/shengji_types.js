@@ -10,14 +10,14 @@ const divisonNameToNumber = {d: 0, c: 1, h: 2, s: 3, t: 4};
 const numberToLevel = ["2", "3", "4", "5", "6", "7", "8", "9", "X", "J", "Q", "K", "A"];
 const ntsHtml = t('labels.noTrumpHtml');
 
-// Shengji position names (absolute positions)
-const numberToPositionInGameShengji = [t('seats.pivot'), t('seats.successor'), t('seats.ally'), t('seats.predecessor')];
+// Shengji position names (absolute positions; renamed namespace seats -> frameRoles)
+const numberToPositionInGameShengji = [t('frameRoles.pivot'), t('frameRoles.successor'), t('frameRoles.ally'), t('frameRoles.predecessor')];
 
-// Cardinal directions (natural player positions)
-const numberToNaturalPositionText4 = [t('natural.east'), t('natural.north'), t('natural.west'), t('natural.south')];
+// Cardinal directions (natural player positions; merged namespace natural -> naturalPositions4P)
+const numberToNaturalPositionText4 = [t('naturalPositions4P.east'), t('naturalPositions4P.north'), t('naturalPositions4P.west'), t('naturalPositions4P.south')];
 
-// Relative position names from reference player's perspective
-const numberToRelativePositionText4 = [t('relative.self'), t('relative.afterhand'), t('relative.opposite'), t('relative.forehand')];
+// Relative position names from reference player's perspective (renamed namespace relative -> referencePositions; self -> reference)
+const numberToRelativePositionText4 = [t('referencePositions.reference'), t('referencePositions.afterhand'), t('referencePositions.opposite'), t('referencePositions.forehand')];
 
 /**
  * ShengjiType enumeration for move classifications
