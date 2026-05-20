@@ -71,7 +71,8 @@ const messages_en = {
   // ── Phase display ──
   phase: {
     dealing:      'Dealing…',
-    declaring:    'Declaration Phase',
+    finalDeclarationCall: 'Final declaration call',
+    overcallDecision: 'Overcall decision',
     basing:       'Base Phase',
     selectBase:   'Select {n} cards for base',
     playing:      'Playing Phase',
@@ -92,7 +93,8 @@ const messages_en = {
     ready:        'Ready',
     barDefault:   'Status',
     dealingHint:  'Dealing — declare if you hold the level card',
-    declaring:    'Declaring…',
+    finalDeclarationCall: 'Final declaration call…',
+    overcallDecision: 'Overcall decision…',
     selectBase:   'Select {n} cards for the base',
     crossingClaim:'Resolve crossing claims for all four seats',
     crossingPending:'Trick play is blocked until all active crossing processes are done',

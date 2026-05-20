@@ -71,7 +71,8 @@ const messages_zhCN = {
   // ── Phase display ──
   phase: {
     dealing:      '发牌中…',
-    declaring:    '亮牌阶段',
+    finalDeclarationCall: '最终叫主窗口',
+    overcallDecision: '改叫决策',
     basing:       '定底阶段',
     selectBase:   '请选择 {n} 张底牌',
     playing:      '行牌阶段',
@@ -92,7 +93,8 @@ const messages_zhCN = {
     ready:        '准备开始',
     barDefault:   '状态栏',
     dealingHint:  '发牌中，持有目标花色可亮牌',
-    declaring:    '亮牌中…',
+    finalDeclarationCall: '最终叫主中…',
+    overcallDecision: '改叫决策中…',
     selectBase:   '选择 {n} 张牌埋底',
     crossingClaim:'请为四家处理过河申报',
     crossingPending:'至少一方过河流程未完成，暂不允许正常出牌',

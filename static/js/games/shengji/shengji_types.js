@@ -48,7 +48,6 @@ const ShengjiVariation = {
  */
 const ShengjiStage = {
     DEALING: 'dealing',
-    DECLARING: 'declaring',
     BASING: 'basing',
     PLAYING: 'playing',
     COUNTING: 'counting',

@@ -122,7 +122,7 @@ function getNaturalPositionFor4PActorSeat(actorSeat) {
     return FOUR_P_NATURAL_POSITIONS[seat] || 'east';
 }
 
-function getReferencePositionFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+function getReferencePositionFor4PActorSeat(actorSeat, referenceActorSeat = selectedNaturalPositionIndex) {
     let seat = Number(actorSeat);
     let reference = Number(referenceActorSeat);
     if (!Number.isInteger(seat) || !Number.isInteger(reference)) return 'reference';
@@ -133,11 +133,11 @@ function getDisplayPositionForReferencePosition(referencePosition) {
     return FOUR_P_REFERENCE_TO_DISPLAY_POSITION[referencePosition] || 'bottom';
 }
 
-function getDisplayPositionFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+function getDisplayPositionFor4PActorSeat(actorSeat, referenceActorSeat = selectedNaturalPositionIndex) {
     return getDisplayPositionForReferencePosition(getReferencePositionFor4PActorSeat(actorSeat, referenceActorSeat));
 }
 
-function getActorSeatFor4PDisplayPosition(displayPosition, referenceActorSeat = HUMAN_PLAYER) {
+function getActorSeatFor4PDisplayPosition(displayPosition, referenceActorSeat = selectedNaturalPositionIndex) {
     let referencePosition = FOUR_P_DISPLAY_TO_REFERENCE_POSITION[displayPosition] || 'reference';
     let offset = FOUR_P_REFERENCE_POSITIONS.indexOf(referencePosition);
     let reference = Number(referenceActorSeat);
@@ -149,7 +149,7 @@ function getReferencePositionForDisplayPosition(displayPosition) {
     return FOUR_P_DISPLAY_TO_REFERENCE_POSITION[displayPosition] || 'reference';
 }
 
-function getActorSeatFor4PReferencePosition(referencePosition, referenceActorSeat = HUMAN_PLAYER) {
+function getActorSeatFor4PReferencePosition(referencePosition, referenceActorSeat = selectedNaturalPositionIndex) {
     let offset = FOUR_P_REFERENCE_POSITIONS.indexOf(referencePosition);
     let reference = Number(referenceActorSeat);
     if (!Number.isInteger(reference) || offset < 0) return reference;
@@ -161,7 +161,7 @@ function getHandSurfaceForDisplayPosition(displayPosition) {
     return displayPosition === 'bottom' ? gReferenceHandSurface : null;
 }
 
-function getNamebarContainerFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+function getNamebarContainerFor4PActorSeat(actorSeat, referenceActorSeat = selectedNaturalPositionIndex) {
     let slot = getDeskSlotFor4PActorSeat(actorSeat, referenceActorSeat);
     return slot ? slot.querySelector('.desk-namebar') : null;
 }
@@ -170,7 +170,7 @@ function getDeskSlotForDisplayPosition(displayPosition) {
     return gDeskDisplaySlots[displayPosition] || null;
 }
 
-function getDeskSlotFor4PActorSeat(actorSeat, referenceActorSeat = HUMAN_PLAYER) {
+function getDeskSlotFor4PActorSeat(actorSeat, referenceActorSeat = selectedNaturalPositionIndex) {
     return getDeskSlotForDisplayPosition(getDisplayPositionFor4PActorSeat(actorSeat, referenceActorSeat));
 }
 
@@ -178,32 +178,34 @@ for (let position in gDeskDisplaySlots) {
     if (gDeskDisplaySlots[position]) gDeskDisplaySlots[position].setAttribute('data-display-position', position);
 }
 
-function buildHumanPlayerSetForCurrentMode() {
-    let primary = Number.isInteger(Number(HUMAN_PLAYER)) ? Number(HUMAN_PLAYER) : getActorSeatFor4PNaturalPosition('east');
+function buildLocallyControlledSeatsForCurrentMode() {
+    let primary = Number.isInteger(Number(localControlledPlayerIndex)) ? Number(localControlledPlayerIndex) : getActorSeatFor4PNaturalPosition('east');
     if (!TEST_MODE) return new Set([primary]);
     return new Set([primary, (primary + 1) % NUM_PLAYERS]);
 }
 
-function refreshHumanPlayersForMode() {
-    HUMAN_PLAYERS = buildHumanPlayerSetForCurrentMode();
+function refreshLocallyControlledSeatsForMode() {
+    locallyControlledSeats = buildLocallyControlledSeatsForCurrentMode();
 }
 
 function applyUserNaturalPositionFor4P(userNaturalPosition) {
-    HUMAN_PLAYER = getActorSeatFor4PNaturalPosition(userNaturalPosition);
-    activeHumanPlayer = HUMAN_PLAYER;
-    refreshHumanPlayersForMode();
+    let seat = getActorSeatFor4PNaturalPosition(userNaturalPosition);
+    localControlledPlayerIndex = seat;        // Note 103b: control identity
+    selectedNaturalPositionIndex = seat;      // Note 103b: display/reference perspective matches control in local 4P
+    activeLocalSeat = localControlledPlayerIndex;
+    refreshLocallyControlledSeatsForMode();
 }
 
 // ---------------------------------------------------------------------------
 // Test mode: human controls the selected reference seat, plus its afterhand.
 // ---------------------------------------------------------------------------
 let TEST_MODE = false;
-let HUMAN_PLAYERS = buildHumanPlayerSetForCurrentMode();
-function isHumanControlled(player) { return HUMAN_PLAYERS.has(player); }
+let locallyControlledSeats = buildLocallyControlledSeatsForCurrentMode();
+function isLocallyControlledSeat(player) { return locallyControlledSeats.has(player); }
 
 function toggleTestMode() {
     TEST_MODE = !TEST_MODE;
-    refreshHumanPlayersForMode();
+    refreshLocallyControlledSeatsForMode();
     const btn = document.getElementById('btn-toggle-test');
     if (btn) btn.textContent = t(TEST_MODE ? 'buttons.testModeOn' : 'buttons.testModeOff');
 }
@@ -233,8 +235,8 @@ function setBotDeclarationMode(mode) {
 window.isPassiveDeclarationBotMode = isPassiveDeclarationBotMode;
 window.getBotDeclarationMode = function() { return gBotDeclarationMode; };
 
-// Track which human-controlled player's hand is currently displayed
-let activeHumanPlayer = HUMAN_PLAYER;
+// Track which locally controlled seat's hand is currently displayed
+let activeLocalSeat = localControlledPlayerIndex;
 
 // ForehandControlInteractionState
 // When active: { target, controller, exposedDivisionCards, exposedCardIds: Set,
@@ -305,7 +307,7 @@ function getDeclarationOrderAnchor() {
 function renderSeatsBoxFromGameState() {
     if (!gSeatsDiv || !game) return;
     if (typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
-        let humanRelPivot = (game.pivot + 4 - HUMAN_PLAYER) % NUM_PLAYERS;
+        let humanRelPivot = (game.pivot + 4 - selectedNaturalPositionIndex) % NUM_PLAYERS;
         let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
         gSeatsDiv.setAttribute('pivot', pivotPosNames[humanRelPivot]);
         return;
@@ -497,7 +499,7 @@ function initPersistentNamebars() {
     gDeskNamebars = [];
     // Create persistent name bars for all players
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        let isReferencePlayer = (p === HUMAN_PLAYER);
+        let isReferencePlayer = (p === selectedNaturalPositionIndex);
         let naturalPosition = getNaturalPositionFor4PActorSeat(p);
         let displayPosition = isReferencePlayer ? 'bottom' : getDisplayPositionFor4PActorSeat(p);
         let container = isReferencePlayer ? gReferenceHandSurface : getDeskSlotFor4PActorSeat(p);
@@ -673,16 +675,16 @@ function hideLocalCrossingActionButtons() {
 }
 
 // ---------------------------------------------------------------------------
-// Hand rendering — only the human player's hand is displayed
+// Hand rendering — only the locally controlled seat's hand is displayed
 // ---------------------------------------------------------------------------
 
 function renderAllHands() {
-    renderHand(activeHumanPlayer);
+    renderHand(activeLocalSeat);
 }
 
 function renderHand(player) {
-    if (!isHumanControlled(player)) return;
-    if (player !== activeHumanPlayer) return;
+    if (!isLocallyControlledSeat(player)) return;
+    if (player !== activeLocalSeat) return;
     let el = gReferenceHandSurface;
     // Preserve persistent namebar; clear only hand content
     let existingNb = el.querySelector('.desk-namebar');
@@ -718,7 +720,7 @@ function renderHand(player) {
         cc.addEventListener('click', () => toggleCardSelection(card.cardId, cc));
         cc.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            if (game.phase === GamePhase.PLAYING && isHumanControlled(engineGetCurrentPlayer())) {
+            if (game.phase === GamePhase.PLAYING && isLocallyControlledSeat(engineGetCurrentPlayer())) {
                 clearSelection();
                 updatePlayButton();
             }
@@ -762,7 +764,7 @@ function toggleCardSelection(cardId, el) {
     }
     let allowCrossingSelection = isLocalCrossingSelectionMode();
     if (isPauseDialogBlockingGameplay()) return;
-    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isHumanControlled(engineGetCurrentPlayer())) return;
+    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isLocallyControlledSeat(engineGetCurrentPlayer())) return;
     if (game.phase !== GamePhase.PLAYING && game.phase !== GamePhase.BASING) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked && !allowCrossingSelection) return;
 
@@ -802,12 +804,12 @@ function updatePlayButton() {
     }
     let crossingMode = getLocalCrossingActionMode();
     if (crossingMode === 'cross') {
-        gBtnPlay.disabled = !isValidCrossingSelection(HUMAN_PLAYER, getSelectedCards(HUMAN_PLAYER), true);
+        gBtnPlay.disabled = !isValidCrossingSelection(localControlledPlayerIndex, getSelectedCards(localControlledPlayerIndex), true);
         gBtnPlay.textContent = t('buttons.toCross');
         return;
     }
     if (crossingMode === 'crossback') {
-        gBtnPlay.disabled = !isValidCrossingSelection(HUMAN_PLAYER, getSelectedCards(HUMAN_PLAYER), false);
+        gBtnPlay.disabled = !isValidCrossingSelection(localControlledPlayerIndex, getSelectedCards(localControlledPlayerIndex), false);
         gBtnPlay.textContent = t('buttons.toCrossBack');
         return;
     }
@@ -819,7 +821,7 @@ function updatePlayButton() {
     if (game.phase === GamePhase.BASING) {
         gBtnPlay.disabled = (selectedCardIds.size !== BASE_SIZE);
         gBtnPlay.textContent = t('buttons.baseProgress', { current: selectedCardIds.size, total: BASE_SIZE });
-    } else if (game.phase === GamePhase.PLAYING && isHumanControlled(engineGetCurrentPlayer())) {
+    } else if (game.phase === GamePhase.PLAYING && isLocallyControlledSeat(engineGetCurrentPlayer())) {
         gBtnPlay.disabled = (selectedCardIds.size === 0);
         gBtnPlay.textContent = t('buttons.play');
     } else {
@@ -884,7 +886,7 @@ function renderDeskCards(player, cards) {
     }
     slot.appendChild(row);
 
-    if (player !== HUMAN_PLAYER) {
+    if (player !== localControlledPlayerIndex) {
         // Update persistent namebar width to match cards (§3.3)
         updateNamebarWidth(player, sorted.length);
         updateNamebarStatus(player, 'played');
@@ -930,7 +932,7 @@ function updateScoreDisplay() {
     const s = game.frameScore;
     gScoreDiv.textContent = s;
 
-    if (game.phase === GamePhase.IDLE || game.phase === GamePhase.DEALING || game.phase === GamePhase.DECLARING || game.phase === GamePhase.BASING) {
+    if (game.phase === GamePhase.IDLE || game.phase === GamePhase.DEALING || game.phase === GamePhase.BASING) {
         gScoreCont.style.borderColor = '#f8f8f8';
     } else {
         gScoreCont.style.borderColor = getScoreBorderColorForValue(s);
@@ -1016,7 +1018,7 @@ function refreshPauseButtonState() {
 }
 
 function seatToPauseBoxPosition(seat) {
-    return getDisplayPositionFor4PActorSeat(seat, HUMAN_PLAYER);
+    return getDisplayPositionFor4PActorSeat(seat, selectedNaturalPositionIndex);
 }
 
 function getPauseBoxStateMap(sourceBySeat) {
@@ -1263,7 +1265,7 @@ function resumeGameAfterPauseProtocol() {
         return;
     }
 
-    if (game.phase === GamePhase.DECLARING && !gTimerInterval) {
+    if (game.phase === GamePhase.DEALING && game.dealingStage === DealingStage.FINAL_DECLARATION_CALL && !gTimerInterval) {
         runFinalDeclarationWindow();
     }
 }
@@ -1284,7 +1286,7 @@ function renderPauseHumanAgreementControls() {
 
     if (pauseState.phase !== 'waitingPauseAgreements') return;
 
-    let seats = Array.from(HUMAN_PLAYERS).filter(seat => seat !== pauseState.requesterSeat);
+    let seats = Array.from(locallyControlledSeats).filter(seat => seat !== pauseState.requesterSeat);
     for (let seat of seats) {
         if (pauseState.agreementBySeat[seat] !== 'pending') continue;
         let row = document.createElement('div');
@@ -1324,13 +1326,13 @@ function renderPausePrimaryControls() {
         let btnReady = document.createElement('button');
         btnReady.className = 'button';
         btnReady.textContent = t('buttons.ready');
-        btnReady.onclick = () => submitResumeReady(HUMAN_PLAYER);
+        btnReady.onclick = () => submitResumeReady(localControlledPlayerIndex);
         gPausePrimaryControls.appendChild(btnReady);
 
         let btnQuit = document.createElement('button');
         btnQuit.className = 'button';
         btnQuit.textContent = t('buttons.quit');
-        btnQuit.onclick = () => requestQuitDuringPause(HUMAN_PLAYER);
+        btnQuit.onclick = () => requestQuitDuringPause(localControlledPlayerIndex);
         gPausePrimaryControls.appendChild(btnQuit);
     }
 }
@@ -1411,7 +1413,7 @@ function receivePauseAgreementRequest(requesterSeat) {
     }, 100);
 
     for (let seat = 0; seat < NUM_PLAYERS; seat++) {
-        if (seat === requesterSeat || isHumanControlled(seat)) continue;
+        if (seat === requesterSeat || isLocallyControlledSeat(seat)) continue;
         setTimeout(() => submitPauseAgreement(seat, 'agree'), 220);
     }
 }
@@ -1462,7 +1464,7 @@ function enterPausedState() {
     renderPauseDialogByState();
 
     for (let seat = 0; seat < NUM_PLAYERS; seat++) {
-        if (isHumanControlled(seat)) continue;
+        if (isLocallyControlledSeat(seat)) continue;
         setTimeout(() => submitResumeReady(seat), 200);
     }
 }
@@ -1689,7 +1691,7 @@ function breakCallingWindowTimer() {
  * @param {Function} onTimeout - called when both shot clock and bank time expire
  */
 function startPlayerMoveTimer(player, moveType, onTimeout) {
-    if (!isHumanControlled(player)) return; // bots are untimed (note 24 §2)
+    if (!isLocallyControlledSeat(player)) return; // bots are untimed (note 24 §2)
     clearTimers();
     gTimingPhase = moveType === 'base' ? 'playerMove' : 'playerMove';
     let timingCfg = getTimingConfigForPage();
@@ -1751,7 +1753,7 @@ function stopPlayerMoveTimer(player) {
 }
 
 function applyBaseTimeIncrementAfterBaseCompletion(player) {
-    if (!isHumanControlled(player)) return;
+    if (!isLocallyControlledSeat(player)) return;
     if (getTimingModeForRuntime() !== 'bank-time-only') return;
     let timingCfg = getTimingConfigForPage();
     let inc = Math.floor(Number(timingCfg.baseTimeIncrement) || 0);
@@ -1766,7 +1768,7 @@ function applyBaseTimeIncrementAfterBaseCompletion(player) {
  * using remaining bank time so the timer remains visible during FC selection.
  */
 function continueFCTimingUnit(player, onTimeout) {
-    if (!isHumanControlled(player)) return;
+    if (!isLocallyControlledSeat(player)) return;
     gTimingPhase = 'fcContinuation';
     gTimerExpireCallback = onTimeout;
 
@@ -1819,12 +1821,12 @@ function showNoDeclareButton(onAllDeclined) {
     gBtnNoDeclare.style.opacity = '';
     gBtnNoDeclare.textContent = t('timing.noDeclaration');
     gBtnNoDeclare.onclick = () => {
-        gNoDeclareClicked.add(HUMAN_PLAYER);
+        gNoDeclareClicked.add(localControlledPlayerIndex);
         gBtnNoDeclare.disabled = true;
         gBtnNoDeclare.style.opacity = '0.4';
         // Bots auto-decline (they've already had their chance)
         for (let i = 0; i < NUM_PLAYERS; i++) {
-            if (!isHumanControlled(i)) gNoDeclareClicked.add(i);
+            if (!isLocallyControlledSeat(i)) gNoDeclareClicked.add(i);
         }
         if (gNoDeclareClicked.size >= NUM_PLAYERS) {
             onAllDeclined();
@@ -1895,7 +1897,7 @@ function autoPlayAsBot(player) {
         renderDeskCards(player, cards);
         renderHand(player);
         for (let p = 0; p < NUM_PLAYERS; p++) {
-            if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+            if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
         }
         if (result.roundComplete) finishRound();
         else promptCurrentPlayer();
@@ -2270,7 +2272,7 @@ function renderResolvedStrainDisplay() {
 }
 
 function updateDeclareMatrix() {
-    let hand  = game.hands[HUMAN_PLAYER];
+    let hand  = game.hands[localControlledPlayerIndex];
     let level = game.level;
     let currentCount = currentDeclaration ? currentDeclaration.count : 0;
 
@@ -2293,7 +2295,7 @@ function updateDeclareMatrix() {
                 btnS.innerHTML = 'VV';
                 btnS.style.fontFamily = '"Roboto Mono"';
                 let canDoubleV = (sj >= 2) && (currentCount < 3);
-                if (currentDeclaration && currentDeclaration.player === HUMAN_PLAYER && currentDeclaration.suit !== 4) {
+                if (currentDeclaration && currentDeclaration.player === localControlledPlayerIndex && currentDeclaration.suit !== 4) {
                     canDoubleV = false; // cannot overcall own declaration with different suit
                 }
                 if (currentDeclaration && currentDeclaration.suit === 4 && currentDeclaration.count === 3) {
@@ -2306,7 +2308,7 @@ function updateDeclareMatrix() {
                 btnD.innerHTML = 'WW';
                 btnD.style.fontFamily = '"Roboto Mono"';
                 let canDoubleW = (bj >= 2) && (currentCount < 4);
-                if (currentDeclaration && currentDeclaration.player === HUMAN_PLAYER && currentDeclaration.suit !== 4) {
+                if (currentDeclaration && currentDeclaration.player === localControlledPlayerIndex && currentDeclaration.suit !== 4) {
                     canDoubleW = false; // cannot overcall own declaration with different suit
                 }
                 if (currentDeclaration && currentDeclaration.suit === 4 && currentDeclaration.count === 4) {
@@ -2326,7 +2328,7 @@ function updateDeclareMatrix() {
             if (btnD) {
                 btnD.innerHTML = suitTexts[suit] + suitTexts[suit];
                 let canD = (count >= 2) && (currentCount < 2);
-                if (currentDeclaration && currentDeclaration.player === HUMAN_PLAYER && currentDeclaration.suit !== suit) {
+                if (currentDeclaration && currentDeclaration.player === localControlledPlayerIndex && currentDeclaration.suit !== suit) {
                     canD = false; // cannot overcall own declaration with different suit
                 }
                 if (currentDeclaration && currentDeclaration.suit === suit && currentDeclaration.count >= 2) {
@@ -2340,19 +2342,19 @@ function updateDeclareMatrix() {
 }
 
 function executeDeclaration(suit, count) {
-    currentDeclaration = { player: HUMAN_PLAYER, suit, count };
+    currentDeclaration = { player: localControlledPlayerIndex, suit, count };
 
     // Preview in UI corner
     let suitName = suit === 4 ? (count >= 4 ? 'w' : 'v') : numberToSuitName[suit];
     gDenomArea.setAttribute('strain', suitName);
     gStrainDiv.innerHTML   = getDenominationHtml(suit, count);
-    gDeclareSp.textContent = POSITION_LABELS[HUMAN_PLAYER];
+    gDeclareSp.textContent = POSITION_LABELS[localControlledPlayerIndex];
     let methodText = t('labels.declareMethod');
     gDeclMethodSp.textContent = methodText;
-    appendLog(t('log.declare', { playerName: PLAYER_NAMES[HUMAN_PLAYER], strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+    appendLog(t('log.declare', { playerName: PLAYER_NAMES[localControlledPlayerIndex], strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
 
-    showDeclaredCardsOnDesk(HUMAN_PLAYER, suit, count);
-    recordDealingDeclarationHistory(HUMAN_PLAYER, suit, count);
+    showDeclaredCardsOnDesk(localControlledPlayerIndex, suit, count);
+    recordDealingDeclarationHistory(localControlledPlayerIndex, suit, count);
     updateDeclareMatrix();
 
     // If this is the highest possible declaration, break any active final-declaration window (note 24 §5.3)
@@ -2390,7 +2392,7 @@ function runDealingPhase() {
         // Bots consider overcalling as they get cards
         for (let i = 0; i < NUM_PLAYERS; i++) {
             let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
-            if (p === HUMAN_PLAYER) continue;
+            if (p === localControlledPlayerIndex) continue;
 
             let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
             if (decl) {
@@ -2410,11 +2412,11 @@ function runDealingPhase() {
             }
         }
 
-        // Sort human-controlled players' hands for readability as cards arrive
-        for (let hp of HUMAN_PLAYERS) {
+        // Sort locally-controlled players' hands for readability as cards arrive
+        for (let hp of locallyControlledSeats) {
             engineSortHand(game.hands[hp]);
         }
-        renderHand(activeHumanPlayer);
+        renderHand(activeLocalSeat);
         updateBotDealCounts();
         updateDeclareMatrix();
 
@@ -2423,7 +2425,7 @@ function runDealingPhase() {
         gDeskInfo.innerHTML = '<div class="dealt-count">' + dealtPerPlayer + '</div>'
             + '<div class="dealt-count-label">' + t('dealing.dealtCount', { count: dealtPerPlayer }) + '</div>';
 
-        if (game.phase === GamePhase.DECLARING) {
+        if (game.dealingStage === DealingStage.FINAL_DECLARATION_CALL) {
             clearInterval(dealingTimer);
             dealingTimer = null;
             // Clear dealt-count display (§4.1 — replaced by timer after dealing)
@@ -2450,7 +2452,7 @@ function runDealingPhase() {
  */
 function runFinalDeclarationWindow() {
     if (isPauseDialogBlockingGameplay()) return;
-    updatePhaseDisplay(t('phase.declaring'));
+    updatePhaseDisplay(t('phase.finalDeclarationCall'));
     gDeclareMatrix.style.display = 'grid';
     updateDeclareMatrix();
     gNoDeclareClicked.clear();
@@ -2465,7 +2467,7 @@ function runFinalDeclarationWindow() {
     // Bots take their last chance to overcall during the window
     for (let i = 0; i < NUM_PLAYERS; i++) {
         let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
-        if (isHumanControlled(p)) continue;
+        if (isLocallyControlledSeat(p)) continue;
         let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
         if (decl) {
             let currentCount = currentDeclaration ? currentDeclaration.count : 0;
@@ -2499,13 +2501,13 @@ function runFinalDeclarationWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// Declaration phase  (resolves after dealing animation completes)
+// Final declaration call resolution (resolves after dealing animation completes)
 // ---------------------------------------------------------------------------
 
 function resolveDeclaredPhase() {
     if (isPauseDialogBlockingGameplay()) return;
-    updatePhaseDisplay(t('phase.declaring'));
-    updateStatus(t('status.declaring'));
+    updatePhaseDisplay(t('phase.finalDeclarationCall'));
+    updateStatus(t('status.finalDeclarationCall'));
     gDeclareMatrix.style.display = 'none';
 
     let bestDeclaration = currentDeclaration;
@@ -2526,7 +2528,7 @@ function resolveDeclaredPhase() {
         gDeclMethodSp.textContent = t('labels.declareMethod');
 
         // Only log if they did it at the very end
-        if (bestDeclaration.player !== HUMAN_PLAYER && (!currentDeclaration || bestDeclaration.count !== currentDeclaration.count)) {
+        if (bestDeclaration.player !== localControlledPlayerIndex && (!currentDeclaration || bestDeclaration.count !== currentDeclaration.count)) {
             appendLog(t('log.declare', { playerName: PLAYER_NAMES[bestDeclaration.player], strain: bestDeclaration.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
             showDeclaredCardsOnDesk(bestDeclaration.player, bestDeclaration.suit, bestDeclaration.count);
         }
@@ -2593,6 +2595,7 @@ function resolveDeclaredPhase() {
         showError(t('errors.baseFailed'));
         return;
     }
+    game.dealingStage = DealingStage.NONE; // Note 103a: dealing substage complete
     runBasingPhase();
 }
 
@@ -2609,9 +2612,9 @@ function runBasingPhase() {
     gDeclareMatrix.style.display = 'none';
     removeNoDeclareButton();
 
-    if (isHumanControlled(baser)) {
-        // Human-controlled player is the active baser — render their hand and wait for selection.
-        activeHumanPlayer = baser;
+    if (isLocallyControlledSeat(baser)) {
+        // Locally controlled player is the active baser — render their hand and wait for selection.
+        activeLocalSeat = baser;
         clearSelection();
         renderHand(baser);
         updatePhaseDisplay(t('phase.selectBase', { n: BASE_SIZE }) + (TEST_MODE ? ' (' + PLAYER_NAMES[baser] + ')' : ''));
@@ -2669,7 +2672,7 @@ function afterBasingComplete() {
  */
 function startOvercallDecisionTimer(player, hasLegalOvercall, onTimeout) {
     let timingMode = getTimingModeForRuntime();
-    if (isHumanControlled(player) && timingMode === 'shot + bank' && !hasLegalOvercall) {
+    if (isLocallyControlledSeat(player) && timingMode === 'shot + bank' && !hasLegalOvercall) {
         clearTimers();
         gTimingPhase = 'overcallDecision';
         let timingCfg = getTimingConfigForPage();
@@ -2818,7 +2821,7 @@ function applyOvercallDecision(player, decl) {
 }
 
 function finishOvercallDecisionStep(player, result) {
-    if (isHumanControlled(player)) {
+    if (isLocallyControlledSeat(player)) {
         stopPlayerMoveTimer(player);
     }
     gDeclareMatrix.style.display = 'none';
@@ -2923,7 +2926,7 @@ function runNextOvercallDecisionStep() {
     let legal = botGetLegalOvercallDeclarations(player, currentDeclaration, 'basing-overcall');
     let hasLegal = legal.length > 0;
 
-    if (!isHumanControlled(player)) {
+    if (!isLocallyControlledSeat(player)) {
         // 0.5 s delay before bot overcall decision is committed (note 41e)
         setTimeout(function() {
             let choice = botChooseDeclaration(player, currentDeclaration, 'basing-overcall');
@@ -2937,11 +2940,11 @@ function runNextOvercallDecisionStep() {
         return;
     }
 
-    activeHumanPlayer = player;
+    activeLocalSeat = player;
     clearSelection();
     renderHand(player);
-    updatePhaseDisplay(t('phase.declaring'));
-    updateStatus(t('status.declaring'));
+    updatePhaseDisplay(t('phase.overcallDecision'));
+    updateStatus(t('status.overcallDecision'));
 
     gDeclareMatrix.style.display = 'grid';
     for (let btn of gDeclBtnsSingle) {
@@ -3072,7 +3075,7 @@ function getLocalCrossingActionMode() {
 function isLocalCrossingSelectionMode() {
     if (!gCrossingState || !gCrossingState.localAction || !gCrossingState.trickPlayBlocked) return false;
     let mode = gCrossingState.localAction.mode;
-    return (mode === 'cross' || mode === 'crossback') && gCrossingState.localAction.seat === HUMAN_PLAYER;
+    return (mode === 'cross' || mode === 'crossback') && gCrossingState.localAction.seat === localControlledPlayerIndex;
 }
 
 function crossingHasAnyActiveTeamProcess() {
@@ -3128,22 +3131,22 @@ function refreshCrossingClaimControls() {
         return;
     }
 
-    let localResolved = !!gCrossingState.resolvedBySeat[HUMAN_PLAYER];
-    let localEligible = !!gCrossingState.eligibilityBySeat[HUMAN_PLAYER];
+    let localResolved = !!gCrossingState.resolvedBySeat[localControlledPlayerIndex];
+    let localEligible = !!gCrossingState.eligibilityBySeat[localControlledPlayerIndex];
     setCrossingClaimControlsVisible(true);
 
     gBtnCrossClaim.style.display = '';
     gBtnCrossClaim.textContent = t('buttons.toCross');
     gBtnCrossClaim.disabled = localResolved || !localEligible;
     gBtnCrossClaim.onclick = gBtnCrossClaim.disabled ? null : (() => {
-        resolveCrossingClaimWindowSeat(HUMAN_PLAYER, 'claim', 'click');
+        resolveCrossingClaimWindowSeat(localControlledPlayerIndex, 'claim', 'click');
     });
 
     gBtnCrossDecline.style.display = '';
     gBtnCrossDecline.textContent = t('buttons.noCrossing');
     gBtnCrossDecline.disabled = localResolved;
     gBtnCrossDecline.onclick = gBtnCrossDecline.disabled ? null : (() => {
-        resolveCrossingClaimWindowSeat(HUMAN_PLAYER, 'no-crossing', 'click');
+        resolveCrossingClaimWindowSeat(localControlledPlayerIndex, 'no-crossing', 'click');
     });
 }
 
@@ -3323,12 +3326,12 @@ function refreshCrossingLocalActionState() {
         for (let teamKey of ['defending', 'attacking']) {
             let ts = gCrossingState.teamState[teamKey];
             if (!ts) continue;
-            if (ts.phase === 'waiting-cross' && ts.claimantSeat === HUMAN_PLAYER) {
-                nextAction = { mode: 'cross', teamKey, seat: HUMAN_PLAYER };
+            if (ts.phase === 'waiting-cross' && ts.claimantSeat === localControlledPlayerIndex) {
+                nextAction = { mode: 'cross', teamKey, seat: localControlledPlayerIndex };
                 break;
             }
-            if (ts.phase === 'waiting-crossback' && ts.partnerSeat === HUMAN_PLAYER) {
-                nextAction = { mode: 'crossback', teamKey, seat: HUMAN_PLAYER };
+            if (ts.phase === 'waiting-crossback' && ts.partnerSeat === localControlledPlayerIndex) {
+                nextAction = { mode: 'crossback', teamKey, seat: localControlledPlayerIndex };
                 break;
             }
         }
@@ -3344,15 +3347,15 @@ function refreshCrossingLocalActionState() {
     let enteredNewAction = (!prev || prev.mode !== nextAction.mode || prev.teamKey !== nextAction.teamKey || prev.seat !== nextAction.seat);
     if (enteredNewAction) {
         clearSelection();
-        if (nextAction.mode === 'cross' && nextAction.seat === HUMAN_PLAYER) {
-            let hand = game.hands[HUMAN_PLAYER] || [];
+        if (nextAction.mode === 'cross' && nextAction.seat === localControlledPlayerIndex) {
+            let hand = game.hands[localControlledPlayerIndex] || [];
             for (let card of hand) {
                 if (isCardTrumpForCurrentFrame(card)) selectedCardIds.add(card.cardId);
             }
         }
     }
-    activeHumanPlayer = HUMAN_PLAYER;
-    renderHand(HUMAN_PLAYER);
+    activeLocalSeat = localControlledPlayerIndex;
+    renderHand(localControlledPlayerIndex);
     hideLocalCrossingActionButtons();
     updatePlayButton();
 }
@@ -3408,9 +3411,9 @@ function driveCrossingProcesses() {
     for (let teamKey of ['defending', 'attacking']) {
         let ts = gCrossingState.teamState[teamKey];
         if (!ts) continue;
-        if (ts.phase === 'waiting-cross' && ts.claimantSeat !== HUMAN_PLAYER) {
+        if (ts.phase === 'waiting-cross' && ts.claimantSeat !== localControlledPlayerIndex) {
             scheduleBotCrossingAction(teamKey, 'cross');
-        } else if (ts.phase === 'waiting-crossback' && ts.partnerSeat !== HUMAN_PLAYER) {
+        } else if (ts.phase === 'waiting-crossback' && ts.partnerSeat !== localControlledPlayerIndex) {
             scheduleBotCrossingAction(teamKey, 'crossback');
         }
     }
@@ -3424,17 +3427,17 @@ function driveCrossingProcesses() {
 function trySubmitLocalCrossingSelection() {
     if (!gCrossingState || !gCrossingState.localAction) return false;
     let action = gCrossingState.localAction;
-    if (action.seat !== HUMAN_PLAYER) return false;
+    if (action.seat !== localControlledPlayerIndex) return false;
     if (action.mode !== 'cross' && action.mode !== 'crossback') return false;
 
-    let cards = getSelectedCards(HUMAN_PLAYER);
+    let cards = getSelectedCards(localControlledPlayerIndex);
     let requireAllTrumps = (action.mode === 'cross');
-    if (!isValidCrossingSelection(HUMAN_PLAYER, cards, requireAllTrumps)) {
+    if (!isValidCrossingSelection(localControlledPlayerIndex, cards, requireAllTrumps)) {
         showError(requireAllTrumps ? t('errors.crossingRequireAllTrumps') : t('errors.crossingSelectFive'));
         return true;
     }
 
-    stopPlayerMoveTimer(HUMAN_PLAYER);
+    stopPlayerMoveTimer(localControlledPlayerIndex);
     let ok = (action.mode === 'cross') ? performCrossMove(action.teamKey, cards) : performCrossbackMove(action.teamKey, cards);
     if (!ok) {
         showError(t('errors.playFailed'));
@@ -3448,7 +3451,7 @@ function trySubmitLocalCrossingSelection() {
 
 function scheduleBotClaimWindowDecisions() {
     for (let player = 0; player < NUM_PLAYERS; player++) {
-        if (player === HUMAN_PLAYER) continue;
+        if (player === localControlledPlayerIndex) continue;
         let delay = 260 + (player * 80);
         setTimeout(() => {
             if (!gCrossingState || !gCrossingState.claimWindowActive) return;
@@ -3544,7 +3547,7 @@ function startPlayingPhase() {
     renderAllHands();
 
     // Show-base button only for the final baser during playing phase.
-    if (gBtnShowBase && canSeatSeeBaseInPlayingPhase(HUMAN_PLAYER) && game.base) {
+    if (gBtnShowBase && canSeatSeeBaseInPlayingPhase(localControlledPlayerIndex) && game.base) {
         gBtnShowBase.style.display = 'block';
         // Populate base preview
         if (gBasePreview) {
@@ -3593,7 +3596,7 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
         commitButtonsMounted: false
     };
 
-    if (!isHumanControlled(controller)) {
+    if (!isLocallyControlledSeat(controller)) {
         // Bot controller: must-play with empty selectedCards (effectively a no-op)
         engineExerciseFC(targetPlayer, 'must-play', []);
         appendLog(t('log.forehandControlBotExercised', { controllerName: PLAYER_NAMES[controller] }));
@@ -3712,7 +3715,7 @@ function commitForehandControl(mode) {
 
     // Update exposed previews with FC markings
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+        if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
     }
 
     clearSelection();
@@ -3761,9 +3764,9 @@ function promptCurrentPlayer() {
 
     highlightActivePlayer(cp);
 
-    if (isHumanControlled(cp)) {
+    if (isLocallyControlledSeat(cp)) {
         // Switch displayed hand to the active human player
-        activeHumanPlayer = cp;
+        activeLocalSeat = cp;
         clearSelection();
 
         if (isLeading) {
@@ -3888,7 +3891,7 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
         row.appendChild(cc);
     }
     slot.appendChild(row);
-    if (player !== HUMAN_PLAYER) {
+    if (player !== localControlledPlayerIndex) {
         updateNamebarWidth(player, sorted.length);
         updateNamebarStatus(player, 'played');
     }
@@ -3901,7 +3904,7 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
         renderDeskCards(player, fm.actualElement.cards);
         // Update exposed-card previews from ExposedCardState
         for (let p = 0; p < NUM_PLAYERS; p++) {
-            if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+            if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
         }
         renderHand(player);
         onContinue();
@@ -3934,7 +3937,7 @@ function botTakeTurn(player) {
 
     // Update exposed previews after each play
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+        if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
     }
 
     if (result.roundComplete) {
@@ -4143,7 +4146,7 @@ function renderLevelWithCycle(hostElement, level, cycleIndex) {
 }
 
 function getPivotAndAllyPositions(pivotSeat) {
-    let referenceActorSeat = Number.isInteger(Number(HUMAN_PLAYER)) ? Number(HUMAN_PLAYER) : getActorSeatFor4PNaturalPosition('east');
+    let referenceActorSeat = Number.isInteger(Number(selectedNaturalPositionIndex)) ? Number(selectedNaturalPositionIndex) : getActorSeatFor4PNaturalPosition('east');
     return {
         pivotPos: getDisplayPositionFor4PActorSeat(pivotSeat, referenceActorSeat),
         allyPos: getDisplayPositionFor4PActorSeat((Number(pivotSeat) + 2) % NUM_PLAYERS, referenceActorSeat),
@@ -4173,7 +4176,7 @@ function renderLevelPositionSquare(host, options) {
 
     let referenceActorSeat = Number.isInteger(Number(options.referenceActorSeat))
         ? Number(options.referenceActorSeat)
-        : HUMAN_PLAYER;
+        : selectedNaturalPositionIndex;
     let levelFallback = Number.isInteger(Number(options.nsLevel)) ? Number(options.nsLevel) : 0;
     let levelsByActor = Array.isArray(options.levelsByActor)
         ? options.levelsByActor
@@ -4280,7 +4283,7 @@ function renderSeatsHoverLevelPositionSquare() {
         levelsByActor: state.levelsByActor,
         cycleIndexBySide: state.cycleIndexBySide,
         pivotSeat: state.pivotSeat,
-        referenceActorSeat: HUMAN_PLAYER,
+        referenceActorSeat: selectedNaturalPositionIndex,
     });
 }
 
@@ -6261,7 +6264,7 @@ function onNewGameButtonClick() {
 
 function humanPlayCardsCore(cp) {
     if (isPauseDialogBlockingGameplay()) return;
-    if (!isHumanControlled(cp)) return;
+    if (!isLocallyControlledSeat(cp)) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked) {
         trySubmitLocalCrossingSelection();
         return;
@@ -6317,7 +6320,7 @@ function humanPlayCardsCore(cp) {
 
     // Update exposed previews after each play
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+        if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
     }
 
     if (result.roundComplete) {
@@ -6363,7 +6366,7 @@ function finishRound() {
 
     // Update exposed-card previews on name bars (§3.5)
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+        if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
     }
 
     let winnerName = PLAYER_NAMES[result.winner];
@@ -6379,7 +6382,7 @@ function finishRound() {
             clearDesk();
             // Restore exposed-card previews that clearDesk() wiped
             for (let p = 0; p < NUM_PLAYERS; p++) {
-                if (p !== HUMAN_PLAYER) updateExposedPreview(p);
+                if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
             }
             promptCurrentPlayer();
         }, BOT_DELAY * 2);
@@ -6546,7 +6549,7 @@ function renderCountingDialogNextFrameSquare(applied) {
             getSideCycleIndex(nextCycleIndexBySide, 1),
         ],
         pivotSeat: nextPivot,
-        referenceActorSeat: HUMAN_PLAYER,
+        referenceActorSeat: selectedNaturalPositionIndex,
     });
 }
 
@@ -6651,7 +6654,7 @@ let pendingNextFrame = null;
 gBtnNewGame.addEventListener('click', onNewGameButtonClick);
 gBtnPlay.addEventListener('click', humanPlayCards);
 if (gBtnPause) {
-    gBtnPause.addEventListener('click', () => requestPause(HUMAN_PLAYER));
+    gBtnPause.addEventListener('click', () => requestPause(localControlledPlayerIndex));
 }
 if (gBtnPauseQuitCancel) {
     gBtnPauseQuitCancel.addEventListener('click', () => {
@@ -6662,7 +6665,7 @@ if (gBtnPauseQuitCancel) {
 }
 if (gBtnPauseQuitConfirm) {
     gBtnPauseQuitConfirm.addEventListener('click', () => {
-        confirmQuitDuringPause(pauseState.quitRequesterSeat !== null ? pauseState.quitRequesterSeat : HUMAN_PLAYER);
+        confirmQuitDuringPause(pauseState.quitRequesterSeat !== null ? pauseState.quitRequesterSeat : localControlledPlayerIndex);
     });
 }
 
@@ -6723,7 +6726,7 @@ window.addEventListener('keydown', function (e) {
 // Double click out of cards -> play
 window.addEventListener('dblclick', function(e) {
     if (e.target.closest('.card, .card-container, button')) return;
-    if (game && game.phase === GamePhase.PLAYING && isHumanControlled(engineGetCurrentPlayer()) && !gBtnPlay.disabled) {
+    if (game && game.phase === GamePhase.PLAYING && isLocallyControlledSeat(engineGetCurrentPlayer()) && !gBtnPlay.disabled) {
         e.preventDefault();
         humanPlayCards();
     }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * games/shengji/shengji_engine.js
  * Shengji game engine for live 3-bot 1-player play
  *
@@ -13,19 +13,55 @@
 const GamePhase = {
     IDLE:       'idle',
     DEALING:    'dealing',
-    DECLARING:  'declaring',
     BASING:     'basing',
     PLAYING:    'playing',
     COUNTING:   'counting',
     GAME_OVER:  'game_over'
 };
 
-let HUMAN_PLAYER     = 1; // East by default; display settings may select any 4P natural seat.
-const TOTAL_CARDS    = 108;
-const CARDS_PER_HAND = 25;
-const BASE_SIZE      = 8;
-const NUM_PLAYERS    = 4;
-const TOTAL_ROUNDS   = 25;
+// Note 103a: dealing substage/action-window.
+// The final declaration call/window stays inside GamePhase.DEALING; it is not a top-level phase.
+const DealingStage = {
+    NONE:                   'none',
+    DEALING_CARDS:          'dealing_cards',
+    FINAL_DECLARATION_CALL: 'final_declaration_call'
+};
+
+let localControlledPlayerIndex = 1;  // Note 103b: local control identity — which actor/seat is controlled by the local user.
+let selectedNaturalPositionIndex = 1;  // Note 103b: display/reference perspective — which seat is shown at the bottom reference position.
+
+// Deck/count configuration (Note 103c)
+const SHENGJI_DECK_COUNT_CONFIGS = Object.freeze({
+    '1deck': Object.freeze({ deckCount: 1, totalCards:  54, baseSize:  4, framePositionCount: 4, realActorCount: 4, cardsPerFramePosition: 12, supported: false }),
+    '2deck': Object.freeze({ deckCount: 2, totalCards: 108, baseSize: 8,  framePositionCount: 4, realActorCount: 4, cardsPerFramePosition: 25, supported: true  }),
+    '3deck': Object.freeze({ deckCount: 3, totalCards: 162, baseSize: 12, framePositionCount: 4, realActorCount: 4, cardsPerFramePosition: 37, supported: false }),
+});
+
+function engineValidateGameSizeConfig(config) {
+    if (!config || typeof config !== 'object') return false;
+    if (!config.supported) return false;
+    if ((config.totalCards - config.baseSize) % config.framePositionCount !== 0) return false;
+    if (typeof config.realActorCount !== 'number' || config.realActorCount < 1) return false;
+    if (typeof config.framePositionCount !== 'number' || config.framePositionCount < 1) return false;
+    return true;
+}
+
+const ACTIVE_GAME_SIZE_CONFIG      = SHENGJI_DECK_COUNT_CONFIGS['2deck'];
+
+// Config-derived semantic constants (Note 103c)
+const TOTAL_CARD_COUNT = ACTIVE_GAME_SIZE_CONFIG.totalCards;
+const CARDS_PER_FRAME_POSITION = ACTIVE_GAME_SIZE_CONFIG.cardsPerFramePosition;
+const FRAME_BASE_SIZE = ACTIVE_GAME_SIZE_CONFIG.baseSize;
+const FRAME_POSITION_COUNT = ACTIVE_GAME_SIZE_CONFIG.framePositionCount;
+const REAL_ACTOR_COUNT = ACTIVE_GAME_SIZE_CONFIG.realActorCount;
+const EXPECTED_TRICK_COUNT = CARDS_PER_FRAME_POSITION;
+
+// Legacy aliases (Note 103c: quarantine — keep for all existing reference sites)
+const TOTAL_CARDS = TOTAL_CARD_COUNT;
+const CARDS_PER_HAND = CARDS_PER_FRAME_POSITION;
+const BASE_SIZE = FRAME_BASE_SIZE;
+const NUM_PLAYERS = FRAME_POSITION_COUNT;
+// Note 103c: round-count global removed; derive per-game from EXPECTED_TRICK_COUNT
 
 // ---------------------------------------------------------------------------
 // Preset game configurations (rules spec §12A)
@@ -128,7 +164,7 @@ const POSITION_LABELS = [t('positions.south'), t('positions.east'), t('positions
 const UNDETERMINED_PIVOT = -1;
 
 function isPivotResolved(pivotSeat) {
-    return Number.isInteger(pivotSeat) && pivotSeat >= 0 && pivotSeat < NUM_PLAYERS;
+    return Number.isInteger(pivotSeat) && pivotSeat >= 0 && pivotSeat < REAL_ACTOR_COUNT;
 }
 
 window.UNDETERMINED_PIVOT = UNDETERMINED_PIVOT;
@@ -139,6 +175,7 @@ window.isPivotResolved = isPivotResolved;
 // ---------------------------------------------------------------------------
 let game = {
     phase:          GamePhase.IDLE,
+    dealingStage:   DealingStage.NONE,  // Note 103a: substage within GamePhase.DEALING
     level:          0,       // rank index: 0→'2', 1→'3', … 12→'A'
     strain:         -1,      // -1 undetermined, 0–3 suited, 4 nts
     pivot:          UNDETERMINED_PIVOT,
@@ -263,13 +300,24 @@ function engineShuffle(arr) {
 // ---------------------------------------------------------------------------
 // Dealing
 // ---------------------------------------------------------------------------
+
+// Returns the deal layout for a given size config (Note 103c)
+function engineGetDealLayoutFor(sizeConfig) {
+    return {
+        framePositionCount:    sizeConfig.framePositionCount,
+        cardsPerFramePosition: sizeConfig.cardsPerFramePosition,
+        realActorCount:        sizeConfig.realActorCount,
+        baseSize:              sizeConfig.baseSize,
+    };
+}
+
 function engineDealCards(deck) {
     let hands = [[], [], [], []];
     let base = [];
-    for (let i = 0; i < CARDS_PER_HAND * NUM_PLAYERS; i++) {
+    for (let i = 0; i < CARDS_PER_FRAME_POSITION * FRAME_POSITION_COUNT; i++) {
         hands[i % NUM_PLAYERS].push(deck[i]);
     }
-    for (let i = CARDS_PER_HAND * NUM_PLAYERS; i < TOTAL_CARDS; i++) {
+    for (let i = CARDS_PER_FRAME_POSITION * FRAME_POSITION_COUNT; i < TOTAL_CARDS; i++) {
         base.push(deck[i]);
     }
     return { hands, base };
@@ -1685,6 +1733,7 @@ function engineResetFailedMultiplayCompensationState() {
  */
 function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRuleConfig, declarationOrderAnchor) {
     game.phase          = GamePhase.DEALING;
+    game.dealingStage   = DealingStage.DEALING_CARDS;  // Note 103a
     game.level          = level;
     game.strain         = -1;
     game.pivot          = isPivotResolved(pivot) ? pivot : UNDETERMINED_PIVOT;
@@ -1771,7 +1820,8 @@ function engineDealNextBatch() {
         }
         // Sort all hands (strain still −1; engineSortHand treats it as NTS)
         for (let h of game.hands) engineSortHand(h);
-        game.phase = GamePhase.DECLARING;
+        // Note 103a: stay in DEALING phase; advance substage to final declaration call/window.
+        game.dealingStage = DealingStage.FINAL_DECLARATION_CALL;
     }
 
     return batch;
@@ -1807,6 +1857,7 @@ function enginePickUpBase() {
     engineSortHand(game.hands[game.pivot]);
     game.currentBaser = game.pivot;
     game.phase = GamePhase.BASING;
+    game.dealingStage = DealingStage.NONE;  // Note 103a
     return true;
 }
 
@@ -1819,6 +1870,7 @@ function engineInitPlayingStateFromCommittedBase() {
     game.roundPlayed      = [null, null, null, null];
     game.leadInfo         = null;
     game.phase            = GamePhase.PLAYING;
+    game.dealingStage     = DealingStage.NONE;  // Note 103a
     return true;
 }
 
@@ -1861,6 +1913,7 @@ function engineSetBase(selectedCards, options) {
     let deferPlaying = !!(options && options.deferPlaying);
     if (deferPlaying) {
         game.phase = GamePhase.BASING;
+        game.dealingStage = DealingStage.NONE;  // Note 103a
         return true;
     }
 
@@ -1886,6 +1939,7 @@ function engineApplyOverbaseDeclaration(player, declaration) {
     game.base = [];
     engineSortHand(game.hands[player]);
     game.phase = GamePhase.BASING;
+    game.dealingStage = DealingStage.NONE;  // Note 103a
     return true;
 }
 
@@ -2008,6 +2062,7 @@ function engineEndRound() {
     let allHandsEmpty = game.hands.every(h => h.length === 0);
     if (allHandsEmpty) {
         game.phase = GamePhase.COUNTING;
+        game.dealingStage = DealingStage.NONE;  // Note 103a
         return { winner, trickPoints, gameOver: true };
     }
 
