@@ -27,11 +27,58 @@ const DealingStage = {
 
 let localControlledPlayerIndex = 1;   // Local playable control seat (East by default in 4P).
 let selectedNaturalPositionIndex = 1; // Selected display/reference seat (defaults to local control in local 4P).
-const TOTAL_CARDS    = 108;
-const CARDS_PER_HAND = 25;
-const BASE_SIZE      = 8;
-const NUM_PLAYERS    = 4;
-const TOTAL_ROUNDS   = 25;
+
+const SHENGJI_DECK_COUNT_CONFIGS = Object.freeze({
+    1: Object.freeze({
+        deckCount: 1,
+        supported: false,
+        reason: 'base size and hand count not finalized',
+    }),
+    2: Object.freeze({
+        deckCount: 2,
+        totalCards: 108,
+        baseSize: 8,
+        framePositionCount: 4,
+        cardsPerFramePosition: 25,
+        realActorCount: 4,
+        supported: true,
+    }),
+    3: Object.freeze({
+        deckCount: 3,
+        supported: false,
+        reason: 'base size and hand count not finalized',
+    }),
+});
+
+function engineValidateGameSizeConfig(config) {
+    if (!config || config.supported !== true) return false;
+    if (config.totalCards !== config.deckCount * 54) return false;
+    if ((config.totalCards - config.baseSize) % config.framePositionCount !== 0) return false;
+    if (config.cardsPerFramePosition !== ((config.totalCards - config.baseSize) / config.framePositionCount)) return false;
+    if (!(config.realActorCount > 0) || !(config.framePositionCount > 0)) return false;
+    return true;
+}
+
+function engineGetGameSizeConfigForDeckCount(deckCount) {
+    let key = Number(deckCount);
+    let config = SHENGJI_DECK_COUNT_CONFIGS[key];
+    if (engineValidateGameSizeConfig(config)) return config;
+    return SHENGJI_DECK_COUNT_CONFIGS[2];
+}
+
+const ACTIVE_GAME_SIZE_CONFIG = engineGetGameSizeConfigForDeckCount(2);
+const TOTAL_CARD_COUNT = ACTIVE_GAME_SIZE_CONFIG.totalCards;
+const CARDS_PER_FRAME_POSITION = ACTIVE_GAME_SIZE_CONFIG.cardsPerFramePosition;
+const FRAME_BASE_SIZE = ACTIVE_GAME_SIZE_CONFIG.baseSize;
+const FRAME_POSITION_COUNT = ACTIVE_GAME_SIZE_CONFIG.framePositionCount;
+const REAL_ACTOR_COUNT = ACTIVE_GAME_SIZE_CONFIG.realActorCount;
+const EXPECTED_TRICK_COUNT = CARDS_PER_FRAME_POSITION;
+
+// Deprecated aliases, derived from ACTIVE_GAME_SIZE_CONFIG for backward compatibility.
+const TOTAL_CARDS = TOTAL_CARD_COUNT;
+const CARDS_PER_HAND = CARDS_PER_FRAME_POSITION;
+const BASE_SIZE = FRAME_BASE_SIZE;
+const NUM_PLAYERS = FRAME_POSITION_COUNT;
 
 // ---------------------------------------------------------------------------
 // Preset game configurations (rules spec §12A)
@@ -134,7 +181,7 @@ const POSITION_LABELS = [t('positions.south'), t('positions.east'), t('positions
 const UNDETERMINED_PIVOT = -1;
 
 function isPivotResolved(pivotSeat) {
-    return Number.isInteger(pivotSeat) && pivotSeat >= 0 && pivotSeat < NUM_PLAYERS;
+    return Number.isInteger(pivotSeat) && pivotSeat >= 0 && pivotSeat < REAL_ACTOR_COUNT;
 }
 
 window.UNDETERMINED_PIVOT = UNDETERMINED_PIVOT;
@@ -152,13 +199,13 @@ let game = {
     declarationOrderAnchor: 0,
 
     deck:           [],
-    hands:          [[], [], [], []],
+    hands:          Array.from({ length: FRAME_POSITION_COUNT }, () => []),
     base:           [],
 
     currentRound:       0,
     currentLeader:      -1,
     currentTurnIndex:   0,   // 0–3 within a round (offset from leader)
-    roundPlayed:        [null, null, null, null],
+    roundPlayed:        new Array(FRAME_POSITION_COUNT).fill(null),
     leadInfo:           null,
 
     frameScore:     0,       // attackers' running frame score
@@ -212,7 +259,7 @@ let game = {
     gameConfig: null,
 
     // Per-player levels (§12)
-    playerLevels: [0, 0, 0, 0],  // each player's current level (0→'2' … 12→'A')
+    playerLevels: new Array(REAL_ACTOR_COUNT).fill(0),  // each player's current level (0→'2' … 12→'A')
 
     // Persistent level-rule clear-state across frames in a session.
     // Cycle-relative semantics are tracked per side (NS / EW) so special marks
@@ -226,17 +273,20 @@ let game = {
     },
 
     // Per-player bank time remaining in seconds (note 24 §9)
-    playerBankTimes: [0, 0, 0, 0],
+    playerBankTimes: new Array(REAL_ACTOR_COUNT).fill(0),
 };
 
 // ---------------------------------------------------------------------------
 // Deck creation
 // ---------------------------------------------------------------------------
-function engineCreateDeck(level, strain) {
+function engineCreateDeck(level, strain, deckCount) {
     let deck = [];
     let cardId = 0;
     let s = (strain >= 0 && strain <= 4) ? strain : 4;
-    for (let copy = 0; copy < 2; copy++) {
+    let copies = Number.isInteger(Number(deckCount)) && Number(deckCount) > 0
+        ? Number(deckCount)
+        : ACTIVE_GAME_SIZE_CONFIG.deckCount;
+    for (let copy = 0; copy < copies; copy++) {
         for (let suit = 0; suit <= 3; suit++) {
             for (let rank = 0; rank <= 12; rank++) {
                 let card = new ShengjiCard(suit, rank, level, s);
@@ -270,13 +320,14 @@ function engineShuffle(arr) {
 // ---------------------------------------------------------------------------
 // Dealing
 // ---------------------------------------------------------------------------
-function engineDealCards(deck) {
-    let hands = [[], [], [], []];
+function engineDealCards(deck, gameSizeConfig) {
+    let sizeConfig = gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG;
+    let hands = Array.from({ length: sizeConfig.framePositionCount }, () => []);
     let base = [];
-    for (let i = 0; i < CARDS_PER_HAND * NUM_PLAYERS; i++) {
-        hands[i % NUM_PLAYERS].push(deck[i]);
+    for (let i = 0; i < sizeConfig.cardsPerFramePosition * sizeConfig.framePositionCount; i++) {
+        hands[i % sizeConfig.framePositionCount].push(deck[i]);
     }
-    for (let i = CARDS_PER_HAND * NUM_PLAYERS; i < TOTAL_CARDS; i++) {
+    for (let i = sizeConfig.cardsPerFramePosition * sizeConfig.framePositionCount; i < sizeConfig.totalCards; i++) {
         base.push(deck[i]);
     }
     return { hands, base };
@@ -1691,12 +1742,18 @@ function engineResetFailedMultiplayCompensationState() {
  *  The page calls engineDealNextBatch() to animate dealing one round at a time.
  */
 function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRuleConfig, declarationOrderAnchor) {
+    let requestedDeckCount = (resolvedRuleConfig && Number.isInteger(Number(resolvedRuleConfig.deckCount)))
+        ? Number(resolvedRuleConfig.deckCount)
+        : ACTIVE_GAME_SIZE_CONFIG.deckCount;
+    let activeGameSizeConfig = engineGetGameSizeConfigForDeckCount(requestedDeckCount);
+
     game.phase          = GamePhase.DEALING;
     game.dealingStage   = DealingStage.DEALING_CARDS;
+    game.gameSizeConfig = activeGameSizeConfig;
     game.level          = level;
     game.strain         = -1;
     game.pivot          = isPivotResolved(pivot) ? pivot : UNDETERMINED_PIVOT;
-    game.declarationOrderAnchor = Number.isInteger(declarationOrderAnchor) && declarationOrderAnchor >= 0 && declarationOrderAnchor < NUM_PLAYERS
+    game.declarationOrderAnchor = Number.isInteger(declarationOrderAnchor) && declarationOrderAnchor >= 0 && declarationOrderAnchor < activeGameSizeConfig.realActorCount
         ? declarationOrderAnchor
         : (isPivotResolved(game.pivot) ? game.pivot : 0);
     game.frameScore     = 0;
@@ -1721,7 +1778,7 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     if (playerLevels) {
         game.playerLevels = [...playerLevels];
     } else {
-        game.playerLevels = new Array(NUM_PLAYERS).fill(level);
+        game.playerLevels = new Array(activeGameSizeConfig.realActorCount).fill(level);
     }
 
     // Keep level-rule clear-state across frames; reset only on a fresh game.
@@ -1742,15 +1799,15 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
         game.gameConfig = engineBuildConfig('default');
     }
 
-    game.deck  = engineCreateDeck(level, 4);
+    game.deck  = engineCreateDeck(level, 4, activeGameSizeConfig.deckCount);
     engineShuffle(game.deck);
 
-    game.hands = [[], [], [], []];
+    game.hands = Array.from({ length: activeGameSizeConfig.framePositionCount }, () => []);
     game.base  = [];
 
     // Reset bank times from resolved timing config (note 34).
     let bank = engineGetTimingConfigValue('bankTime', TIMING_CONFIG.bankTime);
-    game.playerBankTimes = new Array(NUM_PLAYERS).fill(bank);
+    game.playerBankTimes = new Array(activeGameSizeConfig.realActorCount).fill(bank);
 }
 
 /**
@@ -1762,11 +1819,12 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
 function engineDealNextBatch() {
     if (game.phase !== GamePhase.DEALING) return null;
     if (game.dealingStage !== DealingStage.DEALING_CARDS) return null;
-    const playerCardTotal = CARDS_PER_HAND * NUM_PLAYERS;
+    const sizeConfig = game.gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG;
+    const playerCardTotal = sizeConfig.cardsPerFramePosition * sizeConfig.framePositionCount;
     if (game.dealIndex >= playerCardTotal) return null;
 
     let batch = [];
-    for (let i = 0; i < NUM_PLAYERS; i++) {
+    for (let i = 0; i < sizeConfig.framePositionCount; i++) {
         let card = game.deck[game.dealIndex];
         game.hands[i].push(card);
         batch.push({ player: i, card: card });
@@ -1775,7 +1833,7 @@ function engineDealNextBatch() {
 
     if (game.dealIndex === playerCardTotal) {
         // Assign base cards silently
-        for (let i = playerCardTotal; i < TOTAL_CARDS; i++) {
+        for (let i = playerCardTotal; i < sizeConfig.totalCards; i++) {
             game.base.push(game.deck[i]);
         }
         // Sort all hands (strain still −1; engineSortHand treats it as NTS)
@@ -1826,7 +1884,7 @@ function engineInitPlayingStateFromCommittedBase() {
     game.currentLeader    = game.pivot;
     game.currentRound     = 1;
     game.currentTurnIndex = 0;
-    game.roundPlayed      = [null, null, null, null];
+    game.roundPlayed      = new Array((game.gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG).framePositionCount).fill(null);
     game.leadInfo         = null;
     game.phase            = GamePhase.PLAYING;
     game.dealingStage     = DealingStage.NONE;
@@ -1834,12 +1892,13 @@ function engineInitPlayingStateFromCommittedBase() {
 }
 
 function engineGetPlayingEntryCardinalityState() {
+    let sizeConfig = game.gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG;
     let handSizes = game.hands.map(hand => hand.length);
     let baseSize = game.base.length;
     let totalCards = handSizes.reduce((sum, size) => sum + size, 0) + baseSize;
-    let handsOk = handSizes.every(size => size === CARDS_PER_HAND);
-    let baseOk = baseSize === BASE_SIZE;
-    let totalOk = totalCards === TOTAL_CARDS;
+    let handsOk = handSizes.every(size => size === sizeConfig.cardsPerFramePosition);
+    let baseOk = baseSize === sizeConfig.baseSize;
+    let totalOk = totalCards === sizeConfig.totalCards;
 
     return {
         handSizes,
@@ -1854,7 +1913,8 @@ function engineGetPlayingEntryCardinalityState() {
 
 /** Current baser (pivot or overbaser) sets base (discards BASE_SIZE cards). Returns true on success. */
 function engineSetBase(selectedCards, options) {
-    if (selectedCards.length !== BASE_SIZE) return false;
+    let sizeConfig = game.gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG;
+    if (selectedCards.length !== sizeConfig.baseSize) return false;
     // Use currentBaser if set (overbase case), else fall back to game.pivot (normal case).
     let activeBaser = (game.currentBaser !== null && game.currentBaser !== undefined) ? game.currentBaser : game.pivot;
     if (!isPivotResolved(activeBaser)) return false;
@@ -1992,17 +2052,18 @@ function enginePlayCards(player, cards) {
 
     return {
         success: true,
-        roundComplete: game.currentTurnIndex >= NUM_PLAYERS,
+        roundComplete: game.currentTurnIndex >= (game.gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG).framePositionCount,
         failedMultiplay: failedMultiplay
     };
 }
 
 /** End the current round. Returns {winner, trickPoints, gameOver}. */
 function engineEndRound() {
+    let sizeConfig = game.gameSizeConfig || ACTIVE_GAME_SIZE_CONFIG;
     // Use incremental round state if available, otherwise fall back to legacy scan
     let winner = game.roundState ? game.roundState.highestPlayer : engineDetermineRoundWinner();
     let trickPoints = 0;
-    for (let i = 0; i < NUM_PLAYERS; i++) {
+    for (let i = 0; i < sizeConfig.framePositionCount; i++) {
         if (game.roundPlayed[i]) trickPoints += engineCountScore(game.roundPlayed[i]);
     }
     if (game.attackingTeam.includes(winner)) game.frameScore += trickPoints;
@@ -2027,7 +2088,7 @@ function engineEndRound() {
 
     game.currentLeader    = winner;
     game.currentTurnIndex = 0;
-    game.roundPlayed      = [null, null, null, null];
+    game.roundPlayed      = new Array(sizeConfig.framePositionCount).fill(null);
     game.leadInfo         = null;
     game.roundState       = null;
     return { winner, trickPoints, gameOver: false };
