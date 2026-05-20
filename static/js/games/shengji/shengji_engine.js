@@ -1,4 +1,4 @@
-/**
+﻿/**
  * games/shengji/shengji_engine.js
  * Shengji game engine for live 3-bot 1-player play
  *
@@ -13,14 +13,20 @@
 const GamePhase = {
     IDLE:       'idle',
     DEALING:    'dealing',
-    DECLARING:  'declaring',
     BASING:     'basing',
     PLAYING:    'playing',
     COUNTING:   'counting',
     GAME_OVER:  'game_over'
 };
 
-let HUMAN_PLAYER     = 1; // East by default; display settings may select any 4P natural seat.
+const DealingStage = {
+    NONE:                   'none',
+    DEALING_CARDS:          'dealing_cards',
+    FINAL_DECLARATION_CALL: 'final_declaration_call'
+};
+
+let localControlledPlayerIndex = 1;   // Local playable control seat (East by default in 4P).
+let selectedNaturalPositionIndex = 1; // Selected display/reference seat (defaults to local control in local 4P).
 const TOTAL_CARDS    = 108;
 const CARDS_PER_HAND = 25;
 const BASE_SIZE      = 8;
@@ -139,6 +145,7 @@ window.isPivotResolved = isPivotResolved;
 // ---------------------------------------------------------------------------
 let game = {
     phase:          GamePhase.IDLE,
+    dealingStage:   DealingStage.NONE,
     level:          0,       // rank index: 0→'2', 1→'3', … 12→'A'
     strain:         -1,      // -1 undetermined, 0–3 suited, 4 nts
     pivot:          UNDETERMINED_PIVOT,
@@ -1685,6 +1692,7 @@ function engineResetFailedMultiplayCompensationState() {
  */
 function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRuleConfig, declarationOrderAnchor) {
     game.phase          = GamePhase.DEALING;
+    game.dealingStage   = DealingStage.DEALING_CARDS;
     game.level          = level;
     game.strain         = -1;
     game.pivot          = isPivotResolved(pivot) ? pivot : UNDETERMINED_PIVOT;
@@ -1749,10 +1757,11 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
  * Deal one round (one card per player) during animated dealing.
  * Returns [{player, card}, …] for this batch, or null if already done.
  * After all 25 rounds (100 cards), silently assigns the 8 base cards,
- * sorts all hands, and transitions game.phase to DECLARING.
+ * sorts all hands, and enters the final declaration call substage within dealing.
  */
 function engineDealNextBatch() {
     if (game.phase !== GamePhase.DEALING) return null;
+    if (game.dealingStage !== DealingStage.DEALING_CARDS) return null;
     const playerCardTotal = CARDS_PER_HAND * NUM_PLAYERS;
     if (game.dealIndex >= playerCardTotal) return null;
 
@@ -1771,7 +1780,7 @@ function engineDealNextBatch() {
         }
         // Sort all hands (strain still −1; engineSortHand treats it as NTS)
         for (let h of game.hands) engineSortHand(h);
-        game.phase = GamePhase.DECLARING;
+        game.dealingStage = DealingStage.FINAL_DECLARATION_CALL;
     }
 
     return batch;
@@ -1807,6 +1816,7 @@ function enginePickUpBase() {
     engineSortHand(game.hands[game.pivot]);
     game.currentBaser = game.pivot;
     game.phase = GamePhase.BASING;
+    game.dealingStage = DealingStage.NONE;
     return true;
 }
 
@@ -1819,6 +1829,7 @@ function engineInitPlayingStateFromCommittedBase() {
     game.roundPlayed      = [null, null, null, null];
     game.leadInfo         = null;
     game.phase            = GamePhase.PLAYING;
+    game.dealingStage     = DealingStage.NONE;
     return true;
 }
 
@@ -1861,6 +1872,7 @@ function engineSetBase(selectedCards, options) {
     let deferPlaying = !!(options && options.deferPlaying);
     if (deferPlaying) {
         game.phase = GamePhase.BASING;
+        game.dealingStage = DealingStage.NONE;
         return true;
     }
 
@@ -1886,6 +1898,7 @@ function engineApplyOverbaseDeclaration(player, declaration) {
     game.base = [];
     engineSortHand(game.hands[player]);
     game.phase = GamePhase.BASING;
+    game.dealingStage = DealingStage.NONE;
     return true;
 }
 
@@ -2008,6 +2021,7 @@ function engineEndRound() {
     let allHandsEmpty = game.hands.every(h => h.length === 0);
     if (allHandsEmpty) {
         game.phase = GamePhase.COUNTING;
+        game.dealingStage = DealingStage.NONE;
         return { winner, trickPoints, gameOver: true };
     }
 
@@ -2089,6 +2103,7 @@ function engineFinalize() {
     }
 
     game.phase = GamePhase.GAME_OVER;
+    game.dealingStage = DealingStage.NONE;
 
     // Compute ending compensation in canonical frame-score unit.
     // Note 48a: ending compensation = ending length * authoritative base multiplier / 2 * unit.
