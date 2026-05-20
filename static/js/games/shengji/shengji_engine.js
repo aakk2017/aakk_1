@@ -171,6 +171,118 @@ window.UNDETERMINED_PIVOT = UNDETERMINED_PIVOT;
 window.isPivotResolved = isPivotResolved;
 
 // ---------------------------------------------------------------------------
+// Position-system contract helpers (Note 104)
+// ---------------------------------------------------------------------------
+//
+// POSITION SYSTEM SEPARATION CONTRACT:
+//
+//   naturalPosition  — stable actor identity (e.g. E, N, W, S; or N, Sw, Se, D)
+//   referencePosition — relative to selected reference perspective
+//                       (reference, afterhand, opposite, forehand)
+//   framePosition /
+//   frameRole        — relative to pivot/frame structure
+//                       (pivot, successor, ally, predecessor)
+//   roundPosition    — order within the current trick/round
+//                       (leader, secondSeat, thirdSeat, fourthSeat)
+//   displayPosition  — screen layout slot (bottom, right, top, left)
+//
+// CURRENT NORMAL 4P DISPLAY CONTRACT:
+//   naturalPositionOrder + selectedNaturalPositionIndex
+//       -> referencePosition -> displayPosition (bottom/right/top/left)
+//   NOT routed through pivot/framePosition/frameOrder.
+//
+// FUTURE 3PDA-STYLE DISPLAY CONTRACT (specification only, not activated):
+//   frameOrder + referenceActor -> displayPosition (bottom/right/top/left)
+//
+// The helpers below encode the future 3PDA-style contract as pure functions.
+// They have no side effects, no DOM access, and do not affect live gameplay.
+
+/**
+ * Generic frame-order → display-position mapper (future 3PDA-style contract).
+ * Contract:
+ *   bottom = referenceActor
+ *   right  = next actor in frameOrder after reference
+ *   top    = actor two steps after reference
+ *   left   = actor one step before reference
+ * @param {string[]} frameOrder - ordered array of actor IDs in frame play order
+ * @param {string} referenceActor - must appear in frameOrder
+ * @returns {{ bottom, right, top, left }} display-position → actor-ID map
+ */
+function createDisplayMapFromFrameOrder(frameOrder, referenceActor) {
+    const referenceIndex = frameOrder.indexOf(referenceActor);
+    if (referenceIndex < 0) {
+        throw new Error('referenceActor must be present in frameOrder');
+    }
+    const n = frameOrder.length;
+    return {
+        bottom: frameOrder[referenceIndex],
+        right:  frameOrder[(referenceIndex + 1) % n],
+        top:    frameOrder[(referenceIndex + 2) % n],
+        left:   frameOrder[(referenceIndex + n - 1) % n],
+    };
+}
+
+// Future 3PDA constants (specification only — not used in live gameplay)
+const REAL_ACTORS_3PDA = Object.freeze(['N', 'Sw', 'Se']);
+const DUMMY_ACTOR_3PDA = 'D';
+
+/**
+ * Future 3PDA frame-order builder (specification only).
+ * frameOrder = [pivot, successor, dummy, predecessor]
+ * @param {string} pivotActor - must be one of REAL_ACTORS_3PDA
+ * @returns {string[]} frame play order for 3PDA
+ */
+function create3PDAFrameOrder(pivotActor) {
+    const pivotIndex = REAL_ACTORS_3PDA.indexOf(pivotActor);
+    if (pivotIndex < 0) {
+        throw new Error('Invalid 3PDA pivot actor');
+    }
+    return [
+        REAL_ACTORS_3PDA[pivotIndex],             // pivot
+        REAL_ACTORS_3PDA[(pivotIndex + 1) % 3],   // successor
+        DUMMY_ACTOR_3PDA,                          // dummy ally
+        REAL_ACTORS_3PDA[(pivotIndex + 2) % 3],   // predecessor
+    ];
+}
+
+/**
+ * Future 3PDA display map (specification only).
+ * referenceActor must be a real actor (not dummy D).
+ * @param {string} pivotActor - must be one of REAL_ACTORS_3PDA
+ * @param {string} referenceActor - must be one of REAL_ACTORS_3PDA
+ * @returns {{ bottom, right, top, left }} display-position → actor-ID map
+ */
+function create3PDADisplayMap(pivotActor, referenceActor) {
+    if (REAL_ACTORS_3PDA.indexOf(referenceActor) < 0) {
+        throw new Error('referenceActor must be a real 3PDA actor, not dummy');
+    }
+    const frameOrder = create3PDAFrameOrder(pivotActor);
+    return createDisplayMapFromFrameOrder(frameOrder, referenceActor);
+}
+
+/**
+ * Future 3PDA inter-frame pivot rotation (specification only).
+ * @param {string} initialPivotActor - must be one of REAL_ACTORS_3PDA
+ * @param {number} frameIndex - 0-based frame number
+ * @returns {string} pivot actor for that frame
+ */
+function get3PDAPivotForFrame(initialPivotActor, frameIndex) {
+    const start = REAL_ACTORS_3PDA.indexOf(initialPivotActor);
+    if (start < 0) {
+        throw new Error('Invalid initial pivot actor');
+    }
+    return REAL_ACTORS_3PDA[(start + frameIndex) % 3];
+}
+
+// Export position-system contract helpers for test access
+window.createDisplayMapFromFrameOrder = createDisplayMapFromFrameOrder;
+window.create3PDAFrameOrder            = create3PDAFrameOrder;
+window.create3PDADisplayMap            = create3PDADisplayMap;
+window.get3PDAPivotForFrame            = get3PDAPivotForFrame;
+window.REAL_ACTORS_3PDA                = REAL_ACTORS_3PDA;
+window.DUMMY_ACTOR_3PDA                = DUMMY_ACTOR_3PDA;
+
+// ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
 let game = {

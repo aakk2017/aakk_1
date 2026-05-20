@@ -1908,7 +1908,36 @@ function autoPlayAsBot(player) {
 // Game flow
 // ---------------------------------------------------------------------------
 
+/**
+ * Clear stale shared UI surfaces at new-game entry (Note 105).
+ *
+ * Idempotent and null-safe. Must run before any new-game state is rendered.
+ * Clears: phase/status text, reference-hand cards, denomination/declaration
+ * display, hint areas.
+ * Does NOT mutate deck/deal/engine/rules/scoring state.
+ * Safe to call from any game mode entry path.
+ */
+function clearSharedGameStartUiStateForNewGame() {
+    // Phase and status: clear stale previous-game text immediately
+    updatePhaseDisplay('');
+    updateStatus(t('status.ready'));
+
+    // Reference hand: clear stale cards from previous game/frame
+    if (gReferenceHandSurface) gReferenceHandSurface.innerHTML = '';
+
+    // Denomination/declaration display: clear stale strain icon and text
+    if (gDenomArea)    gDenomArea.removeAttribute('strain');
+    if (gStrainDiv)    gStrainDiv.innerHTML = '';
+    if (gDeclareSp)    gDeclareSp.textContent = '';
+    if (gDeclMethodSp) gDeclMethodSp.textContent = '';
+
+    // Hint areas: clear stale per-frame content
+    if (gHint1Div) gHint1Div.textContent = '';
+    if (gHint2Div) { gHint2Div.textContent = ''; gHint2Div.style.display = 'none'; }
+}
+
 function startNewGame() {
+    clearSharedGameStartUiStateForNewGame(); // Note 105: clear stale shared UI before new state
     ensureResolvedSettings();
     applyUserNaturalPositionFor4P(gResolvedGameSettings.displaySettings && gResolvedGameSettings.displaySettings.userNaturalPosition);
 
