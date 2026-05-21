@@ -260,6 +260,11 @@ let selectedCardIds = new Set();
 // Bot turn delay (ms)
 const BOT_DELAY = 600;
 
+// Session epoch/token (Note 108a): monotonically increasing value.
+// Incremented at every new-session boundary.  Async callbacks capture the
+// epoch at scheduling time and return early if the epoch no longer matches.
+let gUiSessionEpoch = 0;
+
 // Dealing phase state
 let currentDeclaration = null;   // declaration made by human during dealing
 let gAutoStrain3rdTriggerCard = null; // 3rd undealt card used for auto-strain (note 44a)
@@ -376,6 +381,92 @@ let pauseState = {
     pendingResumePrompt: false,
     quitRequesterSeat: null,
 };
+
+// ---------------------------------------------------------------------------
+// Session lifecycle (Note 108a)
+// ---------------------------------------------------------------------------
+
+/**
+ * Session kind identifiers for the new-session boundary.
+ * Every active UI session must be one of these kinds.
+ */
+const UiSessionKind = Object.freeze({
+    IDLE:                   'idle',
+    NORMAL_4P:              'normal-4p',
+    THREE_PDA_START_SHELL:  'three-pda-start-shell',  // kept for backward-compat references
+    DA3P_FRAME_START:        'da3p-frame-start',        // Note 109: undealt frame-start board
+});
+
+function bumpUiSessionEpoch() {
+    gUiSessionEpoch += 1;
+    return gUiSessionEpoch;
+}
+
+function getCurrentUiSessionEpoch() {
+    return gUiSessionEpoch;
+}
+
+function isCurrentUiSessionEpoch(epoch) {
+    return epoch === gUiSessionEpoch;
+}
+
+/**
+ * Shared new-session termination boundary (Note 108a).
+ *
+ * Must be called at the start of every new session/shell before any
+ * new UI state is set.  Terminates the previous session by:
+ *   1. Bumping the session epoch  (invalidates stale async callbacks).
+ *   2. Stopping all active timers.
+ *   3. Resetting pause protocol state.
+ *   4. Clearing selection and action state.
+ *   5. Resetting crossing/overbase state.
+ *   6. Clearing the DA3P frame-start board when the next session is not a DA3P session.
+ *   7. Clearing shared game-start UI surfaces (Note 105).
+ *
+ * This function is idempotent and null-safe.
+ *
+ * @param {string} nextSessionKind  One of UiSessionKind.
+ */
+function beginNewSessionBoundary(nextSessionKind) {
+    // 1. Bump epoch — stale async callbacks will see a mismatch and return early.
+    bumpUiSessionEpoch();
+
+    // 2. Stop active timers.
+    if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
+    if (gFrameIntermittentTimeout) {
+        clearTimeout(gFrameIntermittentTimeout);
+        gFrameIntermittentTimeout = null;
+        gFrameIntermittentEndsAt = 0;
+    }
+    clearTimers(); // clears gTimerInterval and shot-clock state
+
+    // 3. Reset pause protocol.
+    clearPauseProtocolStateToIdle();
+    hidePauseDialog();
+    if (pauseState.frozenSnapshot) pauseState.frozenSnapshot = null;
+    if (pauseState.pendingResumePrompt) pauseState.pendingResumePrompt = false;
+
+    // 4. Clear selection and action state.
+    if (typeof clearSelection === 'function') clearSelection();
+    currentDeclaration = null;
+    gAutoStrain3rdTriggerCard = null;
+    gAutoStrain3rdTriggered = false;
+
+    // 5. Reset crossing/overbase state.
+    gCrossingState = null;
+    if (typeof hideLocalCrossingActionButtons === 'function') hideLocalCrossingActionButtons();
+    if (typeof clearCrossingSeatStatuses === 'function') clearCrossingSeatStatuses();
+    gOverbaseDecision = null;
+
+    // 6. Clear DA3P frame-start board unless the next session is itself a DA3P session.
+    if (nextSessionKind !== UiSessionKind.THREE_PDA_START_SHELL &&
+        nextSessionKind !== UiSessionKind.DA3P_FRAME_START) {
+        clearDA3PFrameStartBoard();
+    }
+
+    // 7. Clear shared new-game UI surfaces (Note 105 — still applies).
+    clearSharedGameStartUiStateForNewGame();
+}
 
 // ---------------------------------------------------------------------------
 // Card rendering
@@ -1936,42 +2027,98 @@ function clearSharedGameStartUiStateForNewGame() {
     if (gHint2Div) { gHint2Div.textContent = ''; gHint2Div.style.display = 'none'; }
 }
 
+/**
+ * Shared new-session board-surface reset (Note 108b).
+ * Clears visible and invisibly-coupled stale board/UI surfaces before any new
+ * session or shell renders. UI/surface only — does not start the engine, deal
+ * cards, or activate gameplay. Idempotent and null-safe.
+ *
+ * Layer 2 of the two-layer new-session boundary:
+ *   Layer 1: beginNewSessionBoundary (108a) — lifecycle/timer/epoch termination
+ *   Layer 2: resetBoardSurfacesForNewSession (108b) — visible/UI surface cleanup
+ *
+ * @param {string} nextSessionKind  One of UiSessionKind.
+ */
+function resetBoardSurfacesForNewSession(nextSessionKind) {
+    // 1. Desk slots: clear played cards; reset namebar data-status to idle.
+    clearDesk();
+
+    // 2. For non-4P sessions (e.g. 3PDA shell): also remove persistent .desk-namebar
+    //    elements so stale 4P player labels do not remain in the desk slots.
+    if (nextSessionKind !== UiSessionKind.NORMAL_4P) {
+        [gReferenceHandSurface, ...gDeskSlots].forEach(container => {
+            if (container) container.querySelectorAll('.desk-namebar').forEach(el => el.remove());
+        });
+        gDeskNamebars = [null, null, null, null];
+    }
+
+    // 3. Selection state (also cleared in beginNewSessionBoundary; defensive repeat).
+    if (typeof clearSelection === 'function') clearSelection();
+
+    // 4. Declaration history rows.
+    resetDeclarationHistoryRows();
+
+    // 5. Forehand-control interaction state.
+    gFCInteraction = null;
+
+    // 6. Log.
+    if (typeof clearLog === 'function') clearLog();
+
+    // 7. Bot deal count display.
+    clearBotDealCounts();
+
+    // 8. Declaration matrix.
+    if (gDeclareMatrix) gDeclareMatrix.style.display = 'none';
+
+    // 9. Counting dialog.
+    if (typeof hideCountingDialog === 'function') hideCountingDialog();
+
+    // 10. Play button.
+    if (gBtnPlay) {
+        gBtnPlay.disabled = true;
+        gBtnPlay.textContent = t('buttons.play');
+    }
+
+    // 11. Pause button state.
+    if (typeof refreshPauseButtonState === 'function') refreshPauseButtonState();
+
+    // 12. Show-base button and base preview.
+    if (gBtnShowBase) gBtnShowBase.style.display = 'none';
+    if (gBasePreview) gBasePreview.innerHTML = '';
+
+    // 13. Score box.
+    if (gScoreDiv) gScoreDiv.textContent = '0';
+    if (gScoreCont) {
+        gScoreCont.style.backgroundColor = 'transparent';
+        gScoreCont.style.borderColor = '#f8f8f8';
+    }
+
+    // 14. Attackers streak display (reset to zero before updating).
+    attackersStreak = 0;
+    updateAttackersStreakDisplay();
+
+    // 15. New-game button text.
+    if (gBtnNewGame) gBtnNewGame.textContent = t('buttons.newGame');
+}
+
 function startNewGame() {
-    clearSharedGameStartUiStateForNewGame(); // Note 105: clear stale shared UI before new state
+    // Note 108a: shared new-session boundary — terminates previous session before
+    // setting any new-game state (epoch bump, timer clear, pause reset, etc.)
+    beginNewSessionBoundary(UiSessionKind.NORMAL_4P);
+
+    // Note 108b: shared board-surface reset — clears visible and invisible stale
+    // board/UI surfaces (desk, namebars, score, buttons, declaration, etc.)
+    // before the new 4P session renders.
+    resetBoardSurfacesForNewSession(UiSessionKind.NORMAL_4P);
+
     ensureResolvedSettings();
     applyUserNaturalPositionFor4P(gResolvedGameSettings.displaySettings && gResolvedGameSettings.displaySettings.userNaturalPosition);
 
-    // Clean up any in-progress dealing timer
-    if (dealingTimer) { clearInterval(dealingTimer); dealingTimer = null; }
-    if (gFrameIntermittentTimeout) { clearTimeout(gFrameIntermittentTimeout); gFrameIntermittentTimeout = null; gFrameIntermittentEndsAt = 0; }
-    clearPauseProtocolStateToIdle();
-    currentDeclaration = null;
-    gAutoStrain3rdTriggerCard = null;
-    gAutoStrain3rdTriggered = false;
-    resetDeclarationHistoryRows();
-
-    // Clear all active timers (note 24)
+    // Clear all active timers (note 24) — redundant safety, also in beginNewSessionBoundary.
     clearTimers();
 
     // §3: Clear forehand-control and failed-multiplay aftermath UI state
-    gFCInteraction = null;
-    gCrossingState = null;
-    hideLocalCrossingActionButtons();
-    clearCrossingSeatStatuses();
-
-    clearLog();
-    clearSelection();
-    clearDesk();
-    clearBotDealCounts();
-    gDeclareMatrix.style.display = 'none';
-    hideCountingDialog();
-    gBtnPlay.disabled = true;
-    gBtnPlay.textContent = t('buttons.play');
-    refreshPauseButtonState();
-
-    // Hide show-base button (§5)
-    if (gBtnShowBase) gBtnShowBase.style.display = 'none';
-    if (gBasePreview) gBasePreview.innerHTML = '';
+    // (gFCInteraction and crossing already cleared by resetBoardSurfacesForNewSession / beginNewSessionBoundary)
 
     let level, pivot, playerLevels, isQiangzhuang;
     let pendingCycleIndexBySide = null;
@@ -2005,20 +2152,10 @@ function startNewGame() {
     // Display frame number
     document.getElementById('div-table-number').textContent = frameNumber;
 
-    // Clear corner infos
-    gDenomArea.removeAttribute('strain');
-    gStrainDiv.innerHTML = '';
-    gDeclareSp.textContent = '';
-    gDeclMethodSp.textContent = '';
-    gScoreDiv.textContent = '0';
-    if (gScoreCont) {
-        gScoreCont.style.backgroundColor = 'transparent';
-        gScoreCont.style.borderColor = '#f8f8f8';
-    }
-    if (gHint1Div) gHint1Div.textContent = '';
-    if (gHint2Div) updateAttackersStreakDisplay();
+    // Corner infos and score/streak/button text are all cleared by
+    // beginNewSessionBoundary (→ clearSharedGameStartUiStateForNewGame) and
+    // resetBoardSurfacesForNewSession above.
 
-    gBtnNewGame.textContent = t('buttons.newGame');
     let declarationOrderAnchor = isQiangzhuang ? Math.floor(Math.random() * NUM_PLAYERS) : pivot;
     engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig, declarationOrderAnchor);
     if (pendingCycleIndexBySide && game && game.levelRuleState) {
@@ -2072,7 +2209,9 @@ function runFrameIntermittent(remainingMs) {
 
     let delayMs = Math.max(0, Number.isFinite(remainingMs) ? remainingMs : (getTimingConfigForPage().frameIntermittent * 1000));
     gFrameIntermittentEndsAt = Date.now() + delayMs;
+    const _fiEpoch = getCurrentUiSessionEpoch(); // Note 108a: capture epoch for stale-callback guard
     gFrameIntermittentTimeout = setTimeout(() => {
+        if (!isCurrentUiSessionEpoch(_fiEpoch)) return; // Note 108a: stale session — abort
         gFrameIntermittentTimeout = null;
         gFrameIntermittentEndsAt = 0;
         gTimingPhase = null;
@@ -2414,7 +2553,9 @@ function runDealingPhase() {
     gDeskInfo.innerHTML = '<div class="dealt-count">' + dealtPerPlayer + '</div>'
         + '<div class="dealt-count-label">' + t('dealing.dealtCount', { count: dealtPerPlayer }) + '</div>';
 
+    const _dpEpoch = getCurrentUiSessionEpoch(); // Note 108a: capture epoch for stale-callback guard
     dealingTimer = setInterval(function () {
+        if (!isCurrentUiSessionEpoch(_dpEpoch)) { clearInterval(dealingTimer); dealingTimer = null; return; } // Note 108a
         let batch = engineDealNextBatch();
         if (!batch) { clearInterval(dealingTimer); dealingTimer = null; return; }
 
@@ -2462,10 +2603,12 @@ function runDealingPhase() {
             // Note 24 §5: check if highest-possible declaration was already made
             if (engineIsHighestPossibleDeclaration(currentDeclaration)) {
                 // §5.1: skip final declaration window, enter basing directly
-                setTimeout(resolveDeclaredPhase, 400);
+                const _epoch51 = getCurrentUiSessionEpoch(); // Note 108a
+                setTimeout(() => { if (!isCurrentUiSessionEpoch(_epoch51)) return; resolveDeclaredPhase(); }, 400);
             } else {
                 // §5.2: start 5s final declaration window
-                setTimeout(runFinalDeclarationWindow, 400);
+                const _epoch52 = getCurrentUiSessionEpoch(); // Note 108a
+                setTimeout(() => { if (!isCurrentUiSessionEpoch(_epoch52)) return; runFinalDeclarationWindow(); }, 400);
             }
         }
     }, 500);
@@ -3817,7 +3960,8 @@ function promptCurrentPlayer() {
                 h.forEach(c => selectedCardIds.add(c.cardId));
                 renderHand(cp);
                 updatePlayButton();
-                setTimeout(() => humanPlayCards(), 400); // automatically submit
+                const _hpcEpoch = getCurrentUiSessionEpoch(); // Note 108a
+                setTimeout(() => { if (!isCurrentUiSessionEpoch(_hpcEpoch)) return; humanPlayCards(); }, 400); // automatically submit
                 return;
             }
             
@@ -3872,7 +4016,8 @@ function promptCurrentPlayer() {
             gCrossingState.resolvedMarkersClearedAtFirstLead = true;
         }
         // Bot plays after a delay
-        setTimeout(() => botTakeTurn(cp), BOT_DELAY);
+        const _btEpoch = getCurrentUiSessionEpoch(); // Note 108a
+        setTimeout(() => { if (!isCurrentUiSessionEpoch(_btEpoch)) return; botTakeTurn(cp); }, BOT_DELAY);
     }
 }
 
@@ -4071,6 +4216,33 @@ const MAIN_PRESET_COMPARISON_FIELDS = [
 // table-level constraints; a preset is "enabled" only when those constraints
 // are satisfied by the current draft config.
 const TABLE_LEVEL_FIELDS = ['deckCount', 'tableFormat', 'pivotPassMode'];
+
+// Table-format enum (Note 107 / Note 110a).
+// Canonical values: 'normal-4p' and 'da3p'.
+// THREE_PDA is a deprecated compat alias kept for historical code paths.
+const ShengjiTableFormat = Object.freeze({
+    NORMAL_4P: 'normal-4p',  // canonical normal 4-player table format (was 'normal-4P')
+    DA3P:      'da3p',        // canonical 3-player dummy-ally format (Note 110a)
+    THREE_PDA: 'da3p',        // deprecated compat alias → same value as DA3P
+});
+
+/**
+ * Normalize a raw tableFormat value to its canonical form.
+ * Accepts legacy 'three-pda' → 'da3p', legacy 'normal-4P' → 'normal-4p'.
+ * @param {string} value
+ * @returns {string} canonical tableFormat
+ */
+function normalizeTableFormat(value) {
+    if (value === 'three-pda') return ShengjiTableFormat.DA3P;
+    if (value === 'da3p')      return ShengjiTableFormat.DA3P;
+    if (value === 'normal-4p') return ShengjiTableFormat.NORMAL_4P;
+    if (value === 'normal-4P') return ShengjiTableFormat.NORMAL_4P;
+    return ShengjiTableFormat.NORMAL_4P;
+}
+
+// 3PDA start shell state (Note 108).  Null when not in 3PDA shell mode.
+// This is a UI/model boundary state only — no card dealing, no gameplay.
+let gDA3PFrameStartState = null;
 
 // Per-preset table-level constraints.  Key = preset value string.
 // Value = function(draftCfg) → bool.  Returns true if the preset is compatible
@@ -4385,10 +4557,553 @@ function getDraftUserNaturalPosition() {
     return normalize4PUserNaturalPosition(source.userNaturalPosition);
 }
 
+const VALID_3PDA_REFERENCE_ACTORS = ['N', 'Sw', 'Se'];
+
+// Note 110a: canonical naming — normalizeDA3PReferenceActor / getDraftDA3PReferenceActor
+function normalizeDA3PReferenceActor(value) {
+    return VALID_3PDA_REFERENCE_ACTORS.includes(value) ? value : 'N';
+}
+// Deprecated compat alias
+const normalize3PDAReferenceActor = normalizeDA3PReferenceActor;
+
+function getDraftDA3PReferenceActor() {
+    let source = gSettingsDraftDisplaySettings || {};
+    // Accept canonical selectedDA3PReferenceActor; fall back to legacy selected3PDAReferenceActor
+    let v = (source.selectedDA3PReferenceActor !== undefined)
+        ? source.selectedDA3PReferenceActor
+        : source.selected3PDAReferenceActor;
+    return normalizeDA3PReferenceActor(v);
+}
+// Deprecated compat alias
+const getDraft3PDAReferenceActor = getDraftDA3PReferenceActor;
+
+// Note 108 — 3PDA start shell helpers
+
+function normalizeDA3PDealAnchor(value) {
+    return VALID_3PDA_REFERENCE_ACTORS.includes(value) ? value : 'N';
+}
+
+/**
+ * Generate a random deal anchor from real 3PDA actors.
+ * @param {Object} [options] - { fixed: 'N'|'Sw'|'Se' } for deterministic override
+ * @returns {string}
+ */
+function generateDA3PDealAnchor(options) {
+    if (options && options.fixed) {
+        return normalizeDA3PDealAnchor(options.fixed);
+    }
+    return VALID_3PDA_REFERENCE_ACTORS[Math.floor(Math.random() * VALID_3PDA_REFERENCE_ACTORS.length)];
+}
+
+/**
+ * Get a stable string key for a frame actor ID (Note 110b).
+ * Supports both numeric (normal 4P) and string (DA3P) actor IDs.
+ * @param {number|string} actor
+ * @returns {string}
+ */
+function frameActorKey(actor) {
+    return String(actor);
+}
+
+/**
+ * Stable equality check for frame actor IDs (Note 110b).
+ * Works for both numeric (normal 4P) and string (DA3P) actor IDs.
+ * Numeric '2' and string '2' are considered the same actor.
+ * 'D' does not collide with any numeric seat (0-3 → '0','1','2','3').
+ * @param {number|string} a
+ * @param {number|string} b
+ * @returns {boolean}
+ */
+function isSameFrameActor(a, b) {
+    return frameActorKey(a) === frameActorKey(b);
+}
+
+/**
+ * Check whether an actor is in a list, using stable key comparison (Note 110b).
+ * Supports both numeric (normal 4P) and string (DA3P) actor IDs.
+ * @param {number|string} actor
+ * @param {Array<number|string>} list
+ * @returns {boolean}
+ */
+function isFrameActorInList(actor, list) {
+    return Array.isArray(list) && list.some(x => isSameFrameActor(x, actor));
+}
+
+/**
+ * Build a shared 4-position in-frame context object (Note 110b).
+ * Used as the primary source of truth for in-frame actor layout,
+ * deal order, and declaration eligibility.
+ *
+ * Normal 4P: dummyActor=null, realActors=[0,1,2,3], all actors declare.
+ * DA3P:      dummyActor='D', realActors=['N','Sw','Se'], D cannot declare.
+ *
+ * @param {Object} params
+ * @param {string}         params.tableFormat
+ * @param {string}         params.frameKind
+ * @param {boolean}        params.isQiangzhuangFrame
+ * @param {*|null}         params.pivotActor
+ * @param {string}         params.pivotStatus        - 'resolved' | 'unresolved'
+ * @param {*}              params.dealAnchor
+ * @param {Array}          params.frameActors         - 4-entry array in deal order
+ * @param {Array}          params.realActors
+ * @param {*|null}         params.dummyActor          - null for normal 4P, 'D' for DA3P
+ * @param {Object}         params.actorKindByKey
+ * @param {Array}          params.declarationEligibleActors
+ * @param {Array}          params.nonDeclaringActors
+ * @returns {Object} frameContext with kind 'four-position-frame-context'
+ */
+function buildFourPositionFrameContext(params) {
+    return {
+        kind:                       'four-position-frame-context',
+        tableFormat:                params.tableFormat,
+        frameKind:                  params.frameKind,
+        isQiangzhuangFrame:         params.isQiangzhuangFrame,
+        pivotActor:                 params.pivotActor,
+        pivotStatus:                params.pivotStatus,
+        dealAnchor:                 params.dealAnchor,
+        frameActors:                params.frameActors,
+        dealOrder:                  params.frameActors,  // deal order == frame actors in round sequence
+        realActors:                 params.realActors,
+        dummyActor:                 params.dummyActor,
+        actorKindByKey:             params.actorKindByKey,
+        declarationEligibleActors:  params.declarationEligibleActors,
+        nonDeclaringActors:         params.nonDeclaringActors,
+        // Future variant hooks (not yet active — placeholders for control/visibility/scoring):
+        controlActorByFrameActorKey: {},
+        visibilityPolicy:            {},
+        scoringPolicy:               {},
+    };
+}
+
+/**
+ * Shared dealAnchor resolver for any 4-position-in-frame Shengji game (Notes 110a, 110b).
+ * Contract: qz frame → random real actor (or fixed override); non-qz frame → pivot.
+ *
+ * Examples:
+ *   normal 4P qz:  dealAnchor = random from realActors [0,1,2,3]
+ *   normal 4P non-qz (pivot=1): dealAnchor = 1
+ *   DA3P qz:       dealAnchor = random from ['N','Sw','Se'] (never 'D')
+ *   DA3P non-qz (pivot='Sw'): dealAnchor = 'Sw'
+ *
+ * @param {Object} frameContext - { isQiangzhuangFrame, pivotActor, realActors }
+ * @param {Object} [options]    - { fixedDealAnchor } for deterministic test override
+ * @returns {*|null}
+ */
+function resolveDealAnchorForFrameContext(frameContext, options) {
+    if (frameContext.isQiangzhuangFrame) {
+        if (options && options.fixedDealAnchor) {
+            return normalizeDA3PDealAnchor(options.fixedDealAnchor);
+        }
+        let realActors = frameContext.realActors || VALID_3PDA_REFERENCE_ACTORS;
+        return realActors[Math.floor(Math.random() * realActors.length)];
+    }
+    return frameContext.pivotActor || null;
+}
+
+/**
+ * Check whether an actor is eligible to declare in a frame context (Notes 110a, 110b).
+ * DA3P hook: D cannot declare. For normal 4P, all frame actors can declare.
+ * Uses isFrameActorInList for stable numeric/string actor comparison.
+ *
+ * @param {number|string} actor
+ * @param {Object} frameContext - { declarationEligibleActors: Array }
+ * @returns {boolean}
+ */
+function canActorDeclareInFrameContext(actor, frameContext) {
+    if (!frameContext || !Array.isArray(frameContext.declarationEligibleActors)) return true;
+    return isFrameActorInList(actor, frameContext.declarationEligibleActors);
+}
+
+/**
+ * Build DA3P pre-deal diagnostics derived from a frameContext (Note 110b).
+ * Diagnostics only — not the source of truth for dealing execution.
+ * Replaces the old buildDA3PDealPlan (Note 110) which is quarantined here.
+ * Preserves shape compatibility so existing tests referencing dealPlan.* fields
+ * continue to work via the preDealDiagnostics/dealPlan alias in gDA3PFrameStartState.
+ *
+ * @param {Object} frameContext         - four-position-frame-context (from buildFourPositionFrameContext)
+ * @param {string} selectedReferenceActor
+ * @param {Object} displayMap           - { bottom, right, top, left }
+ * @returns {Object} diagnostics with kind 'da3p-pre-dealing-plan'
+ */
+function buildDA3PPreDealDiagnostics(frameContext, selectedReferenceActor, displayMap) {
+    const deckCount               = 2;
+    const totalCardCount          = TOTAL_CARDS;             // 108
+    const baseSize                = BASE_SIZE;               // 8
+    const framePositionCount      = FRAME_POSITION_COUNT_3PDA; // 4
+    const realActorCount          = REAL_ACTOR_COUNT_3PDA;   // 3
+    const cardsPerFramePosition   = CARDS_PER_HAND;          // 25
+    const totalRecipientCardCount = totalCardCount - baseSize;
+    const expectedCount           = cardsPerFramePosition;
+    const temporaryFrameOrder     = frameContext.frameActors;
+
+    return {
+        kind:               'da3p-pre-dealing-plan',
+        status:             'planned-not-dealt',
+        tableFormat:        frameContext.tableFormat,
+        frameKind:          frameContext.frameKind,
+        frameIndex:         0,
+        frameNumber:        1,
+        isQiangzhuangFrame: frameContext.isQiangzhuangFrame,
+        pivotActor:         frameContext.pivotActor,
+        pivotStatus:        frameContext.pivotStatus,
+        dealAnchor:         frameContext.dealAnchor,
+        selectedReferenceActor,
+        temporaryFrameOrder,
+        displayMap,
+        recipientsInRoundOrder: temporaryFrameOrder,
+        recipientKindByActor: {
+            N:  'real',
+            Sw: 'real',
+            Se: 'real',
+            D:  'temporary-dummy-pile',
+        },
+        dealSequencePattern: {
+            rounds:             cardsPerFramePosition,
+            perRoundRecipients: temporaryFrameOrder,
+        },
+        framePositionCount,
+        realActorCount,
+        dummyActor:               frameContext.dummyActor,
+        declarationEligibleActors: frameContext.declarationEligibleActors,
+        nonDeclaringActors:        frameContext.nonDeclaringActors,
+        deckCount,
+        totalCardCount,
+        baseSize,
+        cardsPerFramePosition,
+        totalRecipientCardCount,
+        expectedCardCountByActor: {
+            N:  expectedCount,
+            Sw: expectedCount,
+            Se: expectedCount,
+            D:  expectedCount,
+        },
+        expectedBaseCardCount: baseSize,
+        // Non-execution guards (transitional diagnostics only, not core model):
+        deckCreated:      false,
+        cardsCreated:     false,
+        handsCreated:     false,
+        cardsDealt:       false,
+        baseCreated:      false,
+        dealTimerStarted: false,
+    };
+}
+// Note 110b: buildDA3PDealPlan quarantined — buildDA3PPreDealDiagnostics is the
+// canonical function. Compat alias kept so older test references resolve without churn.
+const buildDA3PDealPlan = buildDA3PPreDealDiagnostics;
+
+/**
+ * Enter the 3PDA frame-start board (Note 108 shell → Note 109 undealt board).
+ * Creates an undealt 3PDA frame-start state and renders the board skeleton.
+ * Does NOT call startNewGame(), create a deck, deal cards, or start any gameplay.
+ * @param {Object} [options] - { dealAnchorFixed } for deterministic tests
+ */
+function enterDA3PFrameStart(options) {
+    beginNewSessionBoundary(UiSessionKind.DA3P_FRAME_START); // Note 108a: terminate previous session first
+
+    // Note 108b: clear stale board surfaces (desk, namebars, score, buttons,
+    // declaration, etc.) before the 3PDA board renders on top of the board.
+    resetBoardSurfacesForNewSession(UiSessionKind.DA3P_FRAME_START);
+
+    const selectedReferenceActor = getDraftDA3PReferenceActor();
+    const dealAnchor = generateDA3PDealAnchor(options && options.dealAnchorFixed ? { fixed: options.dealAnchorFixed } : undefined);
+
+    // Use engine helpers (Note 106): compute qz temp layout and display map
+    const temporaryFrameOrder = get3PDAQZTempLayout(dealAnchor);
+    const displayMap = createDisplayMapFromFrameOrder(temporaryFrameOrder, selectedReferenceActor);
+
+    // Note 110b: build shared four-position frameContext as primary model.
+    // frameContext is the source of truth for actor layout, deal order, and declaration eligibility.
+    const frameContext = buildFourPositionFrameContext({
+        tableFormat:               ShengjiTableFormat.DA3P,
+        frameKind:                 'da3p',
+        isQiangzhuangFrame:        true,
+        pivotActor:                null,
+        pivotStatus:               'unresolved',
+        dealAnchor,
+        frameActors:               temporaryFrameOrder,
+        realActors:                ['N', 'Sw', 'Se'],
+        dummyActor:                'D',
+        actorKindByKey:            { N: 'real', Sw: 'real', Se: 'real', D: 'temporary-dummy-pile' },
+        declarationEligibleActors: ['N', 'Sw', 'Se'],
+        nonDeclaringActors:        ['D'],
+    });
+
+    // Note 110b: diagnostics derived from frameContext (not source of truth for execution).
+    // dealPlan kept as transitional alias → preDealDiagnostics for backward compat with older tests.
+    const preDealDiagnostics = buildDA3PPreDealDiagnostics(frameContext, selectedReferenceActor, displayMap);
+
+    gDA3PFrameStartState = {
+        kind: 'da3p-frame-start',
+        tableFormat: ShengjiTableFormat.DA3P,  // canonical 'da3p' (Note 110a)
+        activationStatus: 'undealt-frame',
+
+        frameContext, // Note 110b: primary model — shared 4-position in-frame context
+
+        gameplayEnabled: false,
+        dealingEnabled: false,
+        declarationEnabled: false,
+        basingEnabled: false,
+        playingEnabled: false,
+        scoringEnabled: false,
+        dummyControlEnabled: false,
+
+        frameIndex: 0,
+        frameNumber: 1,
+        isQiangzhuangFrame: true,
+
+        pivotActor: null,
+        pivotStatus: 'unresolved',
+
+        dealAnchor,
+        dealAnchorPolicy: 'generated-local',
+
+        selectedReferenceActor,
+        temporaryFrameOrder,
+        displayMap,
+
+        preDealDiagnostics, // Note 110b: derived diagnostics (not source of truth)
+        dealPlan: preDealDiagnostics, // transitional alias → preDealDiagnostics (Note 110b)
+
+        // Explicit non-card boundary:
+        deckCreated: false,
+        cardsDealt: false,
+        handsCreated: false,
+        dummyHandRevealed: false,
+    };
+
+    closeSettingsDialog();
+    renderDA3PFrameStartBoard();
+}
+
+/**
+ * Render the undealt 3PDA frame-start state on the real normal-4P board surface (Note 109a).
+ * Inserts 3PDA actor namebars and desk placeholders into the real bottom/right/top/left
+ * desk slots, puts status content in the real central box, and adds auxiliary Exit/Back
+ * controls to the game-actions area. No cards, no playable UI, no deck/hand/dealing.
+ */
+function renderDA3PFrameStartBoard() {
+    // Clean up any previous DA3P board rendering (handles re-entry via Back to Settings)
+    [gReferenceHandSurface, ...gDeskSlots].forEach(el => {
+        if (el) el.querySelectorAll('.desk-namebar[data-da3p-actor]').forEach(c => c.remove());
+    });
+    const prevSentinel = document.getElementById('da3p-frame-start-sentinel');
+    if (prevSentinel) {
+        if (prevSentinel._onKeydown) document.removeEventListener('keydown', prevSentinel._onKeydown);
+        prevSentinel.remove();
+    }
+    const legacyBoard = document.getElementById('three-pda-board'); // Note 109 legacy cleanup
+    if (legacyBoard) legacyBoard.remove();
+    const prevActions = document.getElementById('da3p-frame-start-actions');
+    if (prevActions) prevActions.remove();
+    const gameActionsEl = document.getElementById('game-actions');
+    if (gameActionsEl) gameActionsEl.classList.remove('da3p-frame-start-actions-active');
+    const containerEl = document.querySelector('.container');
+    if (containerEl) containerEl.classList.remove('da3p-frame-start-active');
+    if (gScoreCont) gScoreCont.classList.remove('da3p-score-hidden');
+
+    if (!gDA3PFrameStartState) return;
+
+    const s = gDA3PFrameStartState;
+    const locale = getLocale();
+
+    function actorLabel(actor) {
+        if (actor === 'D') {
+            return (DUMMY_LABELS_3PDA && DUMMY_LABELS_3PDA[locale === 'en' ? 'en' : 'zh']) || 'D';
+        }
+        // Compact board labels: EN = N/Sw/Se, ZH = 子/申/辰 (from settings referenceActorOptionLabels)
+        return t('settingsDialog.fields.referenceActorOptionLabels.' + actor) || actor;
+    }
+
+    // 1. Mark the board container for 3PDA CSS state
+    if (containerEl) containerEl.classList.add('da3p-frame-start-active');
+
+    // 2. Render shared .desk-namebar into the shared placement area per position (Note 109c).
+    //    bottom/reference → gReferenceHandSurface (same as normal 4P).
+    //    top/right/left   → corresponding desk slot (same as normal 4P).
+    for (const pos of ['bottom', 'right', 'top', 'left']) {
+        const isRef = pos === 'bottom';
+        const container = isRef ? gReferenceHandSurface : gDeskDisplaySlots[pos];
+        if (!container) continue;
+        const actor = s.displayMap[pos];
+        const refPos = FOUR_P_DISPLAY_TO_REFERENCE_POSITION[pos] || pos;
+        const nb = document.createElement('div');
+        nb.className = isRef ? 'desk-namebar reference-hand-namebar' : 'desk-namebar';
+        nb.setAttribute('data-status', 'idle');
+        nb.setAttribute('data-da3p-actor', actor);
+        nb.setAttribute('data-actor-kind', isRef ? 'real' : (actor === 'D' ? 'dummy' : 'real'));
+        nb.setAttribute('data-display-position', pos);
+        nb.setAttribute('data-reference-position', refPos);
+        const posArea = document.createElement('div');
+        posArea.className = 'game-position-area';
+        posArea.textContent = actorLabel(actor);
+        nb.appendChild(posArea);
+        const nameArea = document.createElement('div');
+        nameArea.className = 'name-area';
+        nameArea.textContent = actor;
+        nb.appendChild(nameArea);
+        if (!isRef) {
+            const preview = document.createElement('div');
+            preview.className = 'exposed-preview';
+            nb.appendChild(preview);
+        }
+        container.appendChild(nb);
+    }
+
+    // 3. Populate real central info box
+    if (gDeskInfo) {
+        gDeskInfo.innerHTML = '';
+        const titleEl = document.createElement('div');
+        titleEl.className = 'tpfb-center-title';
+        titleEl.textContent = t('da3pFrameStart.title');
+        gDeskInfo.appendChild(titleEl);
+
+        const infoRows = [
+            t('da3pFrameStart.frame', { n: s.frameNumber }),
+            t('da3pFrameStart.qiangzhuangFrame'),
+            t('da3pFrameStart.pivotUnresolved'),
+            t('da3pFrameStart.dealAnchor') + ': ' + actorLabel(s.dealAnchor),
+            t('da3pFrameStart.selectedSeat') + ': ' + actorLabel(s.selectedReferenceActor),
+        ];
+        for (const text of infoRows) {
+            const row = document.createElement('div');
+            row.className = 'tpfb-center-row';
+            row.textContent = text;
+            gDeskInfo.appendChild(row);
+        }
+
+        // Note 110: show deal-plan-ready metadata if dealPlan is present
+        if (s.dealPlan) {
+            const planReadyEl = document.createElement('div');
+            planReadyEl.className = 'tpfb-center-row tpfb-deal-plan-ready';
+            planReadyEl.textContent = t('da3pFrameStart.dealPlanReady');
+            gDeskInfo.appendChild(planReadyEl);
+
+            const recipientsEl = document.createElement('div');
+            recipientsEl.className = 'tpfb-center-row tpfb-deal-plan-recipients';
+            const recipientLabels = s.dealPlan.recipientsInRoundOrder.map(actorLabel).join(' \u2192 ');
+            recipientsEl.textContent = t('da3pFrameStart.recipients') + ': ' + recipientLabels;
+            gDeskInfo.appendChild(recipientsEl);
+
+            const countsEl = document.createElement('div');
+            countsEl.className = 'tpfb-center-row tpfb-deal-plan-counts';
+            countsEl.textContent =
+                t('da3pFrameStart.cardsPerPosition') + ': ' + s.dealPlan.cardsPerFramePosition +
+                '\u3000' + t('da3pFrameStart.baseCards') + ': ' + s.dealPlan.baseSize;
+            gDeskInfo.appendChild(countsEl);
+        }
+
+        const undealtEl = document.createElement('div');
+        undealtEl.className = 'tpfb-center-undealt';
+        undealtEl.textContent = t('da3pFrameStart.undealt');
+        gDeskInfo.appendChild(undealtEl);
+    }
+
+    // 4. Neutralize 4P team score area (no NS/EW team scoring in 3PDA)
+    if (gScoreCont) gScoreCont.classList.add('da3p-score-hidden');
+
+    // 5. Add Exit/Back as auxiliary board controls in the game-actions area
+    const gameActions = document.getElementById('game-actions');
+    if (gameActions) {
+        gameActions.classList.add('da3p-frame-start-actions-active');
+        const actionsDiv = document.createElement('div');
+        actionsDiv.id = 'da3p-frame-start-actions';
+        const btnBack = document.createElement('button');
+        btnBack.id = 'da3p-frame-start-back-settings';
+        btnBack.className = 'button game-btn';
+        btnBack.textContent = t('da3pShell.backToSettings');
+        btnBack.addEventListener('click', backToSettingsFromDA3PFrameStart);
+        const btnExit = document.createElement('button');
+        btnExit.id = 'da3p-frame-start-exit';
+        btnExit.className = 'button game-btn';
+        btnExit.textContent = t('da3pShell.exitShell');
+        btnExit.addEventListener('click', exitDA3PFrameStart);
+        actionsDiv.appendChild(btnBack);
+        actionsDiv.appendChild(btnExit);
+        gameActions.appendChild(actionsDiv);
+    }
+
+    // 6. Escape key: exit board
+    function onShellKeydown(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            exitDA3PFrameStart();
+            document.removeEventListener('keydown', onShellKeydown);
+        }
+    }
+    document.addEventListener('keydown', onShellKeydown);
+
+    // Store keydown handler on a sentinel element for cleanup
+    const sentinel = document.createElement('div');
+    sentinel.id = 'da3p-frame-start-sentinel';
+    sentinel.style.display = 'none';
+    sentinel._onKeydown = onShellKeydown;
+    document.body.appendChild(sentinel);
+}
+
+/**
+ * Exit the 3PDA frame-start board: clear state/DOM without starting any game.
+ * Note 108d: board reversibility.
+ */
+function exitDA3PFrameStart() {
+    clearDA3PFrameStartBoard();
+}
+
+/**
+ * Open settings dialog from the 3PDA start shell.
+ * Shell stays underneath (settings z-index 110 > shell z-index 10).
+ * Sync tableFormat=three-pda into gResolvedGameSettings so the draft reflects the shell's format.
+ * Note 108d: shell reversibility — back to settings path.
+ */
+function backToSettingsFromDA3PFrameStart() {
+    // Preserve three-pda tableFormat in gResolvedGameSettings so openSettingsDialog
+    // clones it into gSettingsDraftRuleConfig correctly.
+    if (gResolvedGameSettings && gResolvedGameSettings.ruleConfig) {
+        gResolvedGameSettings.ruleConfig.tableFormat = ShengjiTableFormat.DA3P;
+    }
+    openSettingsDialog('create');
+}
+
+/**
+ * Clear the 3PDA frame-start board state and all associated DOM.
+ * Safe to call when no board is active.
+ */
+function clearDA3PFrameStartBoard() {
+    gDA3PFrameStartState = null;
+    // Remove escape keydown listener via sentinel
+    const sentinel = document.getElementById('da3p-frame-start-sentinel');
+    if (sentinel) {
+        if (sentinel._onKeydown) document.removeEventListener('keydown', sentinel._onKeydown);
+        sentinel.remove();
+    }
+    // Remove container class
+    const container = document.querySelector('.container');
+    if (container) container.classList.remove('da3p-frame-start-active');
+    // Remove DA3P shared nameabrs from real board slots
+    [gReferenceHandSurface, ...gDeskSlots].forEach(el => {
+        if (el) el.querySelectorAll('.desk-namebar[data-da3p-actor]').forEach(c => c.remove());
+    });
+    // Clear central info
+    if (gDeskInfo) gDeskInfo.innerHTML = '';
+    // Restore score display
+    if (gScoreCont) gScoreCont.classList.remove('da3p-score-hidden');
+    // Remove auxiliary DA3P controls
+    const actionsDiv = document.getElementById('da3p-frame-start-actions');
+    if (actionsDiv) actionsDiv.remove();
+    const gameActions = document.getElementById('game-actions');
+    if (gameActions) gameActions.classList.remove('da3p-frame-start-actions-active');
+    // Safety: remove legacy Note 109 overlay element if present
+    const legacyBoard = document.getElementById('three-pda-board');
+    if (legacyBoard) legacyBoard.remove();
+}
+
 function setDisplaySettingFieldValue(field, value) {
     if (!gSettingsDraftDisplaySettings) gSettingsDraftDisplaySettings = { placeholder: true };
     if (field === 'userNaturalPosition') {
         gSettingsDraftDisplaySettings.userNaturalPosition = normalize4PUserNaturalPosition(value);
+    } else if (field === 'selectedDA3PReferenceActor' || field === 'selected3PDAReferenceActor') {
+        // Accept canonical selectedDA3PReferenceActor and legacy selected3PDAReferenceActor (Note 110a)
+        gSettingsDraftDisplaySettings.selectedDA3PReferenceActor = normalizeDA3PReferenceActor(value);
     } else {
         gSettingsDraftDisplaySettings[field] = value;
     }
@@ -4440,12 +5155,61 @@ function createUserNaturalPositionSelector(readOnly) {
     return wrapper;
 }
 
+// Note 110a: canonical name — createDA3PReferenceActorSelector
+function createDA3PReferenceActorSelector(readOnly) {
+    let wrapper = document.createElement('div');
+    wrapper.className = 'settings-field';
+
+    let label = document.createElement('label');
+    label.textContent = t('settingsDialog.fields.selected3PDAReferenceActor');
+    wrapper.appendChild(label);
+
+    let radioGroup = document.createElement('div');
+    radioGroup.className = 'settings-radio-group';
+    let current = getDraftDA3PReferenceActor();
+    for (let value of VALID_3PDA_REFERENCE_ACTORS) {
+        let radioLabel = document.createElement('label');
+        radioLabel.className = 'settings-radio-option';
+
+        let radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'selectedDA3PReferenceActor';
+        radio.value = value;
+        radio.checked = (value === current);
+        radio.disabled = !!readOnly;
+        radio.setAttribute('data-settings-field', 'selectedDA3PReferenceActor');
+
+        if (!readOnly) {
+            radio.addEventListener('change', () => {
+                if (radio.checked) {
+                    setDisplaySettingFieldValue('selectedDA3PReferenceActor', value);
+                    renderSettingsDialog();
+                }
+            });
+        }
+
+        radioLabel.appendChild(radio);
+        radioLabel.appendChild(document.createTextNode(t('settingsDialog.fields.referenceActorOptionLabels.' + value)));
+        radioGroup.appendChild(radioLabel);
+    }
+
+    wrapper.appendChild(radioGroup);
+    return wrapper;
+}
+// Deprecated compat alias
+const create3PDAReferenceActorSelector = createDA3PReferenceActorSelector;
+
 function renderSeatSettingsPanel(container, readOnly) {
     if (!container) return;
     container.innerHTML = '';
     let grid = document.createElement('div');
     grid.className = 'settings-grid settings-display-grid';
-    grid.appendChild(createUserNaturalPositionSelector(readOnly));
+    let tableFormat = getRuleConfigFieldValue('tableFormat');
+    if (tableFormat === ShengjiTableFormat.DA3P) {
+        grid.appendChild(createDA3PReferenceActorSelector(readOnly));
+    } else {
+        grid.appendChild(createUserNaturalPositionSelector(readOnly));
+    }
     container.appendChild(grid);
 }
 
@@ -4460,7 +5224,8 @@ function renderDisplaySettingsPanel(container, readOnly) {
 
 function getRuleConfigFieldValue(field) {
     if (field === 'tableFormat') {
-        return (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || 'normal-4P';
+        let raw = (gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat) || ShengjiTableFormat.NORMAL_4P;
+        return normalizeTableFormat(raw);
     }
     if (field in (gSettingsDraftRuleConfig.timing || {})) {
         return gSettingsDraftRuleConfig.timing[field];
@@ -4776,7 +5541,13 @@ function setRuleConfigFieldValue(field, rawValue) {
         }
 
         if (field === 'tableFormat') {
-            gSettingsDraftRuleConfig.tableFormat = rawValue;
+            let normalized = normalizeTableFormat(rawValue);
+            gSettingsDraftRuleConfig.tableFormat = normalized;
+            // DA3P requires rotate-pivot; force it when switching to da3p.
+            if (normalized === ShengjiTableFormat.DA3P &&
+                    gSettingsDraftRuleConfig.pivotPassMode === 'winner-pivot') {
+                gSettingsDraftRuleConfig.pivotPassMode = 'rotate-pivot';
+            }
             return;
         }
 
@@ -5468,13 +6239,24 @@ function createTableFormatSelector(readOnly) {
     let sel = document.createElement('select');
     sel.className = 'settings-table-format-select';
     sel.setAttribute('data-settings-field', 'tableFormat');
-    // Only normal-4P is available in this version; option is always disabled.
-    let op = document.createElement('option');
-    op.value = 'normal-4P';
-    op.textContent = t('settingsDialog.options.normalFourPlayer');
-    sel.appendChild(op);
-    sel.value = 'normal-4P';
-    sel.disabled = true; // only one option exists
+    const opts = [
+        { value: ShengjiTableFormat.NORMAL_4P, labelKey: 'normalFourPlayer' },
+        { value: ShengjiTableFormat.DA3P,      labelKey: 'threePDA' },
+    ];
+    for (let opt of opts) {
+        let op = document.createElement('option');
+        op.value = opt.value;
+        op.textContent = t('settingsDialog.options.' + opt.labelKey);
+        sel.appendChild(op);
+    }
+    sel.value = getRuleConfigFieldValue('tableFormat');
+    sel.disabled = !!readOnly;
+    if (!readOnly) {
+        sel.addEventListener('change', () => {
+            setRuleConfigFieldValue('tableFormat', sel.value);
+            renderSettingsDialog();
+        });
+    }
     return sel;
 }
 
@@ -5752,8 +6534,14 @@ function createPivotPassModeRadioSelector(currentValue, readOnly) {
         radio.name = 'pivotPassMode';
         radio.value = opt.value;
         radio.checked = (opt.value === current);
-        radio.disabled = !!readOnly;
-        if (!readOnly) {
+        let isDisabled = !!readOnly;
+        // 3PDA requires rotate-pivot; disable winner-pivot under three-pda.
+        if (opt.value === 'winner-pivot' &&
+                getRuleConfigFieldValue('tableFormat') === ShengjiTableFormat.DA3P) {
+            isDisabled = true;
+        }
+        radio.disabled = isDisabled;
+        if (!readOnly && !isDisabled) {
             radio.addEventListener('change', () => {
                 if (radio.checked) {
                     setRuleConfigFieldValue('pivotPassMode', opt.value);
@@ -6256,6 +7044,13 @@ function confirmCreateGameFromSettings() {
         return;
     }
 
+    // 3PDA: enter DA3P frame-start board (Note 108).
+    // Does not start normal 4P gameplay.
+    if (getRuleConfigFieldValue('tableFormat') === ShengjiTableFormat.DA3P) {
+        enterDA3PFrameStart();
+        return;
+    }
+
     let presetName = gSettingsDraftRuleConfig.presetName || 'default';
     let overrides = cloneRuleConfig(gSettingsDraftRuleConfig);
     delete overrides.presetName;
@@ -6404,10 +7199,13 @@ function finishRound() {
     updatePhaseDisplay(t('phase.roundWinner', { playerName: winnerName }));
 
     if (result.gameOver) {
-        setTimeout(finishGame, BOT_DELAY);
+        const _rrEpoch = getCurrentUiSessionEpoch(); // Note 108a
+        setTimeout(() => { if (!isCurrentUiSessionEpoch(_rrEpoch)) return; finishGame(); }, BOT_DELAY);
     } else {
         // Short pause then start next round
+        const _rrEpoch2 = getCurrentUiSessionEpoch(); // Note 108a
         setTimeout(() => {
+            if (!isCurrentUiSessionEpoch(_rrEpoch2)) return; // Note 108a
             clearDesk();
             // Restore exposed-card previews that clearDesk() wiped
             for (let p = 0; p < NUM_PLAYERS; p++) {

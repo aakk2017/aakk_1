@@ -488,7 +488,12 @@
             baseTimeIncrement: clampInt(timingIn.baseTimeIncrement, DEFAULT_TIMING.baseTimeIncrement, 1, 60),
         };
 
+        // Note 110a: normalize tableFormat legacy values before enum check.
+        if (out.tableFormat === 'three-pda') out.tableFormat = 'da3p';
+        if (out.tableFormat === 'normal-4P') out.tableFormat = 'normal-4p';
+
         const enumFields = {
+            tableFormat: ['normal-4p', 'da3p'],
             pivotPassMode: ['winner-pivot', 'rotate-pivot'],
             overbaseRestrictions: ['none', 'default'],
             failedMultiplayHandling: ['default', 'compensation', 'lian-zhong-compensation'],
@@ -533,6 +538,10 @@
         return ['east', 'north', 'west', 'south'].includes(value) ? value : 'east';
     }
 
+    function normalize3PDAReferenceActor(value) {
+        return ['N', 'Sw', 'Se'].includes(value) ? value : 'N';
+    }
+
     function resolveGameSettings(input) {
         let ruleConfig = resolveRuleConfig(input || {});
         let displaySettings = {
@@ -540,11 +549,13 @@
             theme: 'default',
             cardSize: 'default',
             userNaturalPosition: 'east',
+            selected3PDAReferenceActor: 'N',
         };
         if (input && input.displayOverrides) {
             displaySettings = { ...displaySettings, ...input.displayOverrides };
         }
         displaySettings.userNaturalPosition = normalizeUserNaturalPosition(displaySettings.userNaturalPosition);
+        displaySettings.selected3PDAReferenceActor = normalize3PDAReferenceActor(displaySettings.selected3PDAReferenceActor);
         return {
             presetName: ruleConfig.presetName,
             ruleConfig,

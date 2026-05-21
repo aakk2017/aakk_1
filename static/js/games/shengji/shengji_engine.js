@@ -283,6 +283,186 @@ window.REAL_ACTORS_3PDA                = REAL_ACTORS_3PDA;
 window.DUMMY_ACTOR_3PDA                = DUMMY_ACTOR_3PDA;
 
 // ---------------------------------------------------------------------------
+// 3PDA rule/model contract (Note 106 — specification only, not activated)
+// ---------------------------------------------------------------------------
+//
+// Count model:
+//   REAL_ACTOR_COUNT_3PDA      = 3   (N, Sw, Se)
+//   FRAME_POSITION_COUNT_3PDA  = 4   (three real actors + dummy D)
+//   Do NOT collapse these into the current normal 4P config.
+//   Real actors and frame positions must remain separate degrees of freedom
+//   to support the 3PDA variant alongside normal 4P (Note 103c).
+//
+// dealAnchor concept (shared 4P/3PDA dealing-start — minimal introduction only):
+//   dealAnchor = the frame's dealing start point.
+//   In qiangzhuang frames:      dealAnchor is generated/randomized before pivot is known.
+//   In non-qiangzhuang frames:  dealAnchor is always the pivot.
+//   NOTE: Full shared dealAnchor implementation (bot timing, 4P dealing order etc.)
+//         is deferred to a future note. This note introduces the concept only for
+//         3PDA qz temporary layout purposes. No 4P dealing behavior is changed.
+//
+// In-frame vs. out-of-frame reference positions:
+//   In-frame (4 positions):    D is counted as the fourth position.
+//     Use createDisplayMapFromFrameOrder for in-frame display mapping.
+//   Out-of-frame (3 positions): Only N/Sw/Se are counted; dummy is not counted.
+//     Out-of-frame positions: { reference, afterhand, forehand }.  No "opposite".
+
+// 3PDA count model (Note 106)
+const REAL_ACTOR_COUNT_3PDA     = 3;
+const FRAME_POSITION_COUNT_3PDA = 4;
+
+/**
+ * Display labels for dummy actor in 3PDA (Note 106).
+ * English: 'D', Chinese: '明'.
+ * Dummy has no natural position; D is a frame actor/hand/desk slot only.
+ */
+const DUMMY_LABELS_3PDA = Object.freeze({ en: 'D', zh: '明' });
+
+/**
+ * Default multiplier for pivot's initial bank time in 3PDA (Note 106).
+ * Pivot controls dummy, so pivot's initial bank time is scaled up.
+ * Default factor: 1.5.  Adjustable later in timing settings.
+ * Factor does NOT apply to set-base increment.
+ */
+const PIVOT_BANK_TIME_FACTOR_3PDA = 1.5;
+
+// ---------------------------------------------------------------------------
+// 3PDA rule/model documentation (Note 106 — all sections below are spec-only)
+// ---------------------------------------------------------------------------
+//
+// BASING / OVERBASE CONTRACT (Note 106 §9):
+//   Pivot makes the first base as usual.
+//   Overbase can run as in normal 4P if allowed.
+//   D cannot make overcalls; overbase declaration eligibility belongs only to real actors.
+//   D is still unrevealed during basing/overbase.
+//
+// CROSSING / REVEAL CONTRACT (Note 106 §10):
+//   If crossing is enabled: crossing claims happen before revealing D.
+//   D is revealed right before the first lead (not after the lead, unlike bridge).
+//   D never claims crossing.
+//   If pivot crosses, pivot sees D and crosses back.
+//   D is not shown to attackers during crossing.
+//   After crossing is resolved, D is revealed before first lead.
+//
+// PLAYING / DUMMY CONTROL CONTRACT (Note 106 §11):
+//   D is played by the pivot.
+//   Pivot controls D's card play.
+//   Pivot performs D's forehand-control choices against predecessor.
+//   Pivot chooses D's block type when D must choose how to block.
+//   D's timing units belong to the pivot player.
+//   D can block and be blocked normally.  D can block pivot; pivot can block D.
+//
+// MULTIPLAY / PUBLIC INFORMATION CONTRACT (Note 106 §12):
+//   After D is revealed, D's hand is public exposed information.
+//   If D has a high element in a division, another player's lower multiplay
+//   in that division may be fake as usual (same fake-multiplay rules apply).
+//
+// TIMING CONTRACT (Note 106 §13):  see PIVOT_BANK_TIME_FACTOR_3PDA above.
+//
+// SCORING / LEVEL CONTRACT (Note 106 §14):
+//   All three real players have independent levels.  There is no fixed team.
+//   Pivot defends own level in each frame.
+//   If defense succeeds, pivot advances; if defense fails, both attackers advance.
+//   Attackers can advance by zero if score threshold says so.
+//   Track successor desk score separately and predecessor desk score separately.
+//   Shared base score and ending compensation apply to both attacker desk-score totals.
+//   Per-player visible frame scores in individual tournament context:
+//     pivot view:      successor desk score + predecessor desk score + shared base + shared end comp
+//     successor view:  successor desk score + shared base + shared ending compensation
+//     predecessor view: predecessor desk score + shared base + shared ending compensation
+//
+// UI CONTRACT (Note 106 §15 — spec-only, no UI implemented in this note):
+//   Settings — Table format / 牌桌形式 options: normal 4P vs 3P dummy-ally (3PDA).
+//     3PDA: winner-pivot disabled; pivot-pass mode forced to rotate-pivot.
+//     normal 4P: winner-pivot option enabled.
+//   Dynamic display: in-frame reference positions using createDisplayMapFromFrameOrder.
+//   Dummy hand display: click-show preferred; D desk hidden when D hand shown.
+//   Position-level box: remove text in dummy triangle area; attackers' levels may differ.
+
+/**
+ * 3PDA qiangzhuang temporary dealing layout (Note 106, spec-only).
+ *
+ * In a 3PDA qz frame, pivot is not yet known when dealing starts.
+ * Cards are dealt to a temporary 4-position layout where the dummy pile
+ * is placed opposite the dealAnchor.
+ *
+ * Temporary layout = [dealAnchor, nextRealAfterDealAnchor, tempDummyPile, previousRealBeforeDealAnchor]
+ *
+ * After pivot is determined:
+ *   - real hands remain attached to their real actors N/Sw/Se;
+ *   - temporary dummy pile becomes D ('明');
+ *   - canonical frame order is rebuilt as [pivot, successor, D, predecessor].
+ *
+ * @param {string} dealAnchor - must be one of REAL_ACTORS_3PDA
+ * @returns {string[]} temporary qz layout (4 positions; 'D' at index 2)
+ */
+function get3PDAQZTempLayout(dealAnchor) {
+    const idx = REAL_ACTORS_3PDA.indexOf(dealAnchor);
+    if (idx < 0) throw new Error('dealAnchor must be a 3PDA real actor');
+    return [
+        REAL_ACTORS_3PDA[idx],             // dealAnchor
+        REAL_ACTORS_3PDA[(idx + 1) % 3],   // next real after dealAnchor
+        DUMMY_ACTOR_3PDA,                  // temporary dummy pile (opposite dealAnchor)
+        REAL_ACTORS_3PDA[(idx + 2) % 3],   // previous real before dealAnchor
+    ];
+}
+
+/**
+ * Returns true if actor is a real 3PDA actor (N/Sw/Se) — i.e. eligible to declare.
+ * Declaration eligibility: only real actors may declare; D cannot declare (Note 106).
+ * In qz frames: only N/Sw/Se may declare.
+ * In non-qz frames: pivot/successor/predecessor may declare (they are the real actors).
+ * @param {string} actor
+ * @returns {boolean}
+ */
+function is3PDARealActor(actor) {
+    return REAL_ACTORS_3PDA.indexOf(actor) >= 0;
+}
+
+/**
+ * Out-of-frame reference positions for 3PDA (Note 106, spec-only).
+ * Outside a frame, only the 3 real actors are counted; dummy is not counted.
+ * There is NO "opposite" among 3 real actors.
+ * @param {string} referenceActor - must be one of REAL_ACTORS_3PDA
+ * @returns {{ reference: string, afterhand: string, forehand: string }}
+ */
+function get3PDAOutOfFramePositions(referenceActor) {
+    const idx = REAL_ACTORS_3PDA.indexOf(referenceActor);
+    if (idx < 0) throw new Error('referenceActor must be a real 3PDA actor');
+    return {
+        reference: REAL_ACTORS_3PDA[idx],
+        afterhand: REAL_ACTORS_3PDA[(idx + 1) % 3],
+        forehand:  REAL_ACTORS_3PDA[(idx + 2) % 3],
+    };
+}
+
+/**
+ * Named frame roles for a given 3PDA pivot (Note 106, spec-only).
+ * @param {string} pivotActor - must be one of REAL_ACTORS_3PDA
+ * @returns {{ pivot: string, successor: string, dummy: string, predecessor: string }}
+ */
+function get3PDARolesForPivot(pivotActor) {
+    const idx = REAL_ACTORS_3PDA.indexOf(pivotActor);
+    if (idx < 0) throw new Error('pivotActor must be a real 3PDA actor');
+    return {
+        pivot:       REAL_ACTORS_3PDA[idx],
+        successor:   REAL_ACTORS_3PDA[(idx + 1) % 3],
+        dummy:       DUMMY_ACTOR_3PDA,
+        predecessor: REAL_ACTORS_3PDA[(idx + 2) % 3],
+    };
+}
+
+// Export 3PDA rule/model contract helpers for test access (Note 106)
+window.REAL_ACTOR_COUNT_3PDA       = REAL_ACTOR_COUNT_3PDA;
+window.FRAME_POSITION_COUNT_3PDA   = FRAME_POSITION_COUNT_3PDA;
+window.DUMMY_LABELS_3PDA           = DUMMY_LABELS_3PDA;
+window.PIVOT_BANK_TIME_FACTOR_3PDA = PIVOT_BANK_TIME_FACTOR_3PDA;
+window.get3PDAQZTempLayout         = get3PDAQZTempLayout;
+window.is3PDARealActor             = is3PDARealActor;
+window.get3PDAOutOfFramePositions  = get3PDAOutOfFramePositions;
+window.get3PDARolesForPivot        = get3PDARolesForPivot;
+
+// ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
 let game = {

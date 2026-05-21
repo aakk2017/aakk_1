@@ -246,6 +246,7 @@ const messages_zhCN = {
     crossingSelectFive:      '过河必须恰好选择 5 张牌',
     crossingRequireAllTrumps:'过河必须包含你手中的全部主牌',
     openBeforeSave:          '请先打开牌谱，再保存。',
+    threePDANotStarted:      '三人明手暂不可用，请选择普通四人以开始游戏。',
   },
 
   // ── Forehand control ──
@@ -309,6 +310,12 @@ const messages_zhCN = {
       knockBackLevels: '勾级',
       skipLevels: '跳过',
       userNaturalPosition: '选座',
+      selected3PDAReferenceActor: '选座',
+      referenceActorOptionLabels: {
+        N: '子',
+        Sw: '申',
+        Se: '辰',
+      },
       knockBackCondition: '勾回条件',
       gameMode: '循环方式',
       timingPreset: '预设计时方案',
@@ -357,6 +364,7 @@ const messages_zhCN = {
       eightFourFour: '8-4-4',
       noPreset: '(无)',
       normalFourPlayer: '普通四人',
+      threePDA: '三人明手',
       // 级别预设
       skip468: '跳468',
       singleT: '单T抠底',
@@ -458,5 +466,58 @@ const messages_zhCN = {
     upOne:        '上一 (攻方升1级)',
     upTwo:        '上二 (攻方升2级)',
     upN:          '上{n} (攻方升{n}级)',
+  },
+  // ── 3PDA 开始外壳（Note 108）──
+  // Note 110a: 正式命名空间为 da3pShell；threePDAShell 保留为历史兼容别名
+  da3pShell: {
+    title: '三人明手设置',
+    notDealtStatus: '仅设置预览；尚未发牌。',
+    selectedSeat: '选座',
+    pivotStatus: '庄家',
+    pivotUnresolved: '未定',
+    dealAnchor: '发牌起点',
+    exitShell: '退出',
+    backToSettings: '返回设置',
+  },
+  // 历史兼容别名 — 保留供旧测试断言使用（Note 110a）
+  threePDAShell: {
+    title: '三人明手设置',
+    notDealtStatus: '仅设置预览；尚未发牌。',
+    selectedSeat: '选座',
+    pivotStatus: '庄家',
+    pivotUnresolved: '未定',
+    dealAnchor: '发牌起点',
+    exitShell: '退出',
+    backToSettings: '返回设置',
+  },
+
+  // ── 3PDA 未发牌帧起始板（Note 109）──
+  // Note 110a: 正式命名空间为 da3pFrameStart；threePDAFrameStart 保留为历史兼容别名
+  da3pFrameStart: {
+    title: '三人明手',
+    frame: '第 {n} 局',
+    qiangzhuangFrame: '抢庄局',
+    pivotUnresolved: '庄家未定',
+    dealAnchor: '发牌起点',
+    selectedSeat: '选座',
+    dealPlanReady: '发牌计划已就绪',
+    recipients: '接收方',
+    cardsPerPosition: '每位/堆',
+    baseCards: '底牌',
+    undealt: '未发牌',
+  },
+  // 历史兼容别名 — 保留供旧测试断言使用（Note 110a）
+  threePDAFrameStart: {
+    title: '三人明手',
+    frame: '第 {n} 局',
+    qiangzhuangFrame: '抢庄局',
+    pivotUnresolved: '庄家未定',
+    dealAnchor: '发牌起点',
+    selectedSeat: '选座',
+    dealPlanReady: '发牌计划已就绪',
+    recipients: '接收方',
+    cardsPerPosition: '每位/堆',
+    baseCards: '底牌',
+    undealt: '未发牌',
   },
 };

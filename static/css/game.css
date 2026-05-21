@@ -1933,3 +1933,139 @@
     padding: 0.5vh 0.8vh;
     margin-top: -0.2vh;
 }
+
+/* ���� Note 108: 3PDA start shell ������������������������������������������������������������������������������ */
+/* ── DA3P frame-start board on real 4P surface (Note 109a/109b) ──
+   Shared .desk-namebar / .game-position-area / .name-area styles apply;
+   DA3P nameabrs use data-da3p-actor attribute. No variant-specific namebar CSS needed. */
+
+.tpfb-center-title {
+    font-size: 1rem;
+    font-weight: bold;
+    margin-bottom: 0.2rem;
+}
+
+.tpfb-center-row {
+    opacity: 0.75;
+}
+
+.tpfb-center-undealt {
+    font-style: italic;
+    opacity: 0.55;
+    font-size: 0.8rem;
+    margin-top: 0.15rem;
+}
+
+/* Auxiliary board controls — hide normal game buttons, show DA3P Exit/Back */
+#game-actions.da3p-frame-start-actions-active > .game-btn {
+    display: none;
+}
+
+#da3p-frame-start-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Neutralize 4P NS/EW score display while DA3P board is active */
+.da3p-score-hidden {
+    visibility: hidden;
+}
+
+.tdss-header {
+    font-size: 1.3rem;
+    font-weight: bold;
+    letter-spacing: 0.03em;
+}
+
+.tdss-status {
+    font-size: 0.9rem;
+    opacity: 0.65;
+    font-style: italic;
+}
+
+.tdss-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.tdss-field {
+    display: flex;
+    gap: 0.7rem;
+    font-size: 0.95rem;
+}
+
+.tdss-field-label {
+    opacity: 0.7;
+    min-width: 7rem;
+}
+
+.tdss-field-value {
+    font-weight: 500;
+}
+
+.tdss-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+}
+
+.tdss-row-middle {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.tdss-slot {
+    padding: 0.35rem 0.7rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    min-width: 2.5rem;
+    text-align: center;
+    font-size: 0.95rem;
+}
+
+.tdss-center {
+    border-style: dashed;
+    opacity: 0.35;
+}
+
+.tdss-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.tdss-btn {
+    padding: 0.45rem 1.1rem;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #eee;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.tdss-btn:hover,
+.tdss-btn:focus {
+    background: rgba(255, 255, 255, 0.22);
+    outline: 2px solid rgba(255, 255, 255, 0.6);
+    outline-offset: 1px;
+}
+
+.tdss-btn-exit {
+    border-color: rgba(255, 120, 120, 0.55);
+    color: #ffb0b0;
+}
+
+.tdss-btn-exit:hover,
+.tdss-btn-exit:focus {
+    background: rgba(255, 80, 80, 0.18);
+}

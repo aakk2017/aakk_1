@@ -62,10 +62,10 @@ const messages_en = {
 
   // ── Table headers (recap page) ──
   table: {
-    pivot:       'P',
-    successor:   'Suc',
-    ally:        'Ally',
-    predecessor: 'Pre',
+    pivot:       'Zh',
+    successor:   'Sc',
+    ally:        'Ay',
+    predecessor: 'Pc',
   },
 
   // ── Phase display ──
@@ -148,7 +148,7 @@ const messages_en = {
 
   // ── Labels ──
   labels: {
-    pivotMark:       'P',
+    pivotMark:       'Zh',
     declareMethod:   'Declared: ',
     autoNts:         'auto NTS',
     thirdBase:       '3rd base',
@@ -200,18 +200,18 @@ const messages_en = {
 
   // ── Seat labels (game-relative) ──
   seats: {
-    pivot:       'Pivot',
-    successor:   'Successor',
-    ally:        'Ally',
-    predecessor: 'Predecessor',
+    pivot:       'Zh',
+    successor:   'Sc',
+    ally:        'Ay',
+    predecessor: 'Pc',
   },
 
   // ── Relative positions ──
   relative: {
-    self:      'Self',
-    afterhand: 'Afterhand',
-    opposite:  'Opposite',
-    forehand:  'Forehand',
+    self:      'Rf',
+    afterhand: 'Ah',
+    opposite:  'Op',
+    forehand:  'Fh',
   },
 
   // ── Natural positions (for recap) ──
@@ -246,6 +246,7 @@ const messages_en = {
     crossingSelectFive:      'Select exactly 5 cards for crossing.',
     crossingRequireAllTrumps:'Crossing requires including all trumps in your hand.',
     openBeforeSave:          'Please open a recap file before saving.',
+    threePDANotStarted:      '3P dummy-ally is not yet available. Please select normal 4P to start a game.',
   },
 
   // ── Forehand control ──
@@ -308,6 +309,12 @@ const messages_en = {
       mustStopLevels: 'must-stop',
       knockBackLevels: 'knock-back',
       userNaturalPosition: 'Your seat',
+      selected3PDAReferenceActor: 'Select seat',
+      referenceActorOptionLabels: {
+        N: 'N',
+        Sw: 'Sw',
+        Se: 'Se',
+      },
       knockBackCondition: 'knock-back condition',
       gameMode: 'level cycle mode',
       timingPreset: 'preset timing scheme',
@@ -356,6 +363,7 @@ const messages_en = {
       eightFourFour: '8-4-4',
       noPreset: '(none)',
       normalFourPlayer: 'normal 4P',
+      threePDA: '3P dummy-ally',
       // levels presets
       slow: 'Slow',
       short: 'Short',
@@ -458,5 +466,59 @@ const messages_en = {
     upOne:        'Up One (attackers +1 level)',
     upTwo:        'Up Two (attackers +2 levels)',
     upN:          'Up {n} (attackers +{n} levels)',
+  },
+
+  // ── 3PDA start shell (Note 108) ──
+  // Note 110a: canonical namespace is da3pShell; threePDAShell kept as compat alias.
+  da3pShell: {
+    title: '3P dummy-ally setup',
+    notDealtStatus: 'Setup shell only \u2014 cards are not dealt yet.',
+    selectedSeat: 'Selected seat',
+    pivotStatus: 'Pivot',
+    pivotUnresolved: 'unresolved',
+    dealAnchor: 'Deal anchor',
+    exitShell: 'Exit shell',
+    backToSettings: 'Back to settings',
+  },
+  // Deprecated compat alias \u2014 kept for historical test assertions (Note 110a)
+  threePDAShell: {
+    title: '3P dummy-ally setup',
+    notDealtStatus: 'Setup shell only \u2014 cards are not dealt yet.',
+    selectedSeat: 'Selected seat',
+    pivotStatus: 'Pivot',
+    pivotUnresolved: 'unresolved',
+    dealAnchor: 'Deal anchor',
+    exitShell: 'Exit shell',
+    backToSettings: 'Back to settings',
+  },
+
+  // ── 3PDA frame-start board (Note 109) ──
+  // Note 110a: canonical namespace is da3pFrameStart; threePDAFrameStart kept as compat alias.
+  da3pFrameStart: {
+    title: '3P dummy-ally',
+    frame: 'Frame {n}',
+    qiangzhuangFrame: 'Qiangzhuang frame',
+    pivotUnresolved: 'Pivot unresolved',
+    dealAnchor: 'Deal anchor',
+    selectedSeat: 'Selected seat',
+    dealPlanReady: 'Deal plan ready',
+    recipients: 'Recipients',
+    cardsPerPosition: 'Cards/position',
+    baseCards: 'Base',
+    undealt: 'Not dealt',
+  },
+  // Deprecated compat alias \u2014 kept for historical test assertions (Note 110a)
+  threePDAFrameStart: {
+    title: '3P dummy-ally',
+    frame: 'Frame {n}',
+    qiangzhuangFrame: 'Qiangzhuang frame',
+    pivotUnresolved: 'Pivot unresolved',
+    dealAnchor: 'Deal anchor',
+    selectedSeat: 'Selected seat',
+    dealPlanReady: 'Deal plan ready',
+    recipients: 'Recipients',
+    cardsPerPosition: 'Cards/position',
+    baseCards: 'Base',
+    undealt: 'Not dealt',
   },
 };
