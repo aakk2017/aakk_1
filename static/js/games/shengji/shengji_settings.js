@@ -488,8 +488,9 @@
             baseTimeIncrement: clampInt(timingIn.baseTimeIncrement, DEFAULT_TIMING.baseTimeIncrement, 1, 60),
         };
 
-        // Note 110a: normalize tableFormat legacy values before enum check.
+        // Legacy input normalization only; do not emit these values.
         if (out.tableFormat === 'three-pda') out.tableFormat = 'da3p';
+        // Legacy input normalization only; do not emit these values.
         if (out.tableFormat === 'normal-4P') out.tableFormat = 'normal-4p';
 
         const enumFields = {
@@ -538,7 +539,7 @@
         return ['east', 'north', 'west', 'south'].includes(value) ? value : 'east';
     }
 
-    function normalize3PDAReferenceActor(value) {
+    function normalizeDA3PReferenceActor(value) {
         return ['N', 'Sw', 'Se'].includes(value) ? value : 'N';
     }
 
@@ -549,13 +550,20 @@
             theme: 'default',
             cardSize: 'default',
             userNaturalPosition: 'east',
-            selected3PDAReferenceActor: 'N',
+            selectedDA3PReferenceActor: 'N',
         };
         if (input && input.displayOverrides) {
             displaySettings = { ...displaySettings, ...input.displayOverrides };
+            if (displaySettings.selectedDA3PReferenceActor === undefined &&
+                    displaySettings.selected3PDAReferenceActor !== undefined) {
+                displaySettings.selectedDA3PReferenceActor = displaySettings.selected3PDAReferenceActor;
+            }
         }
         displaySettings.userNaturalPosition = normalizeUserNaturalPosition(displaySettings.userNaturalPosition);
-        displaySettings.selected3PDAReferenceActor = normalize3PDAReferenceActor(displaySettings.selected3PDAReferenceActor);
+        displaySettings.selectedDA3PReferenceActor = normalizeDA3PReferenceActor(displaySettings.selectedDA3PReferenceActor);
+        if (Object.prototype.hasOwnProperty.call(displaySettings, 'selected3PDAReferenceActor')) {
+            delete displaySettings.selected3PDAReferenceActor;
+        }
         return {
             presetName: ruleConfig.presetName,
             ruleConfig,

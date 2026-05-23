@@ -9,6 +9,359 @@
  *   - Game flow orchestration with bot turns
  */
 
+/**
+ * Overall-game / shared in-frame boundary contract.
+ *
+ * Architecture reality: index.js still contains both local-game orchestration
+ * and shared in-frame control paths. Semantic boundary is preserved through
+ * naming and helpers; physical file split is deferred.
+ */
+// Canonical flow boundary:
+// build frameContext -> run shared in-frame -> consume frame result -> next frame.
+function gameBuildFrameContext(params) {
+    return buildFourPositionFrameContext(params);
+}
+
+function gameIsDA3PSharedFirstFrameActive() {
+    return !!(
+        game &&
+        game.tableFormat === ShengjiTableFormat.DA3P &&
+        game.frameContext &&
+        game.frameContext.tableFormat === ShengjiTableFormat.DA3P
+    );
+}
+
+function gameShouldStopDA3PBeforeBasing() {
+    return !!(
+        game &&
+        game.tableFormat === ShengjiTableFormat.DA3P &&
+        game.frameContext &&
+        game.frameContext.tableFormat === ShengjiTableFormat.DA3P &&
+        game.frameContext.pivotStatus !== 'resolved'
+    );
+}
+
+function gameShouldAutoPlayFrameActor(actor) {
+    return !!(
+        gameIsDA3PSharedFirstFrameActive() &&
+        isSameFrameActor(actor, 'D')
+    );
+}
+
+function gameGetFrameActorForSeat(seat) {
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        const handActors = Array.isArray(game.frameActorByHandSeat)
+            ? game.frameActorByHandSeat
+            : game.frameActorBySeat;
+        if (Array.isArray(handActors)) {
+            return handActors[seat];
+        }
+    }
+    return seat;
+}
+
+function gameGetDisplaySeatForHandSeat(handSeat) {
+    if (!gameIsDA3PSharedFirstFrameActive()) {
+        return handSeat;
+    }
+
+    const actor = gameGetFrameActorForSeat(handSeat);
+    const key = frameActorKey(actor);
+    if (game.displaySeatByFrameActorKey && Number.isInteger(game.displaySeatByFrameActorKey[key])) {
+        return game.displaySeatByFrameActorKey[key];
+    }
+
+    if (Array.isArray(game.frameActorByDisplaySeat)) {
+        const fallbackSeat = game.frameActorByDisplaySeat.findIndex(a => isSameFrameActor(a, actor));
+        if (fallbackSeat >= 0) return fallbackSeat;
+    }
+    return handSeat;
+}
+
+function gameGetDisplayPositionForHandSeat(handSeat) {
+    if (!gameIsDA3PSharedFirstFrameActive()) {
+        return getDisplayPositionFor4PActorSeat(handSeat);
+    }
+    const displaySeat = gameGetDisplaySeatForHandSeat(handSeat);
+    const displayPositions = ['bottom', 'right', 'top', 'left'];
+    return displayPositions[displaySeat] || 'bottom';
+}
+
+function gameGetDeskArtifactSlotForSeat(handSeat) {
+    const displayPosition = gameGetDisplayPositionForHandSeat(handSeat);
+    return getDeskSlotForDisplayPosition(displayPosition);
+}
+
+function gameGetReferenceHandSurfaceForSeat(handSeat) {
+    const displayPosition = gameGetDisplayPositionForHandSeat(handSeat);
+    return displayPosition === 'bottom' ? gReferenceHandSurface : null;
+}
+
+function gameGetDeskSlotForSeat(handSeat) {
+    return gameGetDeskArtifactSlotForSeat(handSeat);
+}
+
+function gameGetFrameActorLabel(actor, options) {
+    const locale = getLocale();
+    const opts = options || {};
+    const compact = locale === 'en'
+        ? { N: 'N', Sw: 'Sw', Se: 'Se', D: 'D' }
+        : { N: '子', Sw: '申', Se: '辰', D: '明' };
+    if (typeof actor === 'string' && Object.prototype.hasOwnProperty.call(compact, actor)) {
+        return compact[actor];
+    }
+    if (Number.isInteger(actor) && actor >= 0 && actor < NUM_PLAYERS) {
+        return opts.long ? PLAYER_NAMES[actor] : POSITION_LABELS[actor];
+    }
+    return String(actor);
+}
+
+function gameGetActorLabelForSeat(seat, options) {
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        return gameGetFrameActorLabel(gameGetFrameActorForSeat(seat), options);
+    }
+    return gameGetFrameActorLabel(seat, options);
+}
+
+function gameGetPlayerLogNameForSeat(seat) {
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        return gameGetFrameActorLabel(gameGetFrameActorForSeat(seat));
+    }
+    return PLAYER_NAMES[seat];
+}
+
+function gameCanSeatDeclare(seat) {
+    if (!gameIsDA3PSharedFirstFrameActive()) return true;
+    return canActorDeclareInFrameContext(gameGetFrameActorForSeat(seat), game.frameContext);
+}
+
+function gameApplyDA3PSeatControlFromFrameContext(selectedReferenceActor) {
+    const handActors = game && Array.isArray(game.frameActorByHandSeat)
+        ? game.frameActorByHandSeat
+        : (game ? game.frameActorBySeat : null);
+    if (!Array.isArray(handActors)) return;
+    let seat = handActors.indexOf(selectedReferenceActor);
+    if (seat < 0 || !gameCanSeatDeclare(seat)) {
+        seat = handActors.findIndex((_, idx) => gameCanSeatDeclare(idx));
+    }
+    if (seat < 0) seat = 0;
+    localControlledPlayerIndex = seat;
+    selectedNaturalPositionIndex = seat;
+    activeLocalSeat = seat;
+    refreshLocallyControlledSeatsForMode();
+}
+
+function gameBuildDA3PSharedFirstFrameContext(options) {
+    const selectedReferenceActor = getDraftDA3PReferenceActor();
+    const frameContext = gameBuildFrameContext({
+        tableFormat:               ShengjiTableFormat.DA3P,
+        frameKind:                 'da3p',
+        isQiangzhuangFrame:        true,
+        pivotActor:                null,
+        pivotStatus:               'unresolved',
+        dealAnchor:                null,
+        frameActors:               ['N', 'Sw', 'D', 'Se'],
+        realActors:                ['N', 'Sw', 'Se'],
+        dummyActor:                'D',
+        actorKindByKey:            { N: 'real', Sw: 'real', Se: 'real', D: 'temporary-dummy-pile' },
+        declarationEligibleActors: ['N', 'Sw', 'Se'],
+        nonDeclaringActors:        ['D'],
+    });
+
+    const fixedDealAnchor = options && options.fixedDealAnchor
+        ? normalizeDA3PDealAnchor(options.fixedDealAnchor)
+        : null;
+    const dealAnchor = resolveDealAnchorForFrameContext(
+        frameContext,
+        fixedDealAnchor ? { fixedDealAnchor } : undefined
+    );
+    const frameActors = get3PDAQZTempLayout(dealAnchor);
+
+    frameContext.dealAnchor = dealAnchor;
+    frameContext.frameActors = frameActors;
+    frameContext.dealOrder = frameActors;
+    frameContext.temporaryFrameOrder = [...frameActors];
+    frameContext.canonicalFrameOrder = null;
+    frameContext.playOrderSeats = null;
+    frameContext.playOrderActorKeys = null;
+    frameContext.declarationResolvedActor = null;
+    frameContext.declarationResolvedSeat = null;
+    frameContext.frameIndex = 0;
+    frameContext.frameNumber = 1;
+    frameContext.displayMapBasis = 'temporary-deal-anchor';
+    frameContext.displayMap = createDisplayMapFromFrameOrder(frameActors, selectedReferenceActor);
+    frameContext.visibilityPolicy = { dummyInitiallyHidden: true };
+
+    return { frameContext, selectedReferenceActor };
+}
+
+function gameStartDA3PSharedFirstFrameFromSettings() {
+    beginNewSessionBoundary(UiSessionKind.DA3P_SHARED_FRAME);
+    resetBoardSurfacesForNewSession(UiSessionKind.DA3P_SHARED_FRAME);
+    ensureResolvedSettings();
+    clearTimers();
+
+    const fixedDealAnchor = (typeof window !== 'undefined' && window.__NOTE111F_TEST_FIXED_DEAL_ANCHOR)
+        ? normalizeDA3PDealAnchor(window.__NOTE111F_TEST_FIXED_DEAL_ANCHOR)
+        : null;
+    const built = gameBuildDA3PSharedFirstFrameContext({ fixedDealAnchor });
+    const frameContext = built.frameContext;
+    const selectedReferenceActor = built.selectedReferenceActor;
+
+    let level = (gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.startLevel !== undefined)
+        ? gResolvedGameSettings.ruleConfig.startLevel
+        : 0;
+
+    frameNumber = 1;
+    attackersStreak = 0;
+    wonCounterCards = [];
+    updateCounterDrawer();
+    document.getElementById('div-table-number').textContent = frameNumber;
+
+    const declarationOrderAnchor = frameContext.frameActors.indexOf(frameContext.dealAnchor);
+    engineStartGame(level, UNDETERMINED_PIVOT, null, true, gResolvedGameSettings.ruleConfig, declarationOrderAnchor);
+
+    game.tableFormat = ShengjiTableFormat.DA3P;
+    game.frameContext = frameContext;
+    game.frameActorByHandSeat = [...frameContext.frameActors];
+    game.handSeatByFrameActorKey = {};
+    for (let seat = 0; seat < game.frameActorByHandSeat.length; seat++) {
+        game.handSeatByFrameActorKey[frameActorKey(game.frameActorByHandSeat[seat])] = seat;
+    }
+    game.frameActorByDisplaySeat = [
+        frameContext.displayMap.bottom,
+        frameContext.displayMap.right,
+        frameContext.displayMap.top,
+        frameContext.displayMap.left,
+    ];
+    game.displaySeatByFrameActorKey = {};
+    for (let seat = 0; seat < game.frameActorByDisplaySeat.length; seat++) {
+        game.displaySeatByFrameActorKey[frameActorKey(game.frameActorByDisplaySeat[seat])] = seat;
+    }
+    // Compatibility aliases: seat->actor is hand ownership mapping in DA3P.
+    game.frameActorBySeat = game.frameActorByHandSeat;
+    game.seatByFrameActorKey = game.handSeatByFrameActorKey;
+    game.playOrderSeats = null;
+    game.playOrderActorKeys = null;
+    game.da3pFlowStatus = 'shared-dealing-declaration';
+    game.da3pStopBeforeBasing = true;
+    game.da3pSelectedReferenceActor = selectedReferenceActor;
+    game.displaySettings = {
+        placeholder: true,
+        userNaturalPosition: 'east',
+        selectedDA3PReferenceActor: selectedReferenceActor,
+        ...(gResolvedGameSettings.displaySettings || {})
+    };
+
+    gameApplyDA3PSeatControlFromFrameContext(selectedReferenceActor);
+    initPersistentNamebars();
+    gLevelDiv.textContent = levelDisplayLabel(game.level);
+    setSeatsTopLeftBoxView('seats');
+
+    clearDA3PFrameStartBoard();
+    runFrameIntermittent();
+    refreshPauseButtonState();
+}
+
+function gameStopDA3PBeforeBasing(reasonText, options) {
+    const opts = options || {};
+    const phaseText = opts.phaseText || t('phase.da3pStoppedBeforeBasing');
+    const statusText = opts.statusText || t('status.da3pStoppedBeforeBasing');
+    const logText = reasonText || statusText;
+    game.dealingStage = DealingStage.NONE;
+    game.phase = GamePhase.IDLE;
+    game.da3pFlowStatus = 'stopped-before-basing';
+    clearSelection();
+    removeNoDeclareButton();
+    gBtnPlay.disabled = true;
+    gBtnPlay.textContent = t('buttons.play');
+    updatePhaseDisplay(phaseText);
+    updateStatus(statusText);
+    if (gDeskInfo) gDeskInfo.textContent = logText;
+    appendLog(logText);
+    refreshPauseButtonState();
+}
+
+function gameApplyDA3PResolvedPivotReframe(pivotActor) {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.frameContext) return false;
+    const frameContext = game.frameContext;
+    const canonicalFrameOrder = createDA3PCanonicalFrameOrderForPivot(pivotActor);
+    if (!Array.isArray(canonicalFrameOrder)) return false;
+
+    const selectedReferenceActor = normalizeDA3PReferenceActor(
+        game.da3pSelectedReferenceActor || getDraftDA3PReferenceActor()
+    );
+    const displayMap = createDisplayMapFromFrameOrder(canonicalFrameOrder, selectedReferenceActor);
+
+    const handActors = Array.isArray(game.frameActorByHandSeat)
+        ? game.frameActorByHandSeat
+        : (Array.isArray(game.frameActorBySeat) ? game.frameActorBySeat : frameContext.frameActors);
+
+    frameContext.pivotActor = pivotActor;
+    frameContext.pivotStatus = 'resolved';
+    frameContext.declarationResolvedActor = pivotActor;
+    frameContext.declarationResolvedSeat = handActors.indexOf(pivotActor);
+    frameContext.temporaryFrameOrder = Array.isArray(frameContext.temporaryFrameOrder)
+        ? [...frameContext.temporaryFrameOrder]
+        : [...handActors];
+    frameContext.canonicalFrameOrder = [...canonicalFrameOrder];
+    frameContext.displayMap = { ...displayMap };
+    frameContext.displayMapBasis = 'canonical-pivot-resolved';
+
+    game.frameActorByHandSeat = [...handActors];
+    game.handSeatByFrameActorKey = {};
+    for (let seat = 0; seat < game.frameActorByHandSeat.length; seat++) {
+        game.handSeatByFrameActorKey[frameActorKey(game.frameActorByHandSeat[seat])] = seat;
+    }
+
+    const playOrderSeats = canonicalFrameOrder.map(actor => game.handSeatByFrameActorKey[frameActorKey(actor)]);
+    const validPlayOrder =
+        playOrderSeats.length === 4
+        && playOrderSeats.every(seat => Number.isInteger(seat) && seat >= 0 && seat < NUM_PLAYERS)
+        && (new Set(playOrderSeats)).size === 4;
+    if (!validPlayOrder) {
+        frameContext.playOrderSeats = null;
+        frameContext.playOrderActorKeys = null;
+        game.playOrderSeats = null;
+        game.playOrderActorKeys = null;
+        return false;
+    }
+    frameContext.playOrderSeats = [...playOrderSeats];
+    frameContext.playOrderActorKeys = canonicalFrameOrder.map(frameActorKey);
+    game.playOrderSeats = [...playOrderSeats];
+    game.playOrderActorKeys = [...frameContext.playOrderActorKeys];
+
+    game.frameActorByDisplaySeat = [displayMap.bottom, displayMap.right, displayMap.top, displayMap.left];
+    game.displaySeatByFrameActorKey = {};
+    for (let seat = 0; seat < game.frameActorByDisplaySeat.length; seat++) {
+        game.displaySeatByFrameActorKey[frameActorKey(game.frameActorByDisplaySeat[seat])] = seat;
+    }
+
+    // Compatibility aliases remain ownership-based.
+    game.frameActorBySeat = game.frameActorByHandSeat;
+    game.seatByFrameActorKey = game.handSeatByFrameActorKey;
+    game.da3pStopBeforeBasing = false;
+    game.da3pFlowStatus = 'shared-basing-playing';
+    return true;
+}
+
+function gameResetNormal4PSharedRuntimeFields() {
+    if (!game) return;
+    game.tableFormat = ShengjiTableFormat.NORMAL_4P;
+    game.frameContext = null;
+    game.frameActorBySeat = null;
+    game.seatByFrameActorKey = null;
+    game.frameActorByHandSeat = null;
+    game.handSeatByFrameActorKey = null;
+    game.frameActorByDisplaySeat = null;
+    game.displaySeatByFrameActorKey = null;
+    game.playOrderSeats = null;
+    game.playOrderActorKeys = null;
+    game.da3pFlowStatus = null;
+    game.da3pStopBeforeBasing = false;
+    game.da3pSelectedReferenceActor = null;
+}
+
 // ---------------------------------------------------------------------------
 // DOM references
 // ---------------------------------------------------------------------------
@@ -393,8 +746,7 @@ let pauseState = {
 const UiSessionKind = Object.freeze({
     IDLE:                   'idle',
     NORMAL_4P:              'normal-4p',
-    THREE_PDA_START_SHELL:  'three-pda-start-shell',  // kept for backward-compat references
-    DA3P_FRAME_START:        'da3p-frame-start',        // Note 109: undealt frame-start board
+    DA3P_SHARED_FRAME:      'da3p-shared-frame',
 });
 
 function bumpUiSessionEpoch() {
@@ -458,9 +810,8 @@ function beginNewSessionBoundary(nextSessionKind) {
     if (typeof clearCrossingSeatStatuses === 'function') clearCrossingSeatStatuses();
     gOverbaseDecision = null;
 
-    // 6. Clear DA3P frame-start board unless the next session is itself a DA3P session.
-    if (nextSessionKind !== UiSessionKind.THREE_PDA_START_SHELL &&
-        nextSessionKind !== UiSessionKind.DA3P_FRAME_START) {
+    // 6. Clear DA3P auxiliary board residue unless the next session is itself DA3P shared flow.
+    if (nextSessionKind !== UiSessionKind.DA3P_SHARED_FRAME) {
         clearDA3PFrameStartBoard();
     }
 
@@ -584,6 +935,14 @@ function updateAttackersStreakDisplay() {
 // Persistent name bars (§3)
 // ---------------------------------------------------------------------------
 function initPersistentNamebars() {
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        initPersistentNamebarsForFrameContext(game.frameContext);
+        return;
+    }
+    initPersistentNamebarsForNormal4P();
+}
+
+function initPersistentNamebarsForNormal4P() {
     [gReferenceHandSurface, ...gDeskSlots].forEach(container => {
         if (container) container.querySelectorAll('.desk-namebar').forEach(el => el.remove());
     });
@@ -631,6 +990,74 @@ function initPersistentNamebars() {
     }
 }
 
+function initPersistentNamebarsForFrameContext(frameContext) {
+    [gReferenceHandSurface, ...gDeskSlots].forEach(container => {
+        if (container) container.querySelectorAll('.desk-namebar').forEach(el => el.remove());
+    });
+    gDeskNamebars = [null, null, null, null];
+
+    const handActors = Array.isArray(game && game.frameActorByHandSeat)
+        ? game.frameActorByHandSeat
+        : (Array.isArray(game && game.frameActorBySeat) ? game.frameActorBySeat : (frameContext && frameContext.frameActors) || []);
+    let displayMap = null;
+    if (frameContext && frameContext.displayMap && frameContext.displayMap.bottom !== undefined) {
+        displayMap = frameContext.displayMap;
+    } else if (Array.isArray(game && game.frameActorByDisplaySeat) && game.frameActorByDisplaySeat.length === 4) {
+        displayMap = {
+            bottom: game.frameActorByDisplaySeat[0],
+            right: game.frameActorByDisplaySeat[1],
+            top: game.frameActorByDisplaySeat[2],
+            left: game.frameActorByDisplaySeat[3],
+        };
+    } else {
+        const selectedReferenceActor = normalizeDA3PReferenceActor((game && game.da3pSelectedReferenceActor) || getDraftDA3PReferenceActor());
+        displayMap = createDisplayMapFromFrameOrder(handActors, selectedReferenceActor);
+    }
+    const displayOrder = ['bottom', 'right', 'top', 'left'];
+
+    for (let i = 0; i < displayOrder.length; i++) {
+        const displayPosition = displayOrder[i];
+        const actor = displayMap[displayPosition];
+        const seat = handActors.findIndex(a => isSameFrameActor(a, actor));
+        const isReferencePlayer = displayPosition === 'bottom';
+        const container = isReferencePlayer ? gReferenceHandSurface : getDeskSlotForDisplayPosition(displayPosition);
+        if (!container) continue;
+
+        let old = container.querySelector('.desk-namebar');
+        if (old) old.remove();
+
+        let nb = document.createElement('div');
+        nb.className = isReferencePlayer ? 'desk-namebar reference-hand-namebar' : 'desk-namebar';
+        nb.setAttribute('data-status', 'idle');
+        if (seat >= 0) nb.setAttribute('data-actor-seat', String(seat));
+        nb.setAttribute('data-display-position', displayPosition);
+        nb.setAttribute('data-frame-actor', frameActorKey(actor));
+        nb.setAttribute('data-actor-kind', getFrameActorKind(frameContext, actor));
+
+        let posArea = document.createElement('div');
+        posArea.className = 'game-position-area';
+        posArea.textContent = gameGetFrameActorLabel(actor);
+        nb.appendChild(posArea);
+
+        let nameArea = document.createElement('div');
+        nameArea.className = 'name-area';
+        nameArea.textContent = isReferencePlayer ? t('players.youShort') : t('players.botShort');
+        nb.appendChild(nameArea);
+
+        if (!isReferencePlayer) {
+            let preview = document.createElement('div');
+            preview.className = 'exposed-preview';
+            nb.appendChild(preview);
+        }
+
+        container.appendChild(nb);
+        if (seat >= 0 && seat < NUM_PLAYERS) {
+            gDeskNamebars[seat] = nb;
+            gCrossingSeatStatuses[seat] = null;
+        }
+    }
+}
+
 function updateNamebarStatus(player, status) {
     let nb = gDeskNamebars[player];
     if (nb) nb.setAttribute('data-status', status);
@@ -655,7 +1082,7 @@ function updateExposedPreview(player) {
     let exposed = game.exposedCards && game.exposedCards[player];
     if (!exposed || Object.keys(exposed).length === 0) {
         preview.classList.remove('has-exposed');
-        let emptySlot = getDeskSlotFor4PActorSeat(player);
+        let emptySlot = gameGetDeskSlotForSeat(player);
         if (emptySlot) emptySlot.removeAttribute('data-has-exposed');
         return;
     }
@@ -677,7 +1104,7 @@ function updateExposedPreview(player) {
         }
     }
     preview.classList.add('has-exposed');
-    let exposedSlot = getDeskSlotFor4PActorSeat(player);
+    let exposedSlot = gameGetDeskSlotForSeat(player);
     if (exposedSlot) exposedSlot.setAttribute('data-has-exposed', '');
 }
 
@@ -713,7 +1140,7 @@ function setCrossingClaimControlsVisible(visible) {
 }
 
 function showDeskEventMarker(player, text, scopeKey) {
-    let slot = getDeskSlotFor4PActorSeat(player);
+    let slot = gameGetDeskSlotForSeat(player);
     if (!slot) return;
     slot.querySelectorAll('.basing-pass-marker[data-marker-scope="' + scopeKey + '"]').forEach(el => el.remove());
     let marker = document.createElement('div');
@@ -725,7 +1152,7 @@ function showDeskEventMarker(player, text, scopeKey) {
 
 function clearDeskEventMarkersByScope(scopeKey) {
     for (let p = 0; p < NUM_PLAYERS; p++) {
-        let slot = getDeskSlotFor4PActorSeat(p);
+        let slot = gameGetDeskSlotForSeat(p);
         if (!slot) continue;
         slot.querySelectorAll('.basing-pass-marker[data-marker-scope="' + scopeKey + '"]').forEach(el => el.remove());
     }
@@ -960,7 +1387,7 @@ function showBasingPassMarker(player) {
 }
 
 function renderDeskCards(player, cards) {
-    let slot = getDeskSlotFor4PActorSeat(player);
+    let slot = gameGetDeskSlotForSeat(player);
     if (!slot) return;
     // Remove previous cards (not persistent namebar)
     slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
@@ -988,7 +1415,7 @@ function renderDeskCards(player, cards) {
 function highlightActivePlayer(player) {
     // Use name bar breathing color for all players including reference player (§6)
     for (let i = 0; i < NUM_PLAYERS; i++) {
-        let slot = getDeskSlotFor4PActorSeat(i);
+        let slot = gameGetDeskSlotForSeat(i);
         if (slot) slot.removeAttribute('data-active');
         if (gDeskNamebars[i] && gDeskNamebars[i].getAttribute('data-status') === 'on-play') {
             gDeskNamebars[i].setAttribute('data-status', 'idle');
@@ -1685,7 +2112,7 @@ function showCenterTimer(seconds) {
  */
 function showTimerOverlay(player) {
     removeTimerOverlay();
-    let slot = getDeskSlotFor4PActorSeat(player);
+    let slot = gameGetDeskSlotForSeat(player);
     if (!slot) return;
     let overlay = document.createElement('div');
     overlay.className = 'timer-overlay';
@@ -1969,7 +2396,7 @@ function autoPlayAsBot(player) {
         clearSelection();
         clearDesk();
         renderAllHands();
-        appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[player] }));
+        appendLog(t('log.baseDone', { playerName: gameGetPlayerLogNameForSeat(player) }));
         afterBasingComplete();
     } else if (game.phase === GamePhase.PLAYING) {
         // Auto-play card(s)
@@ -2099,6 +2526,9 @@ function resetBoardSurfacesForNewSession(nextSessionKind) {
 
     // 15. New-game button text.
     if (gBtnNewGame) gBtnNewGame.textContent = t('buttons.newGame');
+
+    // 16. Top-left seats/level-position box reset.
+    resetTopLeftSeatBoxForNewSession();
 }
 
 function startNewGame() {
@@ -2158,6 +2588,7 @@ function startNewGame() {
 
     let declarationOrderAnchor = isQiangzhuang ? Math.floor(Math.random() * NUM_PLAYERS) : pivot;
     engineStartGame(level, pivot, playerLevels, isQiangzhuang, gResolvedGameSettings.ruleConfig, declarationOrderAnchor);
+    gameResetNormal4PSharedRuntimeFields();
     if (pendingCycleIndexBySide && game && game.levelRuleState) {
         game.levelRuleState.cycleIndexBySide = pendingCycleIndexBySide.map(v =>
             (Number.isInteger(v) && v >= 0) ? v : 0
@@ -2306,7 +2737,7 @@ function buildDeclarationHistoryCellValues(row) {
         };
     }
     return {
-        who: getNaturalPositionShort(row.player),
+        who: gameGetActorLabelForSeat(row.player),
         whatHtml: getDeclarationWhatHtml(row.suit, row.count),
         whenHow: row.phase === 'dealing' ? String(row.whenHow || '') : getBasingWhenHowLabel(row.basingMode || 'ob'),
         strainKey: row.suit === 4 ? (row.count >= 4 ? 'w' : 'v') : numberToSuitName[row.suit],
@@ -2443,6 +2874,23 @@ function updateDeclareMatrix() {
     let hand  = game.hands[localControlledPlayerIndex];
     let level = game.level;
     let currentCount = currentDeclaration ? currentDeclaration.count : 0;
+    if (!gameCanSeatDeclare(localControlledPlayerIndex)) {
+        for (let suit = 0; suit <= 4; suit++) {
+            let btnS = gDeclBtnsSingle[suit];
+            let btnD = gDeclBtnsDouble[suit];
+            if (btnS) {
+                btnS.innerHTML = suit === 4 ? 'VV' : suitTexts[suit];
+                btnS.disabled = true;
+                btnS.onclick = null;
+            }
+            if (btnD) {
+                btnD.innerHTML = suit === 4 ? 'WW' : (suitTexts[suit] + suitTexts[suit]);
+                btnD.disabled = true;
+                btnD.onclick = null;
+            }
+        }
+        return;
+    }
 
     for (let suit = 0; suit <= 4; suit++) {
         let count = 0;
@@ -2510,16 +2958,22 @@ function updateDeclareMatrix() {
 }
 
 function executeDeclaration(suit, count) {
-    currentDeclaration = { player: localControlledPlayerIndex, suit, count };
+    if (!gameCanSeatDeclare(localControlledPlayerIndex)) return;
+    currentDeclaration = {
+        player: localControlledPlayerIndex,
+        frameActor: gameGetFrameActorForSeat(localControlledPlayerIndex),
+        suit,
+        count
+    };
 
     // Preview in UI corner
     let suitName = suit === 4 ? (count >= 4 ? 'w' : 'v') : numberToSuitName[suit];
     gDenomArea.setAttribute('strain', suitName);
     gStrainDiv.innerHTML   = getDenominationHtml(suit, count);
-    gDeclareSp.textContent = POSITION_LABELS[localControlledPlayerIndex];
+    gDeclareSp.textContent = gameGetActorLabelForSeat(localControlledPlayerIndex);
     let methodText = t('labels.declareMethod');
     gDeclMethodSp.textContent = methodText;
-    appendLog(t('log.declare', { playerName: PLAYER_NAMES[localControlledPlayerIndex], strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+    appendLog(t('log.declare', { playerName: gameGetPlayerLogNameForSeat(localControlledPlayerIndex), strain: suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
 
     showDeclaredCardsOnDesk(localControlledPlayerIndex, suit, count);
     recordDealingDeclarationHistory(localControlledPlayerIndex, suit, count);
@@ -2563,19 +3017,20 @@ function runDealingPhase() {
         for (let i = 0; i < NUM_PLAYERS; i++) {
             let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
             if (p === localControlledPlayerIndex) continue;
+            if (!gameCanSeatDeclare(p)) continue;
 
             let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
             if (decl) {
                 let currentCount = currentDeclaration ? currentDeclaration.count : 0;
                 if (currentDeclaration ? botCompareDeclarations(decl, currentDeclaration, botGetEffectiveDeclarationOrdering()) > 0 : (decl.count > currentCount)) {
-                    currentDeclaration = { player: p, suit: decl.suit, count: decl.count };
+                    currentDeclaration = { player: p, frameActor: gameGetFrameActorForSeat(p), suit: decl.suit, count: decl.count };
                     
                     let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
                     gDenomArea.setAttribute('strain', suitName);
                     gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
-                    gDeclareSp.textContent = POSITION_LABELS[p];
+                    gDeclareSp.textContent = gameGetActorLabelForSeat(p);
                     gDeclMethodSp.textContent = t('labels.declareMethod');
-                    appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+                    appendLog(t('log.declare', { playerName: gameGetPlayerLogNameForSeat(p), strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
                     showDeclaredCardsOnDesk(p, decl.suit, decl.count);
                     recordDealingDeclarationHistory(p, decl.suit, decl.count);
                 }
@@ -2640,17 +3095,18 @@ function runFinalDeclarationWindow() {
     for (let i = 0; i < NUM_PLAYERS; i++) {
         let p = (getDeclarationOrderAnchor() + i) % NUM_PLAYERS;
         if (isLocallyControlledSeat(p)) continue;
+        if (!gameCanSeatDeclare(p)) continue;
         let decl = botChooseDeclaration(p, currentDeclaration, 'dealing');
         if (decl) {
             let currentCount = currentDeclaration ? currentDeclaration.count : 0;
             if (currentDeclaration ? botCompareDeclarations(decl, currentDeclaration, botGetEffectiveDeclarationOrdering()) > 0 : (decl.count > currentCount)) {
-                currentDeclaration = { player: p, suit: decl.suit, count: decl.count };
+                currentDeclaration = { player: p, frameActor: gameGetFrameActorForSeat(p), suit: decl.suit, count: decl.count };
                 let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
                 gDenomArea.setAttribute('strain', suitName);
                 gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
-                gDeclareSp.textContent = POSITION_LABELS[p];
+                gDeclareSp.textContent = gameGetActorLabelForSeat(p);
                 gDeclMethodSp.textContent = t('labels.declareMethod');
-                appendLog(t('log.declare', { playerName: PLAYER_NAMES[p], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+                appendLog(t('log.declare', { playerName: gameGetPlayerLogNameForSeat(p), strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
                 showDeclaredCardsOnDesk(p, decl.suit, decl.count);
                 recordDealingDeclarationHistory(p, decl.suit, decl.count);
 
@@ -2691,22 +3147,38 @@ function resolveDeclaredPhase() {
         // in later frames, the pivot is already determined from the previous frame result
         if (game.isQiangzhuang) {
             game.pivot = bestDeclaration.player;
+            if (gameIsDA3PSharedFirstFrameActive() && game.frameContext) {
+                const resolvedActor = bestDeclaration.frameActor || gameGetFrameActorForSeat(bestDeclaration.player);
+                const reframed = gameApplyDA3PResolvedPivotReframe(resolvedActor);
+                if (reframed) {
+                    initPersistentNamebarsForFrameContext(game.frameContext);
+                    refreshTopLeftSeatAndLevelPositionBoxFromGameState();
+                } else {
+                    gameStopDA3PBeforeBasing(t('status.da3pStoppedBeforeBasing'));
+                    return;
+                }
+                game.frameContext.pivotSeat = bestDeclaration.player;
+                game.frameContext.declarationResolvedSeat = bestDeclaration.player;
+            }
         }
         game.declarations.push(bestDeclaration);
 
         gDenomArea.setAttribute('strain', suitName);
         gStrainDiv.innerHTML = getDenominationHtml(bestDeclaration.suit, bestDeclaration.count);
-        gDeclareSp.textContent    = POSITION_LABELS[bestDeclaration.player];
+        gDeclareSp.textContent    = gameGetActorLabelForSeat(bestDeclaration.player);
         gDeclMethodSp.textContent = t('labels.declareMethod');
 
         // Only log if they did it at the very end
         if (bestDeclaration.player !== localControlledPlayerIndex && (!currentDeclaration || bestDeclaration.count !== currentDeclaration.count)) {
-            appendLog(t('log.declare', { playerName: PLAYER_NAMES[bestDeclaration.player], strain: bestDeclaration.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+            appendLog(t('log.declare', { playerName: gameGetPlayerLogNameForSeat(bestDeclaration.player), strain: bestDeclaration.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
             showDeclaredCardsOnDesk(bestDeclaration.player, bestDeclaration.suit, bestDeclaration.count);
         }
-    } else if (game && game.isQiangzhuang) {
+    } else if (game && game.isQiangzhuang && !gameIsDA3PSharedFirstFrameActive()) {
         redealQiangzhuangNoDeclarationFrame();
         return;
+    } else if (game && game.isQiangzhuang && gameIsDA3PSharedFirstFrameActive()) {
+        appendLog(t('log.nobodyDeclared'));
+        recordAutoStrainHistoryRow();
     } else if (game.gameConfig && game.gameConfig.autoStrain === true && game.base && game.base.length >= 3) {
         let triggerCard = game.base[2];
         let resolvedStrain;
@@ -2741,6 +3213,10 @@ function resolveDeclaredPhase() {
     }
 
     if (typeof isPivotResolved === 'function' && !isPivotResolved(game.pivot)) {
+        if (gameShouldStopDA3PBeforeBasing()) {
+            gameStopDA3PBeforeBasing(t('status.da3pStoppedBeforeBasing'));
+            return;
+        }
         if (game && game.isQiangzhuang) {
             redealQiangzhuangNoDeclarationFrame();
             return;
@@ -2760,6 +3236,23 @@ function resolveDeclaredPhase() {
     // Show 3rd-base trigger card in pivot's desk area (note 44a)
     if (gAutoStrain3rdTriggerCard) {
         renderDeskCards(game.pivot, [gAutoStrain3rdTriggerCard]);
+    }
+
+    if (gameShouldStopDA3PBeforeBasing()) {
+        const resolved = gameIsDA3PSharedFirstFrameActive() && game.frameContext && game.frameContext.pivotStatus === 'resolved';
+        if (resolved) {
+            initPersistentNamebarsForFrameContext(game.frameContext);
+            gameApplyDA3PSeatControlFromFrameContext(game.da3pSelectedReferenceActor || getDraftDA3PReferenceActor());
+            renderAllHands();
+            clearDesk();
+            gameStopDA3PBeforeBasing(t('status.da3pPivotResolvedStoppedBeforeBasing'), {
+                phaseText: t('phase.da3pPivotResolvedStoppedBeforeBasing'),
+                statusText: t('status.da3pPivotResolvedStoppedBeforeBasing'),
+            });
+            return;
+        }
+        gameStopDA3PBeforeBasing(t('status.da3pStoppedBeforeBasing'));
+        return;
     }
 
     // Move to basing phase
@@ -2789,7 +3282,7 @@ function runBasingPhase() {
         activeLocalSeat = baser;
         clearSelection();
         renderHand(baser);
-        updatePhaseDisplay(t('phase.selectBase', { n: BASE_SIZE }) + (TEST_MODE ? ' (' + PLAYER_NAMES[baser] + ')' : ''));
+        updatePhaseDisplay(t('phase.selectBase', { n: BASE_SIZE }) + (TEST_MODE ? ' (' + gameGetActorLabelForSeat(baser) + ')' : ''));
         updateStatus(t('status.selectBase', { n: BASE_SIZE }));
         gBtnPlay.textContent = t('buttons.baseProgress', { current: 0, total: BASE_SIZE });
         gBtnPlay.disabled = true;
@@ -2812,7 +3305,7 @@ function runBasingPhase() {
             gAutoStrain3rdTriggerCard = null;
             clearDesk();
             renderAllHands();
-            appendLog(t('log.baseDone', { playerName: PLAYER_NAMES[baser] }));
+            appendLog(t('log.baseDone', { playerName: gameGetPlayerLogNameForSeat(baser) }));
             afterBasingComplete();
         }, 500);
     }
@@ -2835,6 +3328,31 @@ function afterBasingComplete() {
     } else {
         startPlayingPhase();
     }
+}
+
+function gameGetAdvancingSeatSequenceFrom(startSeat) {
+    let start = Number.isInteger(startSeat) ? startSeat : 0;
+    if (start < 0 || start >= NUM_PLAYERS) start = 0;
+    if (gameIsDA3PSharedFirstFrameActive() && Array.isArray(game.playOrderSeats) && game.playOrderSeats.length === NUM_PLAYERS) {
+        let leaderIndex = game.playOrderSeats.indexOf(start);
+        if (leaderIndex >= 0) {
+            let out = [];
+            for (let i = 0; i < NUM_PLAYERS; i++) {
+                out.push(game.playOrderSeats[(leaderIndex + i) % NUM_PLAYERS]);
+            }
+            return out;
+        }
+    }
+    let out = [];
+    for (let i = 0; i < NUM_PLAYERS; i++) {
+        out.push((start + i) % NUM_PLAYERS);
+    }
+    return out;
+}
+
+function gameCanSeatOverbase(player) {
+    if (!gameIsDA3PSharedFirstFrameActive()) return true;
+    return !isSameFrameActor(gameGetFrameActorForSeat(player), 'D');
 }
 
 /**
@@ -2888,6 +3406,7 @@ function getCurrentDeclarationHolder() {
 function isEligiblePostDealingOverbaseActor(player) {
     let baser = getActiveBaserPlayer();
     let declarationHolder = getCurrentDeclarationHolder();
+    if (!gameCanSeatOverbase(player)) return false;
     if (player === baser) return false;
     if (declarationHolder !== null && declarationHolder !== undefined && player === declarationHolder) return false;
     return true;
@@ -2898,12 +3417,13 @@ function buildPostDealingOverbaseActorOrder(startPlayer) {
     // After an accepted overbase + set-base, restart from the afterhand of the last baser (note 41ec).
     // If startPlayer is provided, begin from that player; otherwise use afterhand of pivot.
     if (startPlayer === undefined) {
-        startPlayer = (game.pivot + 1) % NUM_PLAYERS;
+        startPlayer = engineGetPlayerAtTurnOffset(game.pivot, 1);
     }
     // Use the table's advancing sequence starting from startPlayer.
     // Eligibility is then filtered from authoritative current baser/declaration-holder state.
-    for (let i = 0; i < NUM_PLAYERS; i++) {
-        let player = (startPlayer + i) % NUM_PLAYERS;
+    let sequence = gameGetAdvancingSeatSequenceFrom(startPlayer);
+    for (let i = 0; i < sequence.length; i++) {
+        let player = sequence[i];
         if (!isEligiblePostDealingOverbaseActor(player)) continue;
         order.push(player);
     }
@@ -2914,13 +3434,10 @@ function runSequentialOverbaseFlow() {
     let baser = getActiveBaserPlayer();
     let declarationHolder = getCurrentDeclarationHolder();
     // Restart post-dealing sequence from the afterhand of the last baser (note 41ec)
-    let startPlayer = (baser + 1) % NUM_PLAYERS;
+    let startPlayer = engineGetPlayerAtTurnOffset(baser, 1);
     
     // Build full advancing sequence including all players (for automatic PASS display in note 41ec)
-    let fullSequence = [];
-    for (let i = 0; i < NUM_PLAYERS; i++) {
-        fullSequence.push((startPlayer + i) % NUM_PLAYERS);
-    }
+    let fullSequence = gameGetAdvancingSeatSequenceFrom(startPlayer);
     
     // Build eligible-only order for decision-making
     let order = buildPostDealingOverbaseActorOrder(startPlayer);
@@ -2944,16 +3461,17 @@ function buildOvercallOptionKey(opt) {
 
 function applyOvercallDecision(player, decl) {
     let previousDeclaration = currentDeclaration ? { ...currentDeclaration } : null;
-    currentDeclaration = { player: player, suit: decl.suit, count: decl.count };
+    currentDeclaration = { player: player, frameActor: gameGetFrameActorForSeat(player), suit: decl.suit, count: decl.count };
     let suitName = (decl.suit === 4) ? (decl.count >= 4 ? 'w' : 'v') : numberToSuitName[decl.suit];
     gDenomArea.setAttribute('strain', suitName);
     gStrainDiv.innerHTML = getDenominationHtml(decl.suit, decl.count);
-    gDeclareSp.textContent = POSITION_LABELS[player];
+    gDeclareSp.textContent = gameGetActorLabelForSeat(player);
     gDeclMethodSp.textContent = t('labels.declareMethod');
-    appendLog(t('log.declare', { playerName: PLAYER_NAMES[player], strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
+    appendLog(t('log.declare', { playerName: gameGetPlayerLogNameForSeat(player), strain: decl.suit === 4 ? t('strain.noTrump') : suitName.toUpperCase() }));
     // note 41h / 41ha: restriction is only active when the overbaseRestrictions setting is 'default'.
     let restrictionSettingEnabled = !!(game && game.gameConfig && game.gameConfig.overbaseRestrictions === 'default');
-    let isNonOverbase = !!(restrictionSettingEnabled
+    let isNonOverbase = !!(!gameIsDA3PSharedFirstFrameActive()
+        && restrictionSettingEnabled
         && gOverbaseDecision
         && gOverbaseDecision.latestBaserAfterhandPassed
         && game.finalBaserSeat !== null && game.finalBaserSeat !== undefined
@@ -3007,6 +3525,7 @@ function finishOvercallDecisionStep(player, result) {
     // note 41h: track whether the latest baser's afterhand explicitly passes
     // note 41h / 41ha: only set when overbaseRestrictions is enabled
     if (gOverbaseDecision
+            && !gameIsDA3PSharedFirstFrameActive()
             && game.gameConfig && game.gameConfig.overbaseRestrictions === 'default'
             && game.finalBaserSeat !== null && game.finalBaserSeat !== undefined) {
         if (player === (game.finalBaserSeat + 1) % NUM_PLAYERS) {
@@ -3068,6 +3587,7 @@ function runNextOvercallDecisionStep() {
         // note 41h: automatic pass for ineligible actor also counts as afterhand pass
         // note 41h / 41ha: only set when overbaseRestrictions is enabled
         if (game.gameConfig && game.gameConfig.overbaseRestrictions === 'default'
+                && !gameIsDA3PSharedFirstFrameActive()
                 && game.finalBaserSeat !== null && game.finalBaserSeat !== undefined
                 && ineligiblePlayer === (game.finalBaserSeat + 1) % NUM_PLAYERS) {
             gOverbaseDecision.latestBaserAfterhandPassed = true;
@@ -3211,6 +3731,16 @@ function getOppositeSeat(player) {
     return (player + 2) % NUM_PLAYERS;
 }
 
+function getCrossingPartnerSeat(player) {
+    if (game && Array.isArray(game.defendingTeam) && game.defendingTeam.includes(player)) {
+        return game.defendingTeam.find(seat => seat !== player);
+    }
+    if (game && Array.isArray(game.attackingTeam) && game.attackingTeam.includes(player)) {
+        return game.attackingTeam.find(seat => seat !== player);
+    }
+    return getOppositeSeat(player);
+}
+
 function buildCrossingTeamRuntimeState() {
     return {
         claimed: false,
@@ -3225,9 +3755,21 @@ function canOpenCrossingClaimWindow() {
     return !!(game && game.gameConfig && game.gameConfig.allowCrossings && game.strain !== 4);
 }
 
+function gameCanSeatClaimCrossing(player, snapshot) {
+    if (gameIsDA3PSharedFirstFrameActive() && isSameFrameActor(gameGetFrameActorForSeat(player), 'D')) {
+        return false;
+    }
+    if (!snapshot) return false;
+    return !!snapshot[player];
+}
+
 function createCrossingEligibilitySnapshot() {
     let snapshot = {};
     for (let player = 0; player < NUM_PLAYERS; player++) {
+        if (gameIsDA3PSharedFirstFrameActive() && isSameFrameActor(gameGetFrameActorForSeat(player), 'D')) {
+            snapshot[player] = false;
+            continue;
+        }
         let trumpCount = engineCountTrumpIfStrain(game.hands[player], game.strain, game.level);
         snapshot[player] = trumpCount <= 5;
     }
@@ -3304,7 +3846,7 @@ function refreshCrossingClaimControls() {
     }
 
     let localResolved = !!gCrossingState.resolvedBySeat[localControlledPlayerIndex];
-    let localEligible = !!gCrossingState.eligibilityBySeat[localControlledPlayerIndex];
+    let localEligible = gameCanSeatClaimCrossing(localControlledPlayerIndex, gCrossingState.eligibilityBySeat);
     setCrossingClaimControlsVisible(true);
 
     gBtnCrossClaim.style.display = '';
@@ -3345,11 +3887,12 @@ function recordCrossingSeatResolution(player, action, reason) {
     if (action === 'claim') {
         let teamKey = getCrossingTeamKeyForSeat(player);
         let teamState = gCrossingState.teamState[teamKey];
-        if (!gCrossingState.eligibilityBySeat[player]) return false;
+        if (!gameCanSeatClaimCrossing(player, gCrossingState.eligibilityBySeat)) return false;
         if (!teamState.claimed) {
             teamState.claimed = true;
             teamState.claimantSeat = player;
-            teamState.partnerSeat = getOppositeSeat(player);
+            teamState.partnerSeat = getCrossingPartnerSeat(player);
+            if (!Number.isInteger(teamState.partnerSeat) || teamState.partnerSeat === player) return false;
             teamState.phase = 'claim-accepted';
             appendLog(t('log.crossingClaimAccepted', { playerName: PLAYER_NAMES[player] }));
         } else {
@@ -3628,7 +4171,7 @@ function scheduleBotClaimWindowDecisions() {
         setTimeout(() => {
             if (!gCrossingState || !gCrossingState.claimWindowActive) return;
             if (gCrossingState.resolvedBySeat[player]) return;
-            let eligible = !!gCrossingState.eligibilityBySeat[player];
+            let eligible = gameCanSeatClaimCrossing(player, gCrossingState.eligibilityBySeat);
             resolveCrossingClaimWindowSeat(player, eligible ? 'claim' : 'no-crossing', 'bot');
         }, delay);
     }
@@ -3752,8 +4295,8 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
     let exposedDivCards = fcTrigger.exposedDivisionCards;
 
     appendLog(t('log.forehandControlActivated', {
-        controllerName: PLAYER_NAMES[controller],
-        targetName: PLAYER_NAMES[targetPlayer]
+        controllerName: gameGetPlayerLogNameForSeat(controller),
+        targetName: gameGetPlayerLogNameForSeat(targetPlayer)
     }));
 
     // Create ForehandControlInteractionState
@@ -3771,15 +4314,15 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
     if (!isLocallyControlledSeat(controller)) {
         // Bot controller: must-play with empty selectedCards (effectively a no-op)
         engineExerciseFC(targetPlayer, 'must-play', []);
-        appendLog(t('log.forehandControlBotExercised', { controllerName: PLAYER_NAMES[controller] }));
+        appendLog(t('log.forehandControlBotExercised', { controllerName: gameGetPlayerLogNameForSeat(controller) }));
         gFCInteraction = null;
         promptCurrentPlayer();
     } else {
         // Human controller: mount selection UI on the target's namebar
         highlightActivePlayer(targetPlayer);
 
-        updatePhaseDisplay(t('phase.forehandControl', { controllerName: PLAYER_NAMES[controller], targetName: PLAYER_NAMES[targetPlayer] }));
-        updateStatus(t('status.forehandControl', { targetName: PLAYER_NAMES[targetPlayer] }));
+        updatePhaseDisplay(t('phase.forehandControl', { controllerName: gameGetPlayerLogNameForSeat(controller), targetName: gameGetPlayerLogNameForSeat(targetPlayer) }));
+        updateStatus(t('status.forehandControl', { targetName: gameGetPlayerLogNameForSeat(targetPlayer) }));
 
         // Show exposed-preview in interactive FC mode on the target's namebar
         let nb = gDeskNamebars[targetPlayer];
@@ -3875,12 +4418,12 @@ function commitForehandControl(mode) {
 
     if (markedCards.length > 0) {
         appendLog(t('log.forehandControlMarked', {
-            controllerName: PLAYER_NAMES[fci.controller],
+            controllerName: gameGetPlayerLogNameForSeat(fci.controller),
             count: markedCards.length,
             mode: mode === 'must-play' ? t('fc.mustPlay') : t('fc.mustHold')
         }));
     } else {
-        appendLog(t('log.forehandControlNoMarks', { controllerName: PLAYER_NAMES[fci.controller] }));
+        appendLog(t('log.forehandControlNoMarks', { controllerName: gameGetPlayerLogNameForSeat(fci.controller) }));
     }
 
     gFCInteraction = null;
@@ -3910,6 +4453,7 @@ function promptCurrentPlayer() {
     }
 
     let cp = engineGetCurrentPlayer();
+    let cpFrameActor = gameGetFrameActorForSeat(cp);
     let isLeading = (game.currentTurnIndex === 0);
 
     // Check if forehand control needs to be exercised before this player follows
@@ -3922,7 +4466,7 @@ function promptCurrentPlayer() {
         }
     }
 
-    if (gDeskInfo)  gDeskInfo.innerHTML = t('desk.roundInfo', { round: game.currentRound, playerName: PLAYER_NAMES[cp], action: isLeading ? t('desk.leadAction') : t('desk.followAction') });
+    if (gDeskInfo)  gDeskInfo.innerHTML = t('desk.roundInfo', { round: game.currentRound, playerName: gameGetActorLabelForSeat(cp), action: isLeading ? t('desk.leadAction') : t('desk.followAction') });
 
     let shouldClearCrossingResolvedMarkers = !!(
         gCrossingState
@@ -3936,7 +4480,7 @@ function promptCurrentPlayer() {
 
     highlightActivePlayer(cp);
 
-    if (isLocallyControlledSeat(cp)) {
+    if (isLocallyControlledSeat(cp) && !gameShouldAutoPlayFrameActor(cpFrameActor)) {
         // Switch displayed hand to the active human player
         activeLocalSeat = cp;
         clearSelection();
@@ -3947,7 +4491,7 @@ function promptCurrentPlayer() {
             let li = describeLeadInfo(game.leadInfo);
             updateStatus(t('status.follow', { division: t('division.' + li.divisionKey), leadType: t('leadType.' + li.leadTypeKey), volume: game.leadInfo.volume }));
         }
-        updatePhaseDisplay((TEST_MODE ? PLAYER_NAMES[cp] + ' — ' : '') + (isLeading ? t('phase.lead') : t('phase.follow', { volume: game.leadInfo.volume })));
+        updatePhaseDisplay((TEST_MODE ? gameGetActorLabelForSeat(cp) + ' - ' : '') + (isLeading ? t('phase.lead') : t('phase.follow', { volume: game.leadInfo.volume })));
         gBtnPlay.disabled = true;
         gBtnPlay.textContent = t('buttons.play');
         
@@ -4008,8 +4552,8 @@ function promptCurrentPlayer() {
             autoPlayAsBot(cp);
         });
     } else {
-        updateStatus(t('status.botThinking', { playerName: PLAYER_NAMES[cp] }));
-        updatePhaseDisplay(t('phase.botPlaying', { playerName: PLAYER_NAMES[cp] }));
+        updateStatus(t('status.botThinking', { playerName: gameGetPlayerLogNameForSeat(cp) }));
+        updatePhaseDisplay(t('phase.botPlaying', { playerName: gameGetPlayerLogNameForSeat(cp) }));
         gBtnPlay.disabled = true;
         if (shouldClearCrossingResolvedMarkers) {
             clearCrossingSeatStatuses();
@@ -4018,6 +4562,19 @@ function promptCurrentPlayer() {
         // Bot plays after a delay
         const _btEpoch = getCurrentUiSessionEpoch(); // Note 108a
         setTimeout(() => { if (!isCurrentUiSessionEpoch(_btEpoch)) return; botTakeTurn(cp); }, BOT_DELAY);
+    }
+}
+
+function gameStopDA3PAtCountingEntry(result) {
+    game.phase = GamePhase.IDLE;
+    game.da3pFlowStatus = 'stopped-at-counting-entry';
+    gBtnPlay.disabled = true;
+    gBtnPlay.textContent = t('buttons.play');
+    updatePhaseDisplay(t('phase.da3pStoppedAtCountingEntry'));
+    updateStatus(t('status.da3pStoppedAtCountingEntry'));
+    appendLog(t('status.da3pStoppedAtCountingEntry'));
+    if (gDeskInfo && result && Number.isFinite(result.totalScore)) {
+        gDeskInfo.textContent = t('status.da3pStoppedAtCountingEntryScore', { totalScore: result.totalScore });
     }
 }
 
@@ -4037,10 +4594,10 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
     updateCounterDrawer();
 
     // 1) Announce all blockers
-    let allBlockerNames = fm.allBlockerSeats.map(s => PLAYER_NAMES[s]).join(', ');
+    let allBlockerNames = fm.allBlockerSeats.map(s => gameGetPlayerLogNameForSeat(s)).join(', ');
     appendLog(t('log.multiplayFailed', {
-        playerName: PLAYER_NAMES[player],
-        blockerName: PLAYER_NAMES[fm.blockerSeat],
+        playerName: gameGetPlayerLogNameForSeat(player),
+        blockerName: gameGetPlayerLogNameForSeat(fm.blockerSeat),
         allBlockerNames: allBlockerNames,
         actualVolume: fm.actualElement.cards.length
     }));
@@ -4050,7 +4607,7 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
 
     // 2) Show all intended cards on desk, with revoked cards highlighted
     let revokedIds = new Set(fm.revokedCards.map(c => c.cardId));
-    let slot = getDeskSlotFor4PActorSeat(player);
+    let slot = gameGetDeskSlotForSeat(player);
     if (!slot) return;
     slot.querySelectorAll('.card-container, .hand, .namebar:not(.desk-namebar)').forEach(el => el.remove());
     let sorted = [...allIntendedCards];
@@ -4219,11 +4776,9 @@ const TABLE_LEVEL_FIELDS = ['deckCount', 'tableFormat', 'pivotPassMode'];
 
 // Table-format enum (Note 107 / Note 110a).
 // Canonical values: 'normal-4p' and 'da3p'.
-// THREE_PDA is a deprecated compat alias kept for historical code paths.
 const ShengjiTableFormat = Object.freeze({
     NORMAL_4P: 'normal-4p',  // canonical normal 4-player table format (was 'normal-4P')
     DA3P:      'da3p',        // canonical 3-player dummy-ally format (Note 110a)
-    THREE_PDA: 'da3p',        // deprecated compat alias → same value as DA3P
 });
 
 /**
@@ -4233,16 +4788,17 @@ const ShengjiTableFormat = Object.freeze({
  * @returns {string} canonical tableFormat
  */
 function normalizeTableFormat(value) {
+    // Legacy input normalization only; do not emit this value.
     if (value === 'three-pda') return ShengjiTableFormat.DA3P;
     if (value === 'da3p')      return ShengjiTableFormat.DA3P;
     if (value === 'normal-4p') return ShengjiTableFormat.NORMAL_4P;
+    // Legacy input normalization only; do not emit this value.
     if (value === 'normal-4P') return ShengjiTableFormat.NORMAL_4P;
     return ShengjiTableFormat.NORMAL_4P;
 }
 
 // 3PDA start shell state (Note 108).  Null when not in 3PDA shell mode.
 // This is a UI/model boundary state only — no card dealing, no gameplay.
-let gDA3PFrameStartState = null;
 
 // Per-preset table-level constraints.  Key = preset value string.
 // Value = function(draftCfg) → bool.  Returns true if the preset is compatible
@@ -4280,6 +4836,44 @@ function ensureResolvedSettings() {
     if (!gResolvedGameSettings) {
         gResolvedGameSettings = getDefaultResolvedSettings();
     }
+}
+
+function commitResolvedSettingsFromDraft() {
+    let draftRule = cloneRuleConfig(gSettingsDraftRuleConfig || {}) || {};
+    let presetName = draftRule.presetName || 'default';
+    delete draftRule.presetName;
+
+    let draftDisplay = { ...(gSettingsDraftDisplaySettings || {}) };
+
+    if (typeof shengjiResolveGameSettings === 'function') {
+        gResolvedGameSettings = shengjiResolveGameSettings({
+            presetName,
+            overrides: draftRule,
+            displayOverrides: draftDisplay,
+        });
+    } else {
+        gResolvedGameSettings = {
+            presetName,
+            ruleConfig: engineBuildConfig(presetName, draftRule),
+            displaySettings: { ...draftDisplay },
+        };
+    }
+
+    if (gResolvedGameSettings && gResolvedGameSettings.ruleConfig) {
+        gResolvedGameSettings.ruleConfig.tableFormat = normalizeTableFormat(
+            gResolvedGameSettings.ruleConfig.tableFormat
+        );
+    }
+    if (gResolvedGameSettings && gResolvedGameSettings.displaySettings) {
+        gResolvedGameSettings.displaySettings.userNaturalPosition = normalize4PUserNaturalPosition(
+            gResolvedGameSettings.displaySettings.userNaturalPosition
+        );
+        gResolvedGameSettings.displaySettings.selectedDA3PReferenceActor = normalizeDA3PReferenceActor(
+            gResolvedGameSettings.displaySettings.selectedDA3PReferenceActor
+        );
+    }
+
+    return gResolvedGameSettings;
 }
 
 function getTimingConfigForPage() {
@@ -4490,6 +5084,9 @@ function renderSeatsHoverLevelPositionSquare() {
 
 function setSeatsTopLeftBoxView(view) {
     if (!gSeatsDiv) return;
+    if (view === 'level-position' && gameIsDA3PSharedFirstFrameActive()) {
+        view = 'seats';
+    }
     gSeatsTopLeftBoxView = (view === 'level-position') ? 'level-position' : 'seats';
 
     let tableNumber = document.getElementById('div-table-number');
@@ -4506,6 +5103,22 @@ function setSeatsTopLeftBoxView(view) {
         if (showingLevelPosition) {
             renderSeatsHoverLevelPositionSquare();
         }
+    }
+}
+
+function resetTopLeftSeatBoxForNewSession() {
+    gSeatsTopLeftBoxView = 'seats';
+    if (!gSeatsDiv) return;
+    gSeatsDiv.setAttribute('data-box-view', 'seats');
+    gSeatsDiv.setAttribute('pivot', 'undetermined');
+    let tableNumber = document.getElementById('div-table-number');
+    if (tableNumber) tableNumber.style.display = '';
+    let pivotMark = gSeatsDiv.querySelector('.div-pivot-mark');
+    if (pivotMark) pivotMark.style.display = '';
+    ensureSeatsHoverLevelPositionBox();
+    if (gSeatsHoverLevelPositionBox) {
+        gSeatsHoverLevelPositionBox.style.display = 'none';
+        gSeatsHoverLevelPositionBox.innerHTML = '';
     }
 }
 
@@ -4563,19 +5176,17 @@ const VALID_3PDA_REFERENCE_ACTORS = ['N', 'Sw', 'Se'];
 function normalizeDA3PReferenceActor(value) {
     return VALID_3PDA_REFERENCE_ACTORS.includes(value) ? value : 'N';
 }
-// Deprecated compat alias
-const normalize3PDAReferenceActor = normalizeDA3PReferenceActor;
 
 function getDraftDA3PReferenceActor() {
-    let source = gSettingsDraftDisplaySettings || {};
+    let source = gSettingsDraftDisplaySettings
+        || (gResolvedGameSettings && gResolvedGameSettings.displaySettings)
+        || {};
     // Accept canonical selectedDA3PReferenceActor; fall back to legacy selected3PDAReferenceActor
     let v = (source.selectedDA3PReferenceActor !== undefined)
         ? source.selectedDA3PReferenceActor
         : source.selected3PDAReferenceActor;
     return normalizeDA3PReferenceActor(v);
 }
-// Deprecated compat alias
-const getDraft3PDAReferenceActor = getDraftDA3PReferenceActor;
 
 // Note 108 — 3PDA start shell helpers
 
@@ -4714,385 +5325,169 @@ function canActorDeclareInFrameContext(actor, frameContext) {
     return isFrameActorInList(actor, frameContext.declarationEligibleActors);
 }
 
+// ---------------------------------------------------------------------------
+// Note 111a — Shared ordered dealing event stream and timing contract
+// ---------------------------------------------------------------------------
+
 /**
- * Build DA3P pre-deal diagnostics derived from a frameContext (Note 110b).
- * Diagnostics only — not the source of truth for dealing execution.
- * Replaces the old buildDA3PDealPlan (Note 110) which is quarantined here.
- * Preserves shape compatibility so existing tests referencing dealPlan.* fields
- * continue to work via the preDealDiagnostics/dealPlan alias in gDA3PFrameStartState.
+ * Per-card timing constants for the shared dealing event stream (Note 111a).
+ * - normalPerCardMs: 100 ms between card events in normal mode.
+ * - testPerCardMs:   1 ms between card events in test mode (intentionally
+ *   nonzero — declaration timing depends on per-card spacing).
+ */
+const SHARED_DEALING_TIMING = Object.freeze({
+    normalPerCardMs: 100,
+    testPerCardMs:   1,
+});
+
+/**
+ * Resolve the per-card dealing delay in ms (Note 111a).
  *
- * @param {Object} frameContext         - four-position-frame-context (from buildFourPositionFrameContext)
- * @param {string} selectedReferenceActor
- * @param {Object} displayMap           - { bottom, right, top, left }
- * @returns {Object} diagnostics with kind 'da3p-pre-dealing-plan'
+ * Priority:
+ *   1. options.perCardDelayMs  — explicit override (clamped to ≥ 1 ms)
+ *   2. options.testMode === true → 1 ms
+ *   3. default → 100 ms
+ *
+ * The delay is never allowed to fall below 1 ms because declaration/bot
+ * timing logic may depend on the existence of a nonzero per-card interval.
+ *
+ * @param {Object} [options]
+ * @param {number}  [options.perCardDelayMs]   - explicit ms override
+ * @param {boolean} [options.testMode]         - true for 1 ms test delay
+ * @returns {number}
  */
-function buildDA3PPreDealDiagnostics(frameContext, selectedReferenceActor, displayMap) {
-    const deckCount               = 2;
-    const totalCardCount          = TOTAL_CARDS;             // 108
-    const baseSize                = BASE_SIZE;               // 8
-    const framePositionCount      = FRAME_POSITION_COUNT_3PDA; // 4
-    const realActorCount          = REAL_ACTOR_COUNT_3PDA;   // 3
-    const cardsPerFramePosition   = CARDS_PER_HAND;          // 25
-    const totalRecipientCardCount = totalCardCount - baseSize;
-    const expectedCount           = cardsPerFramePosition;
-    const temporaryFrameOrder     = frameContext.frameActors;
-
-    return {
-        kind:               'da3p-pre-dealing-plan',
-        status:             'planned-not-dealt',
-        tableFormat:        frameContext.tableFormat,
-        frameKind:          frameContext.frameKind,
-        frameIndex:         0,
-        frameNumber:        1,
-        isQiangzhuangFrame: frameContext.isQiangzhuangFrame,
-        pivotActor:         frameContext.pivotActor,
-        pivotStatus:        frameContext.pivotStatus,
-        dealAnchor:         frameContext.dealAnchor,
-        selectedReferenceActor,
-        temporaryFrameOrder,
-        displayMap,
-        recipientsInRoundOrder: temporaryFrameOrder,
-        recipientKindByActor: {
-            N:  'real',
-            Sw: 'real',
-            Se: 'real',
-            D:  'temporary-dummy-pile',
-        },
-        dealSequencePattern: {
-            rounds:             cardsPerFramePosition,
-            perRoundRecipients: temporaryFrameOrder,
-        },
-        framePositionCount,
-        realActorCount,
-        dummyActor:               frameContext.dummyActor,
-        declarationEligibleActors: frameContext.declarationEligibleActors,
-        nonDeclaringActors:        frameContext.nonDeclaringActors,
-        deckCount,
-        totalCardCount,
-        baseSize,
-        cardsPerFramePosition,
-        totalRecipientCardCount,
-        expectedCardCountByActor: {
-            N:  expectedCount,
-            Sw: expectedCount,
-            Se: expectedCount,
-            D:  expectedCount,
-        },
-        expectedBaseCardCount: baseSize,
-        // Non-execution guards (transitional diagnostics only, not core model):
-        deckCreated:      false,
-        cardsCreated:     false,
-        handsCreated:     false,
-        cardsDealt:       false,
-        baseCreated:      false,
-        dealTimerStarted: false,
-    };
-}
-// Note 110b: buildDA3PDealPlan quarantined — buildDA3PPreDealDiagnostics is the
-// canonical function. Compat alias kept so older test references resolve without churn.
-const buildDA3PDealPlan = buildDA3PPreDealDiagnostics;
-
-/**
- * Enter the 3PDA frame-start board (Note 108 shell → Note 109 undealt board).
- * Creates an undealt 3PDA frame-start state and renders the board skeleton.
- * Does NOT call startNewGame(), create a deck, deal cards, or start any gameplay.
- * @param {Object} [options] - { dealAnchorFixed } for deterministic tests
- */
-function enterDA3PFrameStart(options) {
-    beginNewSessionBoundary(UiSessionKind.DA3P_FRAME_START); // Note 108a: terminate previous session first
-
-    // Note 108b: clear stale board surfaces (desk, namebars, score, buttons,
-    // declaration, etc.) before the 3PDA board renders on top of the board.
-    resetBoardSurfacesForNewSession(UiSessionKind.DA3P_FRAME_START);
-
-    const selectedReferenceActor = getDraftDA3PReferenceActor();
-    const dealAnchor = generateDA3PDealAnchor(options && options.dealAnchorFixed ? { fixed: options.dealAnchorFixed } : undefined);
-
-    // Use engine helpers (Note 106): compute qz temp layout and display map
-    const temporaryFrameOrder = get3PDAQZTempLayout(dealAnchor);
-    const displayMap = createDisplayMapFromFrameOrder(temporaryFrameOrder, selectedReferenceActor);
-
-    // Note 110b: build shared four-position frameContext as primary model.
-    // frameContext is the source of truth for actor layout, deal order, and declaration eligibility.
-    const frameContext = buildFourPositionFrameContext({
-        tableFormat:               ShengjiTableFormat.DA3P,
-        frameKind:                 'da3p',
-        isQiangzhuangFrame:        true,
-        pivotActor:                null,
-        pivotStatus:               'unresolved',
-        dealAnchor,
-        frameActors:               temporaryFrameOrder,
-        realActors:                ['N', 'Sw', 'Se'],
-        dummyActor:                'D',
-        actorKindByKey:            { N: 'real', Sw: 'real', Se: 'real', D: 'temporary-dummy-pile' },
-        declarationEligibleActors: ['N', 'Sw', 'Se'],
-        nonDeclaringActors:        ['D'],
-    });
-
-    // Note 110b: diagnostics derived from frameContext (not source of truth for execution).
-    // dealPlan kept as transitional alias → preDealDiagnostics for backward compat with older tests.
-    const preDealDiagnostics = buildDA3PPreDealDiagnostics(frameContext, selectedReferenceActor, displayMap);
-
-    gDA3PFrameStartState = {
-        kind: 'da3p-frame-start',
-        tableFormat: ShengjiTableFormat.DA3P,  // canonical 'da3p' (Note 110a)
-        activationStatus: 'undealt-frame',
-
-        frameContext, // Note 110b: primary model — shared 4-position in-frame context
-
-        gameplayEnabled: false,
-        dealingEnabled: false,
-        declarationEnabled: false,
-        basingEnabled: false,
-        playingEnabled: false,
-        scoringEnabled: false,
-        dummyControlEnabled: false,
-
-        frameIndex: 0,
-        frameNumber: 1,
-        isQiangzhuangFrame: true,
-
-        pivotActor: null,
-        pivotStatus: 'unresolved',
-
-        dealAnchor,
-        dealAnchorPolicy: 'generated-local',
-
-        selectedReferenceActor,
-        temporaryFrameOrder,
-        displayMap,
-
-        preDealDiagnostics, // Note 110b: derived diagnostics (not source of truth)
-        dealPlan: preDealDiagnostics, // transitional alias → preDealDiagnostics (Note 110b)
-
-        // Explicit non-card boundary:
-        deckCreated: false,
-        cardsDealt: false,
-        handsCreated: false,
-        dummyHandRevealed: false,
-    };
-
-    closeSettingsDialog();
-    renderDA3PFrameStartBoard();
+function getSharedDealingPerCardDelayMs(options) {
+    if (options && Number.isFinite(options.perCardDelayMs)) {
+        return Math.max(1, Math.floor(options.perCardDelayMs));
+    }
+    if (options && options.testMode === true) {
+        return SHARED_DEALING_TIMING.testPerCardMs;   // 1
+    }
+    return SHARED_DEALING_TIMING.normalPerCardMs;     // 100
 }
 
 /**
- * Render the undealt 3PDA frame-start state on the real normal-4P board surface (Note 109a).
- * Inserts 3PDA actor namebars and desk placeholders into the real bottom/right/top/left
- * desk slots, puts status content in the real central box, and adds auxiliary Exit/Back
- * controls to the game-actions area. No cards, no playable UI, no deck/hand/dealing.
+ * Derive the 4-position deal order from a frameContext (Note 111a).
+ * Returns frameContext.dealOrder if present (set by buildFourPositionFrameContext),
+ * otherwise falls back to frameContext.frameActors.
+ * @param {Object} frameContext
+ * @returns {Array}
  */
-function renderDA3PFrameStartBoard() {
-    // Clean up any previous DA3P board rendering (handles re-entry via Back to Settings)
-    [gReferenceHandSurface, ...gDeskSlots].forEach(el => {
-        if (el) el.querySelectorAll('.desk-namebar[data-da3p-actor]').forEach(c => c.remove());
-    });
-    const prevSentinel = document.getElementById('da3p-frame-start-sentinel');
-    if (prevSentinel) {
-        if (prevSentinel._onKeydown) document.removeEventListener('keydown', prevSentinel._onKeydown);
-        prevSentinel.remove();
-    }
-    const legacyBoard = document.getElementById('three-pda-board'); // Note 109 legacy cleanup
-    if (legacyBoard) legacyBoard.remove();
-    const prevActions = document.getElementById('da3p-frame-start-actions');
-    if (prevActions) prevActions.remove();
-    const gameActionsEl = document.getElementById('game-actions');
-    if (gameActionsEl) gameActionsEl.classList.remove('da3p-frame-start-actions-active');
-    const containerEl = document.querySelector('.container');
-    if (containerEl) containerEl.classList.remove('da3p-frame-start-active');
-    if (gScoreCont) gScoreCont.classList.remove('da3p-score-hidden');
-
-    if (!gDA3PFrameStartState) return;
-
-    const s = gDA3PFrameStartState;
-    const locale = getLocale();
-
-    function actorLabel(actor) {
-        if (actor === 'D') {
-            return (DUMMY_LABELS_3PDA && DUMMY_LABELS_3PDA[locale === 'en' ? 'en' : 'zh']) || 'D';
-        }
-        // Compact board labels: EN = N/Sw/Se, ZH = 子/申/辰 (from settings referenceActorOptionLabels)
-        return t('settingsDialog.fields.referenceActorOptionLabels.' + actor) || actor;
-    }
-
-    // 1. Mark the board container for 3PDA CSS state
-    if (containerEl) containerEl.classList.add('da3p-frame-start-active');
-
-    // 2. Render shared .desk-namebar into the shared placement area per position (Note 109c).
-    //    bottom/reference → gReferenceHandSurface (same as normal 4P).
-    //    top/right/left   → corresponding desk slot (same as normal 4P).
-    for (const pos of ['bottom', 'right', 'top', 'left']) {
-        const isRef = pos === 'bottom';
-        const container = isRef ? gReferenceHandSurface : gDeskDisplaySlots[pos];
-        if (!container) continue;
-        const actor = s.displayMap[pos];
-        const refPos = FOUR_P_DISPLAY_TO_REFERENCE_POSITION[pos] || pos;
-        const nb = document.createElement('div');
-        nb.className = isRef ? 'desk-namebar reference-hand-namebar' : 'desk-namebar';
-        nb.setAttribute('data-status', 'idle');
-        nb.setAttribute('data-da3p-actor', actor);
-        nb.setAttribute('data-actor-kind', isRef ? 'real' : (actor === 'D' ? 'dummy' : 'real'));
-        nb.setAttribute('data-display-position', pos);
-        nb.setAttribute('data-reference-position', refPos);
-        const posArea = document.createElement('div');
-        posArea.className = 'game-position-area';
-        posArea.textContent = actorLabel(actor);
-        nb.appendChild(posArea);
-        const nameArea = document.createElement('div');
-        nameArea.className = 'name-area';
-        nameArea.textContent = actor;
-        nb.appendChild(nameArea);
-        if (!isRef) {
-            const preview = document.createElement('div');
-            preview.className = 'exposed-preview';
-            nb.appendChild(preview);
-        }
-        container.appendChild(nb);
-    }
-
-    // 3. Populate real central info box
-    if (gDeskInfo) {
-        gDeskInfo.innerHTML = '';
-        const titleEl = document.createElement('div');
-        titleEl.className = 'tpfb-center-title';
-        titleEl.textContent = t('da3pFrameStart.title');
-        gDeskInfo.appendChild(titleEl);
-
-        const infoRows = [
-            t('da3pFrameStart.frame', { n: s.frameNumber }),
-            t('da3pFrameStart.qiangzhuangFrame'),
-            t('da3pFrameStart.pivotUnresolved'),
-            t('da3pFrameStart.dealAnchor') + ': ' + actorLabel(s.dealAnchor),
-            t('da3pFrameStart.selectedSeat') + ': ' + actorLabel(s.selectedReferenceActor),
-        ];
-        for (const text of infoRows) {
-            const row = document.createElement('div');
-            row.className = 'tpfb-center-row';
-            row.textContent = text;
-            gDeskInfo.appendChild(row);
-        }
-
-        // Note 110: show deal-plan-ready metadata if dealPlan is present
-        if (s.dealPlan) {
-            const planReadyEl = document.createElement('div');
-            planReadyEl.className = 'tpfb-center-row tpfb-deal-plan-ready';
-            planReadyEl.textContent = t('da3pFrameStart.dealPlanReady');
-            gDeskInfo.appendChild(planReadyEl);
-
-            const recipientsEl = document.createElement('div');
-            recipientsEl.className = 'tpfb-center-row tpfb-deal-plan-recipients';
-            const recipientLabels = s.dealPlan.recipientsInRoundOrder.map(actorLabel).join(' \u2192 ');
-            recipientsEl.textContent = t('da3pFrameStart.recipients') + ': ' + recipientLabels;
-            gDeskInfo.appendChild(recipientsEl);
-
-            const countsEl = document.createElement('div');
-            countsEl.className = 'tpfb-center-row tpfb-deal-plan-counts';
-            countsEl.textContent =
-                t('da3pFrameStart.cardsPerPosition') + ': ' + s.dealPlan.cardsPerFramePosition +
-                '\u3000' + t('da3pFrameStart.baseCards') + ': ' + s.dealPlan.baseSize;
-            gDeskInfo.appendChild(countsEl);
-        }
-
-        const undealtEl = document.createElement('div');
-        undealtEl.className = 'tpfb-center-undealt';
-        undealtEl.textContent = t('da3pFrameStart.undealt');
-        gDeskInfo.appendChild(undealtEl);
-    }
-
-    // 4. Neutralize 4P team score area (no NS/EW team scoring in 3PDA)
-    if (gScoreCont) gScoreCont.classList.add('da3p-score-hidden');
-
-    // 5. Add Exit/Back as auxiliary board controls in the game-actions area
-    const gameActions = document.getElementById('game-actions');
-    if (gameActions) {
-        gameActions.classList.add('da3p-frame-start-actions-active');
-        const actionsDiv = document.createElement('div');
-        actionsDiv.id = 'da3p-frame-start-actions';
-        const btnBack = document.createElement('button');
-        btnBack.id = 'da3p-frame-start-back-settings';
-        btnBack.className = 'button game-btn';
-        btnBack.textContent = t('da3pShell.backToSettings');
-        btnBack.addEventListener('click', backToSettingsFromDA3PFrameStart);
-        const btnExit = document.createElement('button');
-        btnExit.id = 'da3p-frame-start-exit';
-        btnExit.className = 'button game-btn';
-        btnExit.textContent = t('da3pShell.exitShell');
-        btnExit.addEventListener('click', exitDA3PFrameStart);
-        actionsDiv.appendChild(btnBack);
-        actionsDiv.appendChild(btnExit);
-        gameActions.appendChild(actionsDiv);
-    }
-
-    // 6. Escape key: exit board
-    function onShellKeydown(e) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            exitDA3PFrameStart();
-            document.removeEventListener('keydown', onShellKeydown);
-        }
-    }
-    document.addEventListener('keydown', onShellKeydown);
-
-    // Store keydown handler on a sentinel element for cleanup
-    const sentinel = document.createElement('div');
-    sentinel.id = 'da3p-frame-start-sentinel';
-    sentinel.style.display = 'none';
-    sentinel._onKeydown = onShellKeydown;
-    document.body.appendChild(sentinel);
+function buildFourPositionDealOrder(frameContext) {
+    return frameContext.dealOrder || frameContext.frameActors || [];
 }
 
 /**
- * Exit the 3PDA frame-start board: clear state/DOM without starting any game.
- * Note 108d: board reversibility.
+ * Return the per-frame-position card count for the given frameContext (Note 111a).
+ * For both normal 4P and DA3P, the current 2-deck config gives 25 cards per position.
+ * Falls back to CARDS_PER_HAND (25) if not derivable from context.
+ * @param {Object} frameContext
+ * @returns {number}
  */
-function exitDA3PFrameStart() {
-    clearDA3PFrameStartBoard();
+function getCardsPerFramePositionForFrameContext(frameContext) {
+    // Currently config-derived global constant is the authoritative source.
+    // frameContext does not yet carry a per-position card count; use global.
+    return CARDS_PER_HAND; // 25
 }
 
 /**
- * Open settings dialog from the 3PDA start shell.
- * Shell stays underneath (settings z-index 110 > shell z-index 10).
- * Sync tableFormat=three-pda into gResolvedGameSettings so the draft reflects the shell's format.
- * Note 108d: shell reversibility — back to settings path.
+ * Return the actor kind for a given actor in a frameContext (Note 111a).
+ * Uses frameContext.actorKindByKey if present; otherwise classifies as:
+ *   - real              (actor is in realActors)
+ *   - temporary-dummy-pile (actor === dummyActor)
+ *   - unknown
+ * @param {Object} frameContext
+ * @param {number|string} actor
+ * @returns {string}
  */
-function backToSettingsFromDA3PFrameStart() {
-    // Preserve three-pda tableFormat in gResolvedGameSettings so openSettingsDialog
-    // clones it into gSettingsDraftRuleConfig correctly.
-    if (gResolvedGameSettings && gResolvedGameSettings.ruleConfig) {
-        gResolvedGameSettings.ruleConfig.tableFormat = ShengjiTableFormat.DA3P;
+function getFrameActorKind(frameContext, actor) {
+    if (frameContext.actorKindByKey) {
+        const key = frameActorKey(actor);
+        if (Object.prototype.hasOwnProperty.call(frameContext.actorKindByKey, key)) {
+            return frameContext.actorKindByKey[key];
+        }
     }
-    openSettingsDialog('create');
+    if (frameContext.dummyActor !== null && frameContext.dummyActor !== undefined &&
+            isSameFrameActor(actor, frameContext.dummyActor)) {
+        return 'temporary-dummy-pile';
+    }
+    if (Array.isArray(frameContext.realActors) &&
+            isFrameActorInList(actor, frameContext.realActors)) {
+        return 'real';
+    }
+    return 'unknown';
 }
 
 /**
- * Clear the 3PDA frame-start board state and all associated DOM.
- * Safe to call when no board is active.
+ * Build the ordered dealing event stream for a four-position frame (Note 111a).
+ *
+ * Produces a pure metadata sequence — one event per card-to-recipient pairing —
+ * in the round-robin order defined by frameContext.dealOrder.  For current 2-deck
+ * config: 25 rounds × 4 positions = 100 recipient events.
+ *
+ * Contract:
+ *   - purely functional: no mutation, no timers, no card objects;
+ *   - supports numeric normal-4P actors and string DA3P actors;
+ *   - D appears in the DA3P stream as recipientKind='temporary-dummy-pile';
+ *   - base cards are represented only as remainder metadata, not as events.
+ *
+ * @param {Object} frameContext  - four-position-frame-context
+ * @param {Object} [options]
+ * @param {number} [options.rounds]  - override deal-round count (default CARDS_PER_HAND=25)
+ * @returns {{ events: Array<Object>, recipientEventCount: number, expectedBaseCardCount: number }}
  */
+function buildSharedOrderedDealEvents(frameContext, options) {
+    const dealOrder = buildFourPositionDealOrder(frameContext);
+    const rounds    = (options && options.rounds != null)
+        ? options.rounds
+        : getCardsPerFramePositionForFrameContext(frameContext);
+
+    const events = [];
+
+    for (let dealRoundIndex = 0; dealRoundIndex < rounds; dealRoundIndex += 1) {
+        for (let withinRoundIndex = 0; withinRoundIndex < dealOrder.length; withinRoundIndex += 1) {
+            const recipientActor = dealOrder[withinRoundIndex];
+            events.push({
+                kind:                    'deal-card-event',
+                eventIndex:              events.length,
+                dealRoundIndex,
+                withinRoundIndex,
+                recipientActor,
+                recipientKey:            frameActorKey(recipientActor),
+                recipientKind:           getFrameActorKind(frameContext, recipientActor),
+                frameActorIndex:         withinRoundIndex,
+                cardOrdinalForRecipient: dealRoundIndex + 1,
+                cardGlobalOrdinal:       events.length + 1,
+            });
+        }
+    }
+
+    const recipientEventCount   = events.length;                         // 100
+    const expectedBaseCardCount = TOTAL_CARDS - recipientEventCount;     // 8
+
+    return { events, recipientEventCount, expectedBaseCardCount };
+}
+
+// ---------------------------------------------------------------------------
+// Note 111e: DA3P mini-engine deleted from production source.
+// ---------------------------------------------------------------------------
 function clearDA3PFrameStartBoard() {
-    gDA3PFrameStartState = null;
-    // Remove escape keydown listener via sentinel
+    // Legacy cleanup helper: remove stale obsolete DA3P preview DOM residue.
     const sentinel = document.getElementById('da3p-frame-start-sentinel');
     if (sentinel) {
         if (sentinel._onKeydown) document.removeEventListener('keydown', sentinel._onKeydown);
         sentinel.remove();
     }
-    // Remove container class
     const container = document.querySelector('.container');
     if (container) container.classList.remove('da3p-frame-start-active');
-    // Remove DA3P shared nameabrs from real board slots
     [gReferenceHandSurface, ...gDeskSlots].forEach(el => {
         if (el) el.querySelectorAll('.desk-namebar[data-da3p-actor]').forEach(c => c.remove());
     });
-    // Clear central info
-    if (gDeskInfo) gDeskInfo.innerHTML = '';
-    // Restore score display
     if (gScoreCont) gScoreCont.classList.remove('da3p-score-hidden');
-    // Remove auxiliary DA3P controls
     const actionsDiv = document.getElementById('da3p-frame-start-actions');
     if (actionsDiv) actionsDiv.remove();
     const gameActions = document.getElementById('game-actions');
     if (gameActions) gameActions.classList.remove('da3p-frame-start-actions-active');
-    // Safety: remove legacy Note 109 overlay element if present
     const legacyBoard = document.getElementById('three-pda-board');
     if (legacyBoard) legacyBoard.remove();
 }
@@ -5161,7 +5556,7 @@ function createDA3PReferenceActorSelector(readOnly) {
     wrapper.className = 'settings-field';
 
     let label = document.createElement('label');
-    label.textContent = t('settingsDialog.fields.selected3PDAReferenceActor');
+    label.textContent = t('settingsDialog.fields.selectedDA3PReferenceActor');
     wrapper.appendChild(label);
 
     let radioGroup = document.createElement('div');
@@ -5196,8 +5591,6 @@ function createDA3PReferenceActorSelector(readOnly) {
     wrapper.appendChild(radioGroup);
     return wrapper;
 }
-// Deprecated compat alias
-const create3PDAReferenceActorSelector = createDA3PReferenceActorSelector;
 
 function renderSeatSettingsPanel(container, readOnly) {
     if (!container) return;
@@ -6535,7 +6928,7 @@ function createPivotPassModeRadioSelector(currentValue, readOnly) {
         radio.value = opt.value;
         radio.checked = (opt.value === current);
         let isDisabled = !!readOnly;
-        // 3PDA requires rotate-pivot; disable winner-pivot under three-pda.
+        // DA3P requires rotate-pivot; disable winner-pivot under DA3P.
         if (opt.value === 'winner-pivot' &&
                 getRuleConfigFieldValue('tableFormat') === ShengjiTableFormat.DA3P) {
             isDisabled = true;
@@ -7044,33 +7437,23 @@ function confirmCreateGameFromSettings() {
         return;
     }
 
-    // 3PDA: enter DA3P frame-start board (Note 108).
-    // Does not start normal 4P gameplay.
-    if (getRuleConfigFieldValue('tableFormat') === ShengjiTableFormat.DA3P) {
-        enterDA3PFrameStart();
-        return;
-    }
-
-    let presetName = gSettingsDraftRuleConfig.presetName || 'default';
-    let overrides = cloneRuleConfig(gSettingsDraftRuleConfig);
-    delete overrides.presetName;
-
-    if (typeof shengjiResolveGameSettings === 'function') {
-        gResolvedGameSettings = shengjiResolveGameSettings({
-            presetName,
-            overrides,
-            displayOverrides: gSettingsDraftDisplaySettings,
-        });
-    } else {
-        gResolvedGameSettings = {
-            presetName,
-            ruleConfig: engineBuildConfig(presetName, overrides),
-            displaySettings: { ...gSettingsDraftDisplaySettings },
-        };
-    }
+    commitResolvedSettingsFromDraft();
 
     pendingNextFrame = null;
     closeSettingsDialog();
+
+    let tableFormat = normalizeTableFormat(
+        gResolvedGameSettings && gResolvedGameSettings.ruleConfig
+            ? gResolvedGameSettings.ruleConfig.tableFormat
+            : ShengjiTableFormat.NORMAL_4P
+    );
+
+    // Note 111f: DA3P first frame routes through shared dealing/declaration flow.
+    if (tableFormat === ShengjiTableFormat.DA3P) {
+        gameStartDA3PSharedFirstFrameFromSettings();
+        return;
+    }
+
     startNewGame();
 }
 
@@ -7162,7 +7545,7 @@ function finishRound() {
     if (isPauseDialogBlockingGameplay()) return;
     let result = engineEndRound();
     highlightActivePlayer(-1);
-    let winnerSlot = getDeskSlotFor4PActorSeat(result.winner);
+    let winnerSlot = gameGetDeskSlotForSeat(result.winner);
     if (winnerSlot) winnerSlot.setAttribute('data-winner', 'true');
     updateScoreDisplay();
 
@@ -7193,7 +7576,7 @@ function finishRound() {
         if (p !== selectedNaturalPositionIndex) updateExposedPreview(p);
     }
 
-    let winnerName = PLAYER_NAMES[result.winner];
+    let winnerName = gameGetPlayerLogNameForSeat(result.winner);
     let msg = t('log.roundResult', { round: game.currentRound - 1, playerName: winnerName, score: result.trickPoints > 0 ? t('log.trickPoints', { points: result.trickPoints }) : '' });
     appendLog(msg);
     updatePhaseDisplay(t('phase.roundWinner', { playerName: winnerName }));
@@ -7235,6 +7618,13 @@ function finishGame() {
     gBtnPlay.disabled = true;
     gBtnPlay.textContent = t('buttons.play');
     // Base-score no longer shown in right-top corner (note 25 §2.1)
+
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        // Note 113: DA3P now reaches counting-entry boundary, but scoring/inter-frame
+        // progression is deferred.
+        gameStopDA3PAtCountingEntry(result);
+        return;
+    }
 
     // Apply level update (§12)
     if (result.frameResult) {

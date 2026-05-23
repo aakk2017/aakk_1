@@ -72,6 +72,9 @@ const messages_zhCN = {
   phase: {
     dealing:      '发牌中…',
     finalDeclarationCall: '最终叫主窗口',
+    da3pStoppedBeforeBasing: 'DA3P发牌/叫主完成',
+    da3pPivotResolvedStoppedBeforeBasing: 'DA3P已定庄；埋底前暂停',
+    da3pStoppedAtCountingEntry: 'DA3P 到达计分入口并暂停',
     overcallDecision: '改叫决策',
     basing:       '定底阶段',
     selectBase:   '请选择 {n} 张底牌',
@@ -102,6 +105,11 @@ const messages_zhCN = {
     follow:       '跟{division}{leadType} ({volume}张)',
     botThinking:  '{playerName} 思考中…',
     forehandControl: '选择 {targetName} 的标记牌（仅限当前门曝光牌，可不选）',
+    da3pSharedFlowNotImplemented: 'DA3P共享局内流程尚未实现。',
+    da3pStoppedBeforeBasing: 'DA3P发牌/叫主已完成——埋底尚未实现。',
+    da3pPivotResolvedStoppedBeforeBasing: 'DA3P 已定庄；埋底前暂停。',
+    da3pStoppedAtCountingEntry: 'DA3P 已到达计分入口边界；计分与下一局推进尚未实现。',
+    da3pStoppedAtCountingEntryScore: 'DA3P 计分入口暂停（临时总分：{totalScore}）。',
     gameOver:     '对局结束',
     paused:       '对局已暂停',
   },
@@ -310,7 +318,7 @@ const messages_zhCN = {
       knockBackLevels: '勾级',
       skipLevels: '跳过',
       userNaturalPosition: '选座',
-      selected3PDAReferenceActor: '选座',
+      selectedDA3PReferenceActor: '选座',
       referenceActorOptionLabels: {
         N: '子',
         Sw: '申',
@@ -466,58 +474,5 @@ const messages_zhCN = {
     upOne:        '上一 (攻方升1级)',
     upTwo:        '上二 (攻方升2级)',
     upN:          '上{n} (攻方升{n}级)',
-  },
-  // ── 3PDA 开始外壳（Note 108）──
-  // Note 110a: 正式命名空间为 da3pShell；threePDAShell 保留为历史兼容别名
-  da3pShell: {
-    title: '三人明手设置',
-    notDealtStatus: '仅设置预览；尚未发牌。',
-    selectedSeat: '选座',
-    pivotStatus: '庄家',
-    pivotUnresolved: '未定',
-    dealAnchor: '发牌起点',
-    exitShell: '退出',
-    backToSettings: '返回设置',
-  },
-  // 历史兼容别名 — 保留供旧测试断言使用（Note 110a）
-  threePDAShell: {
-    title: '三人明手设置',
-    notDealtStatus: '仅设置预览；尚未发牌。',
-    selectedSeat: '选座',
-    pivotStatus: '庄家',
-    pivotUnresolved: '未定',
-    dealAnchor: '发牌起点',
-    exitShell: '退出',
-    backToSettings: '返回设置',
-  },
-
-  // ── 3PDA 未发牌帧起始板（Note 109）──
-  // Note 110a: 正式命名空间为 da3pFrameStart；threePDAFrameStart 保留为历史兼容别名
-  da3pFrameStart: {
-    title: '三人明手',
-    frame: '第 {n} 局',
-    qiangzhuangFrame: '抢庄局',
-    pivotUnresolved: '庄家未定',
-    dealAnchor: '发牌起点',
-    selectedSeat: '选座',
-    dealPlanReady: '发牌计划已就绪',
-    recipients: '接收方',
-    cardsPerPosition: '每位/堆',
-    baseCards: '底牌',
-    undealt: '未发牌',
-  },
-  // 历史兼容别名 — 保留供旧测试断言使用（Note 110a）
-  threePDAFrameStart: {
-    title: '三人明手',
-    frame: '第 {n} 局',
-    qiangzhuangFrame: '抢庄局',
-    pivotUnresolved: '庄家未定',
-    dealAnchor: '发牌起点',
-    selectedSeat: '选座',
-    dealPlanReady: '发牌计划已就绪',
-    recipients: '接收方',
-    cardsPerPosition: '每位/堆',
-    baseCards: '底牌',
-    undealt: '未发牌',
   },
 };

@@ -1935,43 +1935,6 @@
 }
 
 /* ���� Note 108: 3PDA start shell ������������������������������������������������������������������������������ */
-/* ── DA3P frame-start board on real 4P surface (Note 109a/109b) ──
-   Shared .desk-namebar / .game-position-area / .name-area styles apply;
-   DA3P nameabrs use data-da3p-actor attribute. No variant-specific namebar CSS needed. */
-
-.tpfb-center-title {
-    font-size: 1rem;
-    font-weight: bold;
-    margin-bottom: 0.2rem;
-}
-
-.tpfb-center-row {
-    opacity: 0.75;
-}
-
-.tpfb-center-undealt {
-    font-style: italic;
-    opacity: 0.55;
-    font-size: 0.8rem;
-    margin-top: 0.15rem;
-}
-
-/* Auxiliary board controls — hide normal game buttons, show DA3P Exit/Back */
-#game-actions.da3p-frame-start-actions-active > .game-btn {
-    display: none;
-}
-
-#da3p-frame-start-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-}
-
-/* Neutralize 4P NS/EW score display while DA3P board is active */
-.da3p-score-hidden {
-    visibility: hidden;
-}
-
 .tdss-header {
     font-size: 1.3rem;
     font-weight: bold;

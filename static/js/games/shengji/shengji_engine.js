@@ -5,6 +5,14 @@
  * Manages game state, deck, dealing, declaration, basing,
  * round play, scoring, and game flow.
  * Does NOT touch the DOM — all rendering is done by pages/game/index.js.
+ *
+ * Note 111d boundary acknowledgement:
+ * - This file is NOT yet the complete shared in-frame engine.
+ * - pages/game/index.js still contains backend-like in-frame orchestration
+ *   (dealing/declaration/basing/playing/counting flow coordination) due to
+ *   current local-browser architecture.
+ * - Physical split into dedicated game-engine/frame-engine modules is deferred
+ *   to future cleanup notes after shared DA3P routing stabilizes.
  */
 
 // ---------------------------------------------------------------------------
@@ -246,6 +254,21 @@ function create3PDAFrameOrder(pivotActor) {
 }
 
 /**
+ * Canonical DA3P frame order helper used by runtime pivot resolution (Note 112).
+ * Returns [pivot, successor, D, predecessor] for pivots N/Sw/Se.
+ * Invalid pivots return null (controlled failure) instead of silently producing
+ * a wrong order.
+ * @param {string} pivotActor
+ * @returns {string[]|null}
+ */
+function createDA3PCanonicalFrameOrderForPivot(pivotActor) {
+    if (REAL_ACTORS_3PDA.indexOf(pivotActor) < 0) {
+        return null;
+    }
+    return create3PDAFrameOrder(pivotActor);
+}
+
+/**
  * Future 3PDA display map (specification only).
  * referenceActor must be a real actor (not dummy D).
  * @param {string} pivotActor - must be one of REAL_ACTORS_3PDA
@@ -277,6 +300,7 @@ function get3PDAPivotForFrame(initialPivotActor, frameIndex) {
 // Export position-system contract helpers for test access
 window.createDisplayMapFromFrameOrder = createDisplayMapFromFrameOrder;
 window.create3PDAFrameOrder            = create3PDAFrameOrder;
+window.createDA3PCanonicalFrameOrderForPivot = createDA3PCanonicalFrameOrderForPivot;
 window.create3PDADisplayMap            = create3PDADisplayMap;
 window.get3PDAPivotForFrame            = get3PDAPivotForFrame;
 window.REAL_ACTORS_3PDA                = REAL_ACTORS_3PDA;
@@ -468,6 +492,8 @@ window.get3PDARolesForPivot        = get3PDARolesForPivot;
 let game = {
     phase:          GamePhase.IDLE,
     dealingStage:   DealingStage.NONE,  // Note 103a: substage within GamePhase.DEALING
+    playOrderSeats: null,
+    playOrderActorKeys: null,
     level:          0,       // rank index: 0→'2', 1→'3', … 12→'A'
     strain:         -1,      // -1 undetermined, 0–3 suited, 4 nts
     pivot:          UNDETERMINED_PIVOT,
@@ -550,6 +576,39 @@ let game = {
     // Per-player bank time remaining in seconds (note 24 §9)
     playerBankTimes: [0, 0, 0, 0],
 };
+
+function engineIsValidPlayOrderSeats(order) {
+    if (!Array.isArray(order) || order.length !== NUM_PLAYERS) return false;
+    if (!order.every(seat => Number.isInteger(seat) && seat >= 0 && seat < NUM_PLAYERS)) return false;
+    return (new Set(order)).size === NUM_PLAYERS;
+}
+
+function engineGetFramePlayOrderSeats() {
+    if (engineIsValidPlayOrderSeats(game.playOrderSeats)) {
+        return game.playOrderSeats;
+    }
+    return [0, 1, 2, 3];
+}
+
+function engineGetPlayerAtTurnOffset(leaderSeat, turnIndex) {
+    const order = engineGetFramePlayOrderSeats();
+    const leaderIndex = order.indexOf(leaderSeat);
+    if (leaderIndex < 0) {
+        return (leaderSeat + turnIndex) % NUM_PLAYERS;
+    }
+    const n = order.length;
+    const normalizedOffset = ((turnIndex % n) + n) % n;
+    return order[(leaderIndex + normalizedOffset) % n];
+}
+
+function engineGetPreviousPlayerInPlayOrder(playerSeat) {
+    const order = engineGetFramePlayOrderSeats();
+    const idx = order.indexOf(playerSeat);
+    if (idx < 0) {
+        return (playerSeat + NUM_PLAYERS - 1) % NUM_PLAYERS;
+    }
+    return order[(idx + order.length - 1) % order.length];
+}
 
 // ---------------------------------------------------------------------------
 // Deck creation
@@ -845,9 +904,9 @@ function engineIsLegalLead(player, cards) {
 function engineResolveFailedMultiplay(leader, leadInfo, blockedEvents) {
     // Seat priority: 4th, 2nd, 3rd (relative to leader)
     let seatPriority = [
-        (leader + 3) % NUM_PLAYERS, // 4th seat
-        (leader + 1) % NUM_PLAYERS, // 2nd seat
-        (leader + 2) % NUM_PLAYERS  // 3rd seat
+        engineGetPlayerAtTurnOffset(leader, 3), // 4th seat
+        engineGetPlayerAtTurnOffset(leader, 1), // 2nd seat
+        engineGetPlayerAtTurnOffset(leader, 2)  // 3rd seat
     ];
 
     // Find the highest-priority seat that has at least one block
@@ -964,7 +1023,7 @@ function engineBuildLeaderKnownInfo(leader, leadCards) {
 
     let followers = [];
     for (let i = 1; i < NUM_PLAYERS; i++) {
-        followers.push((leader + i) % NUM_PLAYERS);
+        followers.push(engineGetPlayerAtTurnOffset(leader, i));
     }
 
     // Track void info: if a player has shown out of a division
@@ -1249,7 +1308,7 @@ function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allB
     let handling = (game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
     let useForehandControl = handling === 'default';
     
-    let forehand = (failer + NUM_PLAYERS - 1) % NUM_PLAYERS;
+    let forehand = engineGetPreviousPlayerInPlayOrder(failer);
     if (useForehandControl) {
         if (!game.fcChances[failer]) game.fcChances[failer] = { forehand: forehand, count: 0 };
         game.fcChances[failer].count++;
@@ -1363,7 +1422,7 @@ function engineExerciseFC(failer, mode, selectedCards) {
         mode: mode,
         selectedCards: selectedCards || [],
         target: failer,
-        controller: game.fcPending ? game.fcPending.forehand : (failer + NUM_PLAYERS - 1) % NUM_PLAYERS
+        controller: game.fcPending ? game.fcPending.forehand : engineGetPreviousPlayerInPlayOrder(failer)
     };
 
     // Deactivate ForehandControlPendingTriggerState
@@ -1922,7 +1981,7 @@ function engineDetermineRoundWinner() {
     let bestIsRuff = false;
 
     for (let i = 1; i < NUM_PLAYERS; i++) {
-        let player = (leader + i) % NUM_PLAYERS;
+        let player = engineGetPlayerAtTurnOffset(leader, i);
         let cards  = game.roundPlayed[player];
         if (!cards || cards.length === 0) continue;
 
@@ -1982,20 +2041,107 @@ function engineDetermineRoundWinner() {
 // Utility
 // ---------------------------------------------------------------------------
 function engineGetCurrentPlayer() {
-    return (game.currentLeader + game.currentTurnIndex) % NUM_PLAYERS;
+    return engineGetPlayerAtTurnOffset(game.currentLeader, game.currentTurnIndex);
+}
+
+function engineIsDA3PResolvedRuntimeFrame() {
+    return !!(
+        game
+        && game.tableFormat === 'da3p'
+        && game.frameContext
+        && game.frameContext.tableFormat === 'da3p'
+        && game.frameContext.pivotStatus === 'resolved'
+    );
+}
+
+function engineGetHandSeatByFrameActorKeyMap() {
+    let map = {};
+    if (game && game.handSeatByFrameActorKey && typeof game.handSeatByFrameActorKey === 'object') {
+        Object.assign(map, game.handSeatByFrameActorKey);
+    }
+    if (game && Array.isArray(game.frameActorByHandSeat)) {
+        for (let seat = 0; seat < game.frameActorByHandSeat.length; seat++) {
+            map[frameActorKey(game.frameActorByHandSeat[seat])] = seat;
+        }
+    }
+    return map;
+}
+
+function engineArrayEqualsByFrameActorKey(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (frameActorKey(a[i]) !== frameActorKey(b[i])) return false;
+    }
+    return true;
+}
+
+function engineIsValidSeatSet(seats) {
+    if (!Array.isArray(seats) || seats.length !== 2) return false;
+    if (!seats.every(seat => Number.isInteger(seat) && seat >= 0 && seat < NUM_PLAYERS)) return false;
+    return (new Set(seats)).size === seats.length;
+}
+
+function engineBuildDA3PTeamSeatsFromFrameContext(frameContext) {
+    if (!engineIsDA3PResolvedRuntimeFrame() || !frameContext) return null;
+
+    const order = frameContext.canonicalFrameOrder;
+    if (!Array.isArray(order) || order.length !== 4) return null;
+
+    const pivotActor = frameContext.pivotActor;
+    if (!pivotActor || frameActorKey(pivotActor) === frameActorKey('D')) return null;
+
+    const expected = createDA3PCanonicalFrameOrderForPivot(pivotActor);
+    if (!Array.isArray(expected) || !engineArrayEqualsByFrameActorKey(order, expected)) return null;
+
+    const pivotActorInOrder = order[0];
+    const successorActor = order[1];
+    const dummyActor = order[2];
+    const predecessorActor = order[3];
+    if (frameActorKey(dummyActor) !== frameActorKey('D')) return null;
+
+    const seatByActorKey = engineGetHandSeatByFrameActorKeyMap();
+    const seatOf = actor => seatByActorKey[frameActorKey(actor)];
+
+    const pivotSeat = seatOf(pivotActorInOrder);
+    const successorSeat = seatOf(successorActor);
+    const dummySeat = seatOf(dummyActor);
+    const predecessorSeat = seatOf(predecessorActor);
+
+    const defendingTeam = [pivotSeat, dummySeat];
+    const attackingTeam = [successorSeat, predecessorSeat];
+    if (!engineIsValidSeatSet(defendingTeam) || !engineIsValidSeatSet(attackingTeam)) return null;
+
+    const allSeats = [...defendingTeam, ...attackingTeam];
+    if ((new Set(allSeats)).size !== NUM_PLAYERS) return null;
+
+    return { defendingTeam, attackingTeam };
 }
 
 function engineSetTeams() {
     if (!isPivotResolved(game.pivot)) {
         game.defendingTeam = [];
         game.attackingTeam = [];
-        return;
+        return false;
     }
+
+    if (engineIsDA3PResolvedRuntimeFrame()) {
+        const teams = engineBuildDA3PTeamSeatsFromFrameContext(game.frameContext);
+        if (!teams) {
+            game.defendingTeam = [];
+            game.attackingTeam = [];
+            return false;
+        }
+        game.defendingTeam = [...teams.defendingTeam];
+        game.attackingTeam = [...teams.attackingTeam];
+        return true;
+    }
+
     game.defendingTeam = [game.pivot, (game.pivot + 2) % NUM_PLAYERS];
     game.attackingTeam = [];
     for (let i = 0; i < NUM_PLAYERS; i++) {
         if (!game.defendingTeam.includes(i)) game.attackingTeam.push(i);
     }
+    return true;
 }
 
 /**
@@ -2032,6 +2178,8 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     game.declarationOrderAnchor = Number.isInteger(declarationOrderAnchor) && declarationOrderAnchor >= 0 && declarationOrderAnchor < NUM_PLAYERS
         ? declarationOrderAnchor
         : (isPivotResolved(game.pivot) ? game.pivot : 0);
+    game.playOrderSeats = null;
+    game.playOrderActorKeys = null;
     game.frameScore     = 0;
     game.currentRound   = 0;
     game.roundHistory   = [];
@@ -2155,7 +2303,10 @@ function enginePickUpBase() {
 
 function engineInitPlayingStateFromCommittedBase() {
     if (!isPivotResolved(game.pivot)) return false;
-    engineSetTeams();
+    if (Array.isArray(game.playOrderSeats) && !engineIsValidPlayOrderSeats(game.playOrderSeats)) {
+        return false;
+    }
+    if (!engineSetTeams()) return false;
     game.currentLeader    = game.pivot;
     game.currentRound     = 1;
     game.currentTurnIndex = 0;
