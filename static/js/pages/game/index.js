@@ -938,6 +938,7 @@ let gTimerOverlayEl  = null;   // desk-slot timer overlay
 let gTimerCenterEl   = null;   // center-area timer
 let gShotClockEl     = null;   // shot clock digit element
 let gBankTimeEl      = null;   // bank time digit element
+let gDeskSlotSubmitHostEl = null;
 
 // "No declaration" tracking: which players have clicked "不亮" in current window
 let gNoDeclareClicked = new Set();
@@ -1447,9 +1448,13 @@ function gameSetSideDummyFCSelectionBackgroundVisual(cardContainer, selected) {
     if (existing) existing.remove();
 }
 
-function gameCreateDummyFCActionsRow() {
+function gameCreateDummyFCActionsRow(dummySeat) {
     let host = document.createElement('div');
     host.className = 'da3p-side-dummy-fc-actions-host';
+    host.setAttribute('data-da3p-side-dummy-local-fc-actions', 'true');
+    if (Number.isInteger(dummySeat)) {
+        host.setAttribute('data-da3p-fc-target-seat', String(dummySeat));
+    }
     host.addEventListener('click', (e) => {
         e.stopPropagation();
     });
@@ -1738,6 +1743,7 @@ function updatePlayButton() {
     if (gFCInteraction) {
         gBtnPlay.disabled = gameIsUnfoldedSideDummyFCLocalMode();
         gBtnPlay.textContent = t('buttons.confirmMarks');
+        gameRefreshDeskSlotSubmitHost();
         return;
     }
     let crossingMode = getLocalCrossingActionMode();
@@ -1745,17 +1751,20 @@ function updatePlayButton() {
         let actionSeat = (gCrossingState && gCrossingState.localAction) ? gCrossingState.localAction.seat : localControlledPlayerIndex;
         gBtnPlay.disabled = !isValidCrossingSelection(actionSeat, getSelectedCards(actionSeat), true);
         gBtnPlay.textContent = t('buttons.toCross');
+        gameRefreshDeskSlotSubmitHost();
         return;
     }
     if (crossingMode === 'crossback') {
         let actionSeat = (gCrossingState && gCrossingState.localAction) ? gCrossingState.localAction.seat : localControlledPlayerIndex;
         gBtnPlay.disabled = !isValidCrossingSelection(actionSeat, getSelectedCards(actionSeat), false);
         gBtnPlay.textContent = t('buttons.toCrossBack');
+        gameRefreshDeskSlotSubmitHost();
         return;
     }
     if (gCrossingState && gCrossingState.trickPlayBlocked) {
         gBtnPlay.disabled = true;
         gBtnPlay.textContent = t('buttons.play');
+        gameRefreshDeskSlotSubmitHost();
         return;
     }
     if (game.phase === GamePhase.BASING) {
@@ -1768,6 +1777,159 @@ function updatePlayButton() {
         gBtnPlay.disabled = true;
         gBtnPlay.textContent = t('buttons.play');
     }
+    gameRefreshDeskSlotSubmitHost();
+}
+
+function gameIsSubmitUiBlockedByOverlay() {
+    if (isPauseDialogBlockingGameplay()) return true;
+    if (gSettingsOverlay && gSettingsOverlay.style.display !== 'none') return true;
+    if (gCountingOverlay && gCountingOverlay.style.display !== 'none') return true;
+    return false;
+}
+
+function gameGetCurrentLocalSubmitAction() {
+    if (!game || !gBtnPlay) return null;
+    if (gFCInteraction) return null;
+    if (gameIsSubmitUiBlockedByOverlay()) return null;
+
+    let crossingMode = getLocalCrossingActionMode();
+    if (crossingMode === 'cross' || crossingMode === 'crossback') {
+        let localAction = gCrossingState && gCrossingState.localAction;
+        if (!localAction) return null;
+        if (!Number.isInteger(localAction.seat)) return null;
+        if (!gameCanLocallyControlActingSeat(localAction.seat, crossingMode)) return null;
+        let requireAllTrumps = crossingMode === 'cross';
+        let enabled = isValidCrossingSelection(localAction.seat, getSelectedCards(localAction.seat), requireAllTrumps);
+        return {
+            kind: requireAllTrumps ? 'cross' : 'cross-back',
+            actingSeat: localAction.seat,
+            displayPosition: gameGetDisplayPositionForHandSeat(localAction.seat),
+            label: t(requireAllTrumps ? 'buttons.toCross' : 'buttons.toCrossBack'),
+            enabled,
+            submit: () => {
+                if (gameIsSubmitUiBlockedByOverlay()) return;
+                trySubmitLocalCrossingSelection();
+            },
+            source: 'crossing-local-action',
+        };
+    }
+
+    if (game.phase === GamePhase.BASING) {
+        let baser = getActiveBaserPlayer();
+        if (!Number.isInteger(baser)) return null;
+        if (!gameCanLocallyControlActingSeat(baser, 'set-base')) return null;
+        return {
+            kind: 'set-base',
+            actingSeat: baser,
+            displayPosition: gameGetDisplayPositionForHandSeat(baser),
+            label: t('buttons.baseProgress', { current: selectedCardIds.size, total: BASE_SIZE }),
+            enabled: selectedCardIds.size === BASE_SIZE,
+            submit: () => {
+                if (gameIsSubmitUiBlockedByOverlay()) return;
+                humanPlayCards();
+            },
+            source: 'basing-active-baser',
+        };
+    }
+
+    if (game.phase === GamePhase.PLAYING) {
+        let actingSeat = engineGetCurrentPlayer();
+        if (!Number.isInteger(actingSeat)) return null;
+        if (!gameCanLocallyControlActingSeat(actingSeat, 'trick-play')) return null;
+        if (gCrossingState && gCrossingState.trickPlayBlocked) return null;
+        return {
+            kind: 'play',
+            actingSeat,
+            displayPosition: gameGetDisplayPositionForHandSeat(actingSeat),
+            label: t('buttons.play'),
+            enabled: selectedCardIds.size > 0,
+            submit: () => {
+                if (gameIsSubmitUiBlockedByOverlay()) return;
+                humanPlayCards();
+            },
+            source: 'playing-current-actor',
+        };
+    }
+
+    return null;
+}
+
+function gameClearDeskSlotSubmitHost() {
+    if (gDeskSlotSubmitHostEl && gDeskSlotSubmitHostEl.parentNode) {
+        gDeskSlotSubmitHostEl.parentNode.removeChild(gDeskSlotSubmitHostEl);
+    }
+    gDeskSlotSubmitHostEl = null;
+}
+
+function gameEnsureDeskSlotSubmitHost(displayPosition) {
+    let slot = getDeskSlotForDisplayPosition(displayPosition);
+    if (!slot) return null;
+
+    if (gDeskSlotSubmitHostEl && gDeskSlotSubmitHostEl.parentNode !== slot) {
+        gameClearDeskSlotSubmitHost();
+    }
+
+    if (!gDeskSlotSubmitHostEl) {
+        let host = document.createElement('div');
+        host.className = 'desk-slot-submit-host';
+        host.setAttribute('data-local-submit-host', 'true');
+
+        let btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'button game-btn desk-slot-submit-button';
+        btn.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            let action = gameGetCurrentLocalSubmitAction();
+            if (!action || !action.enabled || typeof action.submit !== 'function') return;
+            gameClearDeskSlotSubmitHost();
+            action.submit();
+        });
+
+        host.appendChild(btn);
+        gDeskSlotSubmitHostEl = host;
+    }
+
+    if (gDeskSlotSubmitHostEl.parentNode !== slot) {
+        slot.appendChild(gDeskSlotSubmitHostEl);
+    }
+
+    return gDeskSlotSubmitHostEl;
+}
+
+function gameSyncLegacyGlobalSubmitButton(action) {
+    if (!gBtnPlay) return;
+    if (action) {
+        gBtnPlay.style.display = 'none';
+        gBtnPlay.setAttribute('data-desk-slot-submit-legacy', 'true');
+    } else {
+        gBtnPlay.style.display = '';
+        gBtnPlay.removeAttribute('data-desk-slot-submit-legacy');
+    }
+}
+
+function gameRefreshDeskSlotSubmitHost() {
+    let action = gameGetCurrentLocalSubmitAction();
+    gameSyncLegacyGlobalSubmitButton(action);
+    if (!action || !action.displayPosition) {
+        gameClearDeskSlotSubmitHost();
+        return;
+    }
+
+    let host = gameEnsureDeskSlotSubmitHost(action.displayPosition);
+    if (!host) {
+        gameClearDeskSlotSubmitHost();
+        return;
+    }
+
+    host.setAttribute('data-submit-kind', action.kind);
+    host.setAttribute('data-acting-seat', String(action.actingSeat));
+    host.setAttribute('data-display-position', action.displayPosition);
+
+    let btn = host.querySelector('.desk-slot-submit-button');
+    if (!btn) return;
+    btn.textContent = action.label;
+    btn.disabled = !action.enabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -2043,7 +2205,7 @@ function gameGetSideDummyFoldToggleText(folded) {
     return folded ? t('players.dummyClickToUnfold') : t('players.dummyClickToFold');
 }
 
-function gameBindSideDummyFoldToggleTarget(namebar, preferredTarget) {
+function gameClearSideDummyFoldToggleTarget(namebar) {
     if (!namebar) return;
 
     namebar.removeAttribute('data-da3p-side-dummy-toggle');
@@ -2057,10 +2219,12 @@ function gameBindSideDummyFoldToggleTarget(namebar, preferredTarget) {
         node.style.cursor = '';
     }
 
-    let toggleTarget = preferredTarget
-        || namebar.querySelector('.name-area')
-        || namebar.querySelector('.game-position-area');
-    if (!toggleTarget) return;
+    return;
+}
+
+function gameBindSideDummyFoldToggleTarget(namebar, toggleTarget) {
+    gameClearSideDummyFoldToggleTarget(namebar);
+    if (!namebar || !toggleTarget) return false;
 
     namebar.setAttribute('data-da3p-side-dummy-toggle', 'true');
     toggleTarget.setAttribute('data-da3p-side-dummy-fold-toggle', 'true');
@@ -2070,6 +2234,7 @@ function gameBindSideDummyFoldToggleTarget(namebar, preferredTarget) {
         e.stopPropagation();
         gameToggleSideDummyFolded();
     };
+    return true;
 }
 
 function applyDA3PSideDummyDeskVisibility(displayPosition, folded, revealed) {
@@ -2100,7 +2265,7 @@ function setSideDummyDeskNamebarLabel(displayPosition, folded, revealed) {
     if (revealed) {
         gameBindSideDummyFoldToggleTarget(namebar, nameArea);
     } else {
-        gameBindSideDummyFoldToggleTarget(namebar, null);
+        gameClearSideDummyFoldToggleTarget(namebar);
     }
 }
 
@@ -2305,6 +2470,33 @@ function renderSideDummyHandSurface(surface, dummySeat, displayPosition, folded)
         fcMarkedIds = new Set(game.forehandControl.selectedCards.map(c => c.cardId));
     }
     let rows = gameBuildSideDummyHandRows(sorted);
+
+    let namebarShell = document.createElement('div');
+    namebarShell.className = 'da3p-side-dummy-namebar-shell';
+    namebarShell.setAttribute('data-da3p-side-dummy-namebar-shell', 'true');
+
+    let namebar = document.createElement('div');
+    namebar.className = 'namebar';
+    namebar.setAttribute('show', 'show');
+    namebar.setAttribute('status', 'idle');
+
+    let posArea = document.createElement('div');
+    posArea.className = 'game-position-area';
+    posArea.textContent = gameGetFrameActorLabel('D', { compact: true });
+    namebar.appendChild(posArea);
+
+    let nameArea = document.createElement('div');
+    nameArea.className = 'name-area';
+    nameArea.textContent = gameGetSideDummyFoldToggleText(!!folded);
+    namebar.appendChild(nameArea);
+    gameBindSideDummyFoldToggleTarget(namebar, nameArea);
+
+    namebarShell.appendChild(namebar);
+    if (fcSelectActive) {
+        namebarShell.appendChild(gameCreateDummyFCActionsRow(dummySeat));
+    }
+    surface.appendChild(namebarShell);
+
     let rowsByGroup = {};
     for (let rowModel of rows) {
         let group = rowModel.sortGroup;
@@ -2354,26 +2546,6 @@ function renderSideDummyHandSurface(surface, dummySeat, displayPosition, folded)
         }
     }
 
-    let namebar = document.createElement('div');
-    namebar.className = 'namebar';
-    namebar.setAttribute('show', 'show');
-    namebar.setAttribute('status', 'idle');
-
-    let posArea = document.createElement('div');
-    posArea.className = 'game-position-area';
-    posArea.textContent = gameGetFrameActorLabel('D', { compact: true });
-    namebar.appendChild(posArea);
-
-    let nameArea = document.createElement('div');
-    nameArea.className = 'name-area';
-    nameArea.textContent = gameGetSideDummyFoldToggleText(!!folded);
-    namebar.appendChild(nameArea);
-    gameBindSideDummyFoldToggleTarget(namebar, nameArea);
-
-    surface.appendChild(namebar);
-    if (fcSelectActive) {
-        surface.appendChild(gameCreateDummyFCActionsRow());
-    }
 }
 
 function renderSideDummyHand() {
@@ -3123,6 +3295,7 @@ function removeTimerOverlay() {
     gTimerOverlayEl = null;
     gShotClockEl = null;
     gBankTimeEl = null;
+    gameClearDeskSlotSubmitHost();
 }
 
 /**
@@ -3190,6 +3363,7 @@ function showTimerOverlay(player) {
 
     slot.appendChild(overlay);
     gTimerOverlayEl = overlay;
+    gameRefreshDeskSlotSubmitHost();
 }
 
 /**
@@ -9330,7 +9504,16 @@ let pendingNextFrame = null;
 // ---------------------------------------------------------------------------
 
 gBtnNewGame.addEventListener('click', onNewGameButtonClick);
-gBtnPlay.addEventListener('click', humanPlayCards);
+gBtnPlay.addEventListener('click', function (e) {
+    let action = gameGetCurrentLocalSubmitAction();
+    if (action && action.enabled && typeof action.submit === 'function') {
+        e.preventDefault();
+        gameClearDeskSlotSubmitHost();
+        action.submit();
+        return;
+    }
+    humanPlayCards();
+});
 if (gBtnPause) {
     gBtnPause.addEventListener('click', () => requestPause(localControlledPlayerIndex));
 }
@@ -9391,9 +9574,49 @@ if (gBtnGotoRecap) {
     });
 }
 
+function gameShouldIgnoreSubmitKeydownTarget(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    return !!target.closest('input, textarea, select, button, [contenteditable="true"], #settings-dialog, #pause-dialog, #counting-dialog');
+}
+
+function gameShouldIgnoreSubmitDblClickTarget(target) {
+    if (!target || typeof target.closest !== 'function') return true;
+    if (target.closest('.card, .card-container, button, input, select, textarea, [contenteditable="true"]')) return true;
+    if (target.closest('#settings-overlay, #settings-dialog, #pause-overlay, #pause-dialog, #counting-overlay, #counting-dialog')) return true;
+    if (target.closest('#declare-matrix')) return true;
+    if (target.closest('.fc-active, .fc-btn-row, .da3p-side-dummy-fc-actions-host, [data-da3p-side-dummy-local-fc-actions="true"], #fc-mode-selector')) return true;
+    return false;
+}
+
+function gameHandleDeskSlotSubmitDoubleClick(event) {
+    if (gameShouldIgnoreSubmitDblClickTarget(event.target)) return;
+
+    let action = gameGetCurrentLocalSubmitAction();
+    if (!action || !action.enabled || typeof action.submit !== 'function') return;
+
+    let slot = event.target.closest('.desk-slot[data-display-position]');
+    if (!slot) return;
+
+    let slotDisplayPosition = slot.getAttribute('data-display-position');
+    if (!slotDisplayPosition || slotDisplayPosition !== action.displayPosition) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    gameClearDeskSlotSubmitHost();
+    action.submit();
+}
+
 // Keyboard shortcuts
 window.addEventListener('keydown', function (e) {
+    if (gameShouldIgnoreSubmitKeydownTarget(e.target)) return;
     if (e.code === 'Enter' || e.code === 'Space') {
+        let action = gameGetCurrentLocalSubmitAction();
+        if (action && action.enabled && typeof action.submit === 'function') {
+            e.preventDefault();
+            gameClearDeskSlotSubmitHost();
+            action.submit();
+            return;
+        }
         if (!gBtnPlay.disabled) {
             e.preventDefault();
             humanPlayCards();
@@ -9401,14 +9624,7 @@ window.addEventListener('keydown', function (e) {
     }
 });
 
-// Double click out of cards -> play
-window.addEventListener('dblclick', function(e) {
-    if (e.target.closest('.card, .card-container, button')) return;
-    if (game && game.phase === GamePhase.PLAYING && isLocallyControlledSeat(engineGetCurrentPlayer()) && !gBtnPlay.disabled) {
-        e.preventDefault();
-        humanPlayCards();
-    }
-});
+window.addEventListener('dblclick', gameHandleDeskSlotSubmitDoubleClick);
 
 // ---------------------------------------------------------------------------
 // Initial state
