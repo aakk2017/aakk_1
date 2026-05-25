@@ -135,6 +135,7 @@ const messages_zhCN = {
     baseDone:       '{playerName} 埋好底牌',
     humanBaseDone:  '你埋好了底牌',
     botError:       'Bot 错误: {error}',
+    fakeMultiplayWarning: '{playerName} 假甩提示 — 原因: {cause}，证据: {evidence}，阻止者: {blockerName}',
     multiplayFailed: '{playerName} 甩牌失败 — {allBlockerNames} 有更大的牌，{blockerName} 为实际阻止者，改出{actualVolume}张',
     forehandControlActivated: '{controllerName} 获得对 {targetName} 的一次上控门跟机会',
     forehandControlBotExercised: '{controllerName} (bot) 行使上控门跟: 必跟(无标记)',
@@ -195,6 +196,12 @@ const messages_zhCN = {
     north: '北 (Bot)',
     west:  '西 (Bot)',
     youShort: '你',
+    dummyShort: '明手',
+    dummy: '明手',
+    dummyClickToFold: '明手（点击收起）',
+    dummyClickToUnfold: '明手（点击展开）',
+    dummyFoldHint: '明手（点击收起）',
+    dummyUnfoldHint: '明手（点击展开）',
     botShort: 'Bot',
   },
 
@@ -447,6 +454,8 @@ const messages_zhCN = {
   hints: {
     attackersStreak: '连攻: {streak}',
     multiplayFailedShort: '甩牌失败',
+    fakeMultiplayWarningGeneric: '假甩提示：公开信息显示该甩牌可被压过。',
+    fakeMultiplayWarningPublicDummy: '假甩提示：明手公开牌中有可压过的牌型。',
   },
 
   // ── Counting dialog ──
@@ -454,6 +463,8 @@ const messages_zhCN = {
     baseLabel:       '底牌',
     scoreLabel:      '得分明细',
     deskScore:       '桌面分',
+    deskScoreSuccessor: '右家',
+    deskScorePredecessor: '左家',
     baseScore:       '底分',
     endingCompensation: '终盘补分',
     multiplayCompensation: '甩牌补分',

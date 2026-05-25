@@ -135,6 +135,7 @@ const messages_en = {
     baseDone:       '{playerName} set the base',
     humanBaseDone:  'You set the base',
     botError:       'Bot error: {error}',
+    fakeMultiplayWarning: '{playerName} fake multiplay warning — cause: {cause}, evidence: {evidence}, blocker: {blockerName}',
     multiplayFailed: '{playerName} multiplay failed — blocked by {allBlockerNames} (actual blocker: {blockerName}); forced to lead {actualVolume} card(s)',
     forehandControlActivated: '{controllerName} gains one forehand control on {targetName}',
     forehandControlBotExercised: '{controllerName} (bot) exercises forehand control: must-play (no marks)',
@@ -195,6 +196,12 @@ const messages_en = {
     north: 'North (Bot)',
     west:  'West (Bot)',
     youShort: 'You',
+    dummyShort: 'Dummy',
+    dummy: 'dummy',
+    dummyClickToFold: 'dummy (click to fold)',
+    dummyClickToUnfold: 'dummy (click to unfold)',
+    dummyFoldHint: 'dummy (click to fold)',
+    dummyUnfoldHint: 'dummy (click to unfold)',
     botShort: 'Bot',
   },
 
@@ -393,6 +400,8 @@ const messages_en = {
   hints: {
     attackersStreak: 'Atk. streak: {streak}',
     multiplayFailedShort: 'Multiplay failed',
+    fakeMultiplayWarningGeneric: 'Fake multiplay warning: public information shows this multiplay can be blocked.',
+    fakeMultiplayWarningPublicDummy: 'Fake multiplay warning: revealed dummy hand contains a blocking element.',
   },
 
   // ── Counting dialog ──
@@ -400,6 +409,8 @@ const messages_en = {
     baseLabel:       'Base',
     scoreLabel:      'Score Breakdown',
     deskScore:       'Desk Score',
+    deskScoreSuccessor: 'Right attacker',
+    deskScorePredecessor: 'Left attacker',
     baseScore:       'Base Score',
     endingCompensation: 'Ending Compensation',
     multiplayCompensation: 'Multiplay Compensation',

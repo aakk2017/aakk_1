@@ -196,6 +196,10 @@
 .corner-card[data-fc="must-hold"] { background-color: #525; color: #d66; }
 /* FC selection highlight during exercise */
 .corner-card[data-fc-selected] { background-color: #fff3b0; outline: 2px solid #f0c040; }
+.card-container[data-fc-selected="true"] .card {
+    background-color: #fff3b0;
+    box-shadow: 0 0 0.35vh 0.2vh #f0c040;
+}
 
 /* Exposed-card highlight in own hand view */
 .card-container[data-exposed="true"] .card {
@@ -218,6 +222,10 @@
 .fc-marker-must-play::after {
     content: '\25B2'; /* cyan upward triangle ▲ */
     color: #00bcd4;
+}
+.fc-marker-selected::after {
+    content: '\2713'; /* green check mark ✓ */
+    color: #1ea449;
 }
 
 .card-rank,

@@ -541,6 +541,17 @@ let game = {
     // { [failer]: { [division]: Card[] } }
     exposedCards: {},
 
+    // Public hand information for legality reasoning (note 116b).
+    // Keys are hand seats, never display positions.
+    publicHandInfo: {
+        publicHandSeatKeys: [],
+        reasonBySeatKey: {}
+    },
+
+    // DA3P attacker desk-score split (note 117).
+    // Actor-keyed and desk-score-only; never replaces frameScore.
+    da3pAttackerDeskScore: null,
+
     // ForehandControlChanceState — stored FC chances per failer
     // { [failer]: { forehand: int, count: int } }
     fcChances: {},
@@ -868,6 +879,8 @@ function engineIsLegalLead(player, cards) {
         return { valid: true };
     }
 
+    let fakeMultiplay = engineDetectFakeMultiplay(player, cards);
+
     // Multiplay: detect blocked elements per Section 9
     // Each element is checked independently against each follower's hand
     let blockedEvents = []; // { element, blockerSeat }
@@ -882,12 +895,16 @@ function engineIsLegalLead(player, cards) {
 
     if (blockedEvents.length === 0) {
         // Multiplay survives — all elements pass
-        return { valid: true };
+        return { valid: true, fakeMultiplay: fakeMultiplay && fakeMultiplay.isFakeMultiplay ? fakeMultiplay : null };
     }
 
     // Failed multiplay: resolve actual blocker and actual led element
     let resolution = engineResolveFailedMultiplay(player, leadInfo, blockedEvents);
-    return { valid: true, failedMultiplay: resolution };
+    return {
+        valid: true,
+        failedMultiplay: resolution,
+        fakeMultiplay: fakeMultiplay && fakeMultiplay.isFakeMultiplay ? fakeMultiplay : null
+    };
 }
 
 /**
@@ -981,7 +998,14 @@ function engineResolveFailedMultiplay(leader, leadInfo, blockedEvents) {
 function engineDetectFakeMultiplay(leader, leadCards) {
     let resolvedLead = engineResolveLead(leadCards);
     if (!resolvedLead || resolvedLead.elements.length <= 1) {
-        return { isMultiplay: false, isFakeMultiplay: false, fakeCause: null };
+        return {
+            isMultiplay: false,
+            isFakeMultiplay: false,
+            fakeCause: null,
+            evidenceSource: null,
+            blockerSeat: null,
+            blockedElement: null
+        };
     }
 
     let singlePart = resolvedLead.elements.filter(e => e.copy === 1);
@@ -992,8 +1016,16 @@ function engineDetectFakeMultiplay(leader, leadCards) {
 
     // Single-part check
     if (singlePart.length > 0) {
-        if (engineSinglePartIsFake(info, singlePart)) {
-            return { isMultiplay: true, isFakeMultiplay: true, fakeCause: 'single-part' };
+        let singleDiag = engineSinglePartIsFake(info, singlePart);
+        if (singleDiag.isFake) {
+            return {
+                isMultiplay: true,
+                isFakeMultiplay: true,
+                fakeCause: 'single-part',
+                evidenceSource: singleDiag.evidenceSource || 'existing-known-single',
+                blockerSeat: Number.isInteger(singleDiag.blockerSeat) ? singleDiag.blockerSeat : null,
+                blockedElement: singleDiag.blockedElement || null
+            };
         }
     }
 
@@ -1001,13 +1033,33 @@ function engineDetectFakeMultiplay(leader, leadCards) {
     if (structuredPart.length > 0) {
         let compressed = engineCompressStructuredPartByType(structuredPart);
         for (let element of compressed) {
-            if (engineStructuredElementIsSurelyBlocked(info, element)) {
-                return { isMultiplay: true, isFakeMultiplay: true, fakeCause: 'structured-part' };
+            let structuredDiag = engineStructuredElementIsSurelyBlocked(info, element);
+            if (structuredDiag.isFake) {
+                return {
+                    isMultiplay: true,
+                    isFakeMultiplay: true,
+                    fakeCause: 'structured-part',
+                    evidenceSource: structuredDiag.evidenceSource || 'existing-known-structured',
+                    blockerSeat: Number.isInteger(structuredDiag.blockerSeat) ? structuredDiag.blockerSeat : null,
+                    blockedElement: structuredDiag.blockedElement || {
+                        copy: element.copy,
+                        span: element.span,
+                        division: element.division,
+                        order: element.order
+                    }
+                };
             }
         }
     }
 
-    return { isMultiplay: true, isFakeMultiplay: false, fakeCause: null };
+    return {
+        isMultiplay: true,
+        isFakeMultiplay: false,
+        fakeCause: null,
+        evidenceSource: null,
+        blockerSeat: null,
+        blockedElement: null
+    };
 }
 
 /**
@@ -1040,6 +1092,26 @@ function engineBuildLeaderKnownInfo(leader, leadCards) {
         }
     }
 
+    let publicKnownHandCardsBySeat = engineGetPublicKnownHandCardsBySeat();
+    let publicKnownCards = [];
+    let publicVoidInfo = {};
+    let publicHandSeats = new Set();
+    for (let seatKey in publicKnownHandCardsBySeat) {
+        let seat = Number(seatKey);
+        if (!Number.isInteger(seat)) continue;
+        publicHandSeats.add(seat);
+        let cards = Array.isArray(publicKnownHandCardsBySeat[seat]) ? publicKnownHandCardsBySeat[seat] : [];
+        publicKnownCards.push(...cards);
+        if (!publicVoidInfo[seat]) publicVoidInfo[seat] = {};
+        let hasDivision = new Set(cards.map(c => c.division));
+        for (let div = 0; div <= 4; div++) {
+            if (!hasDivision.has(div)) {
+                publicVoidInfo[seat][div] = true;
+                voidInfo[seat][div] = true;
+            }
+        }
+    }
+
     return {
         leader: leader,
         leaderHandCards: game.hands[leader],
@@ -1049,8 +1121,30 @@ function engineBuildLeaderKnownInfo(leader, leadCards) {
         followers: followers,
         currentHandCounts: game.hands.map(h => h.length),
         voidInfo: voidInfo,
-        fullDeck: game.deck
+        fullDeck: game.deck,
+        publicKnownHandCardsBySeat,
+        publicKnownCards,
+        publicVoidInfo,
+        publicHandSeats
     };
+}
+
+function engineCollectKnownCardsForFakeMultiplay(info) {
+    let byId = new Map();
+    let addCards = (cards) => {
+        for (let c of (cards || [])) {
+            if (!c || !Number.isInteger(c.cardId)) continue;
+            if (!byId.has(c.cardId)) byId.set(c.cardId, c);
+        }
+    };
+
+    addCards(info.leaderHandCards);
+    addCards(info.intendedLeadCards);
+    addCards(info.playedCards);
+    addCards(info.knownBaseCards);
+    addCards(info.publicKnownCards);
+
+    return [...byId.values()];
 }
 
 /**
@@ -1081,10 +1175,7 @@ function engineBuildUnknownValueCounts(info, division) {
         }
     };
 
-    addSeen(info.leaderHandCards);
-    addSeen(info.intendedLeadCards);
-    addSeen(info.playedCards);
-    addSeen(info.knownBaseCards);
+    addSeen(engineCollectKnownCardsForFakeMultiplay(info));
 
     let result = new Map();
     for (let [key, total] of totalCounts) {
@@ -1102,6 +1193,26 @@ function engineBuildUnknownValueCounts(info, division) {
 function engineSinglePartIsFake(info, singlePart) {
     let division = singlePart[0].division;
     let minSingleOrder = Math.min(...singlePart.map(e => e.order));
+
+    for (let follower of info.followers) {
+        if (follower === info.leader) continue;
+        let publicCards = info.publicKnownHandCardsBySeat[follower] || [];
+        let blocker = publicCards.find(c => c.division === division && c.order > minSingleOrder);
+        if (blocker) {
+            return {
+                isFake: true,
+                evidenceSource: 'public-dummy-single-blocker',
+                blockerSeat: follower,
+                blockedElement: {
+                    copy: 1,
+                    span: 1,
+                    division,
+                    order: minSingleOrder
+                }
+            };
+        }
+    }
+
     let unknownCounts = engineBuildUnknownValueCounts(info, division);
 
     let unknownBaseCapacity = (info.leader === game.pivot)
@@ -1123,10 +1234,22 @@ function engineSinglePartIsFake(info, singlePart) {
 
         // If this value is only possible in follower hands (can't be in base)
         // and it has more copies than base can absorb, it's fake
-        if (totalRelevantUnknown > unknownBaseCapacity) return true;
+        if (totalRelevantUnknown > unknownBaseCapacity) {
+            return {
+                isFake: true,
+                evidenceSource: 'existing-known-single',
+                blockerSeat: null,
+                blockedElement: {
+                    copy: 1,
+                    span: 1,
+                    division,
+                    order: minSingleOrder
+                }
+            };
+        }
     }
 
-    return false;
+    return { isFake: false };
 }
 
 /**
@@ -1155,37 +1278,57 @@ function engineCompressStructuredPartByType(structuredPart) {
  */
 function engineStructuredElementIsSurelyBlocked(info, ledElement) {
     let division = ledElement.division;
+
+    // Direct known blocker from a public hand (including revealed dummy).
+    for (let follower of info.followers) {
+        if (follower === info.leader) continue;
+        let publicCards = (info.publicKnownHandCardsBySeat[follower] || []).filter(c => c.division === division);
+        if (publicCards.length === 0) continue;
+        let candidates = engineFindPotentialElements(publicCards, ledElement.copy, ledElement.span);
+        if (candidates.some(el => el.order > ledElement.order)) {
+            return {
+                isFake: true,
+                evidenceSource: 'public-dummy-structured-blocker',
+                blockerSeat: follower,
+                blockedElement: {
+                    copy: ledElement.copy,
+                    span: ledElement.span,
+                    division: ledElement.division,
+                    order: ledElement.order
+                }
+            };
+        }
+    }
+
+    let forced = engineFindForcedSameFollowerStructuredBlocker(info, ledElement);
+    if (forced.isFake) return forced;
+
+    return { isFake: false };
+}
+
+function engineFindForcedSameFollowerStructuredBlocker(info, ledElement) {
+    if (!ledElement || ledElement.copy < 2) return { isFake: false };
+
+    let division = ledElement.division;
     let unknownCounts = engineBuildUnknownValueCounts(info, division);
+    let byOrder = new Map();
 
-    // Check if every possible distribution of unknown cards forces at least one
-    // follower to hold a blocking element. For simplified approach:
-    // if total unknown copies at higher orders can form a blocker,
-    // and there aren't enough non-follower slots to absorb them all, it's fake.
+    for (let [key, count] of unknownCounts) {
+        let parts = key.split('|');
+        let suit = parseInt(parts[0]);
+        let rank = parseInt(parts[1]);
+        let sample = info.fullDeck.find(c => c.suit === suit && c.rank === rank && c.division === division);
+        if (!sample || sample.order <= ledElement.order || count < ledElement.copy) continue;
+        if (!byOrder.has(sample.order)) byOrder.set(sample.order, []);
+        byOrder.get(sample.order).push({ key, count, suit, rank, order: sample.order });
+    }
 
+    let higherOrders = [...byOrder.keys()].sort((a, b) => a - b);
     let unknownBaseCapacity = (info.leader === game.pivot)
         ? 0
         : game.base.length - info.knownBaseCards.length;
 
-    // Group unknown values by order
-    let byOrder = new Map();
-    for (let [key, count] of unknownCounts) {
-        let parts = key.split('|');
-        let suit = parseInt(parts[0]), rank = parseInt(parts[1]);
-        let sample = info.fullDeck.find(c => c.suit === suit && c.rank === rank && c.division === division);
-        if (!sample || sample.order <= ledElement.order) continue;
-        let o = sample.order;
-        if (!byOrder.has(o)) byOrder.set(o, []);
-        byOrder.get(o).push({ key, count });
-    }
-
-    // For a (copy, span) blocker, we need `span` consecutive orders
-    // each with >= `copy` copies of some value.
-    // Check if there exists a window of `span` consecutive higher orders
-    // where the total copies forced into follower hands can form such a blocker.
-    let higherOrders = [...byOrder.keys()].sort((a, b) => a - b);
-
     for (let startIdx = 0; startIdx <= higherOrders.length - ledElement.span; startIdx++) {
-        // Check if higherOrders[startIdx..startIdx+span-1] are consecutive
         let consecutive = true;
         for (let j = 1; j < ledElement.span; j++) {
             if (higherOrders[startIdx + j] !== higherOrders[startIdx] + j) {
@@ -1195,31 +1338,73 @@ function engineStructuredElementIsSurelyBlocked(info, ledElement) {
         }
         if (!consecutive) continue;
 
-        // Check if each order in the window has a value with enough copies
-        // that can't all be hidden in the base
-        let windowBlocks = true;
+        let forcedSeatIntersection = null;
+        let usedPublicVoid = false;
+        let windowValid = true;
+
         for (let j = 0; j < ledElement.span; j++) {
-            let o = higherOrders[startIdx + j];
-            let values = byOrder.get(o);
-            let anyValueForced = false;
-            for (let v of values) {
-                // If more copies than base can absorb, at least some go to followers
-                if (v.count > unknownBaseCapacity) {
-                    // At least (count - baseCapacity) copies forced into followers
-                    let forced = v.count - unknownBaseCapacity;
-                    if (forced >= ledElement.copy) {
-                        anyValueForced = true;
-                        break;
+            let order = higherOrders[startIdx + j];
+            let entries = byOrder.get(order) || [];
+            let forcedSeatsForOrder = new Set();
+
+            for (let entry of entries) {
+                let possibleFollowers = [];
+                for (let follower of info.followers) {
+                    if (follower === info.leader) continue;
+
+                    if (info.publicHandSeats && info.publicHandSeats.has(follower)) {
+                        if ((info.publicVoidInfo[follower] || {})[division]) usedPublicVoid = true;
+                        continue;
                     }
+
+                    if ((info.voidInfo[follower] || {})[division]) {
+                        if ((info.publicVoidInfo[follower] || {})[division]) usedPublicVoid = true;
+                        continue;
+                    }
+
+                    possibleFollowers.push(follower);
+                }
+
+                let canBeInBase = unknownBaseCapacity > 0;
+                if (!canBeInBase && possibleFollowers.length === 1 && entry.count >= ledElement.copy) {
+                    forcedSeatsForOrder.add(possibleFollowers[0]);
                 }
             }
-            if (!anyValueForced) { windowBlocks = false; break; }
+
+            if (forcedSeatsForOrder.size === 0) {
+                windowValid = false;
+                break;
+            }
+
+            if (forcedSeatIntersection === null) {
+                forcedSeatIntersection = new Set(forcedSeatsForOrder);
+            } else {
+                forcedSeatIntersection = new Set([...forcedSeatIntersection].filter(s => forcedSeatsForOrder.has(s)));
+            }
+
+            if (forcedSeatIntersection.size === 0) {
+                windowValid = false;
+                break;
+            }
         }
 
-        if (windowBlocks) return true;
+        if (windowValid && forcedSeatIntersection && forcedSeatIntersection.size > 0) {
+            let blockerSeat = [...forcedSeatIntersection][0];
+            return {
+                isFake: true,
+                evidenceSource: usedPublicVoid ? 'public-dummy-void-forced-distribution' : 'existing-known-structured-forced-distribution',
+                blockerSeat,
+                blockedElement: {
+                    copy: ledElement.copy,
+                    span: ledElement.span,
+                    division: ledElement.division,
+                    order: ledElement.order
+                }
+            };
+        }
     }
 
-    return false;
+    return { isFake: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -2162,6 +2347,193 @@ function engineResetFailedMultiplayCompensationState() {
     game.multiplayCompensationEvents = [];
 }
 
+function engineEnsurePublicHandInfo() {
+    if (!game.publicHandInfo || typeof game.publicHandInfo !== 'object') {
+        game.publicHandInfo = { publicHandSeatKeys: [], reasonBySeatKey: {} };
+    }
+    if (!Array.isArray(game.publicHandInfo.publicHandSeatKeys)) {
+        game.publicHandInfo.publicHandSeatKeys = [];
+    }
+    if (!game.publicHandInfo.reasonBySeatKey || typeof game.publicHandInfo.reasonBySeatKey !== 'object') {
+        game.publicHandInfo.reasonBySeatKey = {};
+    }
+    return game.publicHandInfo;
+}
+
+function engineResetPublicHandInfo() {
+    game.publicHandInfo = { publicHandSeatKeys: [], reasonBySeatKey: {} };
+}
+
+function engineSetHandPublicForLegality(seat, isPublic, reason) {
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return false;
+    let info = engineEnsurePublicHandInfo();
+    let key = String(seat);
+    if (isPublic) {
+        if (!info.publicHandSeatKeys.includes(seat)) info.publicHandSeatKeys.push(seat);
+        if (reason) info.reasonBySeatKey[key] = String(reason);
+    } else {
+        info.publicHandSeatKeys = info.publicHandSeatKeys.filter(s => s !== seat);
+        delete info.reasonBySeatKey[key];
+    }
+    return true;
+}
+
+function engineIsHandPublicForLegality(seat) {
+    if (!Number.isInteger(seat)) return false;
+    let info = engineEnsurePublicHandInfo();
+    return info.publicHandSeatKeys.includes(seat);
+}
+
+function engineGetPublicKnownHandCardsBySeat() {
+    let bySeat = {};
+    let info = engineEnsurePublicHandInfo();
+    for (let seat of info.publicHandSeatKeys) {
+        if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) continue;
+        bySeat[seat] = Array.isArray(game.hands[seat]) ? game.hands[seat].slice() : [];
+    }
+    return bySeat;
+}
+
+function engineGetFrameActorKeyByHandSeat(seat) {
+    if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return null;
+    if (game && Array.isArray(game.frameActorByHandSeat)) {
+        let actor = game.frameActorByHandSeat[seat];
+        if (actor !== undefined && actor !== null) return frameActorKey(actor);
+    }
+    let byActorKey = engineGetHandSeatByFrameActorKeyMap();
+    for (let actorKey in byActorKey) {
+        if (byActorKey[actorKey] === seat) return frameActorKey(actorKey);
+    }
+    return null;
+}
+
+function engineBuildDA3PAttackerDeskScoreState() {
+    if (!engineIsDA3PResolvedRuntimeFrame() || !game || !game.frameContext) return null;
+    let order = game.frameContext.canonicalFrameOrder;
+    if (!Array.isArray(order) || order.length !== 4) return null;
+
+    let successorActor = frameActorKey(order[1]);
+    let predecessorActor = frameActorKey(order[3]);
+    let seatByActorKey = engineGetHandSeatByFrameActorKeyMap();
+    let successorSeat = seatByActorKey[successorActor];
+    let predecessorSeat = seatByActorKey[predecessorActor];
+    if (!Number.isInteger(successorSeat) || !Number.isInteger(predecessorSeat)) return null;
+
+    let scoreByActor = {};
+    scoreByActor[successorActor] = 0;
+    scoreByActor[predecessorActor] = 0;
+
+    let canonicalFrameOrderKeys = order.map(frameActorKey);
+    let frameIndex = Number.isInteger(game.frameContext.frameIndex) ? game.frameContext.frameIndex : null;
+    let frameNumber = Number.isInteger(game.frameContext.frameNumber) ? game.frameContext.frameNumber : null;
+    let pivotActor = frameActorKey(game.frameContext.pivotActor);
+
+    return {
+        frameIndex,
+        frameNumber,
+        pivotActor,
+        canonicalFrameOrderKeys,
+        successorActor,
+        predecessorActor,
+        scoreByActor,
+        seatByActorKey: {
+            [successorActor]: successorSeat,
+            [predecessorActor]: predecessorSeat,
+        },
+    };
+}
+
+function engineResetDA3PAttackerDeskScore() {
+    if (!engineIsDA3PResolvedRuntimeFrame()) {
+        game.da3pAttackerDeskScore = null;
+        return null;
+    }
+    game.da3pAttackerDeskScore = engineBuildDA3PAttackerDeskScoreState();
+    return game.da3pAttackerDeskScore;
+}
+
+function engineResetDA3PAttackerDeskScoreForCurrentFrame() {
+    return engineResetDA3PAttackerDeskScore();
+}
+
+function engineGetExpectedDA3PAttackerDeskScoreIdentity() {
+    if (!engineIsDA3PResolvedRuntimeFrame() || !game || !game.frameContext) return null;
+    let order = game.frameContext.canonicalFrameOrder;
+    if (!Array.isArray(order) || order.length !== 4) return null;
+    return {
+        frameIndex: Number.isInteger(game.frameContext.frameIndex) ? game.frameContext.frameIndex : null,
+        frameNumber: Number.isInteger(game.frameContext.frameNumber) ? game.frameContext.frameNumber : null,
+        pivotActor: frameActorKey(game.frameContext.pivotActor),
+        canonicalFrameOrderKeys: order.map(frameActorKey),
+        successorActor: frameActorKey(order[1]),
+        predecessorActor: frameActorKey(order[3]),
+    };
+}
+
+function engineDA3PAttackerDeskScoreHasNonzeroScore(state) {
+    if (!state || !state.scoreByActor) return false;
+    for (let actorKey in state.scoreByActor) {
+        if ((Number(state.scoreByActor[actorKey]) || 0) !== 0) return true;
+    }
+    return false;
+}
+
+function engineDA3PAttackerDeskScoreMatchesCurrentFrame(state) {
+    let expected = engineGetExpectedDA3PAttackerDeskScoreIdentity();
+    if (!expected || !state || typeof state !== 'object') return false;
+    if (state.frameIndex !== expected.frameIndex) return false;
+    if (state.frameNumber !== expected.frameNumber) return false;
+    if (frameActorKey(state.pivotActor) !== expected.pivotActor) return false;
+
+    let stateOrder = Array.isArray(state.canonicalFrameOrderKeys) ? state.canonicalFrameOrderKeys.map(frameActorKey) : null;
+    if (!stateOrder || stateOrder.length !== expected.canonicalFrameOrderKeys.length) return false;
+    for (let i = 0; i < expected.canonicalFrameOrderKeys.length; i++) {
+        if (stateOrder[i] !== expected.canonicalFrameOrderKeys[i]) return false;
+    }
+
+    if (frameActorKey(state.successorActor) !== expected.successorActor) return false;
+    if (frameActorKey(state.predecessorActor) !== expected.predecessorActor) return false;
+
+    if (!state.scoreByActor || typeof state.scoreByActor !== 'object') return false;
+    if (!Object.prototype.hasOwnProperty.call(state.scoreByActor, expected.successorActor)) return false;
+    if (!Object.prototype.hasOwnProperty.call(state.scoreByActor, expected.predecessorActor)) return false;
+    return true;
+}
+
+function engineEnsureDA3PAttackerDeskScore() {
+    if (!engineIsDA3PResolvedRuntimeFrame()) return null;
+    let state = game.da3pAttackerDeskScore;
+    if (!engineDA3PAttackerDeskScoreMatchesCurrentFrame(state)) {
+        if (engineDA3PAttackerDeskScoreHasNonzeroScore(state)) {
+            throw new Error('DA3P attacker desk score state mismatches current frame after scoring started');
+        }
+        return engineResetDA3PAttackerDeskScoreForCurrentFrame();
+    }
+    return state;
+}
+
+function engineGetDA3PAttackerDeskScoreSnapshot() {
+    let state = engineEnsureDA3PAttackerDeskScore();
+    if (!state) return null;
+    let scoreByActor = {};
+    scoreByActor[state.successorActor] = Number(state.scoreByActor[state.successorActor]) || 0;
+    scoreByActor[state.predecessorActor] = Number(state.scoreByActor[state.predecessorActor]) || 0;
+    let deskScoreTotal = (Number(scoreByActor[state.successorActor]) || 0)
+        + (Number(scoreByActor[state.predecessorActor]) || 0);
+    return {
+        frameIndex: state.frameIndex,
+        frameNumber: state.frameNumber,
+        pivotActor: state.pivotActor,
+        canonicalFrameOrderKeys: Array.isArray(state.canonicalFrameOrderKeys)
+            ? [...state.canonicalFrameOrderKeys]
+            : null,
+        successorActor: state.successorActor,
+        predecessorActor: state.predecessorActor,
+        scoreByActor,
+        deskScoreTotal,
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Game flow
 // ---------------------------------------------------------------------------
@@ -2190,7 +2562,9 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     game.dealIndex      = 0;
     game.roundState     = null;
     engineResetFailedMultiplayCompensationState();
+    engineResetPublicHandInfo();
     game.exposedCards   = {};
+    game.da3pAttackerDeskScore = null;
     game.fcChances      = {};
     game.fcPending      = null;
     game.forehandControl = null;
@@ -2232,6 +2606,8 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     // Reset bank times from resolved timing config (note 34).
     let bank = engineGetTimingConfigValue('bankTime', TIMING_CONFIG.bankTime);
     game.playerBankTimes = new Array(NUM_PLAYERS).fill(bank);
+
+    // Note 117a: do not initialize DA3P split here; frame context may still be stale.
 }
 
 /**
@@ -2407,11 +2783,15 @@ function enginePlayCards(player, cards) {
         return { success: false, error: t('errors.notYourTurn') };
 
     let failedMultiplay = null;
+    let fakeMultiplay = null;
 
     if (game.currentTurnIndex === 0) {
         let leadValid = engineIsLegalLead(player, cards);
         if (!leadValid.valid)
             return { success: false, error: leadValid.error };
+        if (leadValid.fakeMultiplay && leadValid.fakeMultiplay.isFakeMultiplay) {
+            fakeMultiplay = leadValid.fakeMultiplay;
+        }
 
         if (leadValid.failedMultiplay) {
             // Failed multiplay — resolve per the continuation protocol
@@ -2477,7 +2857,8 @@ function enginePlayCards(player, cards) {
     return {
         success: true,
         roundComplete: game.currentTurnIndex >= NUM_PLAYERS,
-        failedMultiplay: failedMultiplay
+        failedMultiplay: failedMultiplay,
+        fakeMultiplay: fakeMultiplay
     };
 }
 
@@ -2490,6 +2871,19 @@ function engineEndRound() {
         if (game.roundPlayed[i]) trickPoints += engineCountScore(game.roundPlayed[i]);
     }
     if (game.attackingTeam.includes(winner)) game.frameScore += trickPoints;
+
+    // DA3P attacker desk-score split is desk-score-only and winner-attributed (note 117).
+    if (trickPoints > 0 && game.attackingTeam.includes(winner)) {
+        let split = engineEnsureDA3PAttackerDeskScore();
+        if (split && split.scoreByActor) {
+            let winnerActor = engineGetFrameActorKeyByHandSeat(winner);
+            if (winnerActor && Object.prototype.hasOwnProperty.call(split.scoreByActor, winnerActor)) {
+                split.scoreByActor[winnerActor] = (Number(split.scoreByActor[winnerActor]) || 0) + trickPoints;
+            } else if (winnerActor && frameActorKey(winnerActor) !== frameActorKey(split.pivotActor) && frameActorKey(winnerActor) !== frameActorKey('D')) {
+                throw new Error('DA3P attacker desk score actor-key mismatch: current attacker winner missing from scoreByActor');
+            }
+        }
+    }
 
     game.roundHistory.push({
         round:  game.currentRound,
@@ -2527,6 +2921,10 @@ function engineFinalize() {
     let attackersSetFinalBase = !!(game.attackingTeam && game.attackingTeam.includes(effectiveFinalBaser));
     let multiplayCompensation = Number(game.multiplayCompensation) || 0;
     let counterScore = game.frameScore - multiplayCompensation;
+    let da3pAttackerDeskScore = engineGetDA3PAttackerDeskScoreSnapshot();
+    let deskScoreTotal = da3pAttackerDeskScore
+        ? (Number(da3pAttackerDeskScore.deskScoreTotal) || 0)
+        : counterScore;
     let baseScore = 0;
     let baseScoreBeforeSelfBaseHalf = 0;
     let baseScoreAfterSelfBaseHalf = 0;
@@ -2617,6 +3015,8 @@ function engineFinalize() {
 
     let scoreBreakdown = {
         counterScore,
+        deskScoreTotal,
+        da3pAttackerDeskScore,
         baseScoreBeforeSelfBaseHalf,
         baseScoreAfterSelfBaseHalf,
         baseScoreSelfBaseHalfApplied,
@@ -2628,7 +3028,10 @@ function engineFinalize() {
 
     return {
         totalScore: finalScore,
+        levelAdvanceBasisScore: finalScore,
         counterScore,
+        deskScoreTotal,
+        da3pAttackerDeskScore,
         attackersWonBase,
         baseScoreBeforeSelfBaseHalf,
         baseScoreAfterSelfBaseHalf,

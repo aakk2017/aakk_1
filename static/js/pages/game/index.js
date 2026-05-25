@@ -153,6 +153,9 @@ function gameApplyDA3PSeatControlFromFrameContext(selectedReferenceActor) {
 
 function gameBuildDA3PSharedFirstFrameContext(options) {
     const selectedReferenceActor = getDraftDA3PReferenceActor();
+    const startLevel = (gResolvedGameSettings && gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.startLevel !== undefined)
+        ? gResolvedGameSettings.ruleConfig.startLevel
+        : 0;
     const frameContext = gameBuildFrameContext({
         tableFormat:               ShengjiTableFormat.DA3P,
         frameKind:                 'da3p',
@@ -188,6 +191,8 @@ function gameBuildDA3PSharedFirstFrameContext(options) {
     frameContext.declarationResolvedSeat = null;
     frameContext.frameIndex = 0;
     frameContext.frameNumber = 1;
+    frameContext.levelsByActor = { N: startLevel, Sw: startLevel, Se: startLevel };
+    frameContext.levelCyclesByActor = { N: 0, Sw: 0, Se: 0 };
     frameContext.displayMapBasis = 'temporary-deal-anchor';
     frameContext.displayMap = createDisplayMapFromFrameOrder(frameActors, selectedReferenceActor);
     frameContext.visibilityPolicy = { dummyInitiallyHidden: true };
@@ -195,72 +200,274 @@ function gameBuildDA3PSharedFirstFrameContext(options) {
     return { frameContext, selectedReferenceActor };
 }
 
-function gameStartDA3PSharedFirstFrameFromSettings() {
+const DA3P_REAL_ACTORS = Object.freeze(['N', 'Sw', 'Se']);
+
+function gameCloneDA3PActorLevels(levelsByActor, fallbackLevel) {
+    let fallback = Number.isInteger(fallbackLevel) ? fallbackLevel : 0;
+    let out = {};
+    for (let actor of DA3P_REAL_ACTORS) {
+        let level = levelsByActor ? Number(levelsByActor[actor]) : NaN;
+        out[actor] = Number.isInteger(level) ? level : fallback;
+    }
+    return out;
+}
+
+function gameCloneDA3PActorCycles(levelCyclesByActor) {
+    let out = {};
+    for (let actor of DA3P_REAL_ACTORS) {
+        let cycleIndex = levelCyclesByActor ? Number(levelCyclesByActor[actor]) : NaN;
+        out[actor] = Number.isInteger(cycleIndex) && cycleIndex >= 0 ? cycleIndex : 0;
+    }
+    return out;
+}
+
+function gameCloneDA3PAttackerDeskScoreSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object' || !snapshot.scoreByActor) return null;
+    let successorActor = frameActorKey(snapshot.successorActor);
+    let predecessorActor = frameActorKey(snapshot.predecessorActor);
+    if (!successorActor || !predecessorActor) return null;
+
+    let scoreByActor = {};
+    scoreByActor[successorActor] = Number(snapshot.scoreByActor[successorActor]) || 0;
+    scoreByActor[predecessorActor] = Number(snapshot.scoreByActor[predecessorActor]) || 0;
+
+    return {
+        frameIndex: Number.isInteger(snapshot.frameIndex) ? snapshot.frameIndex : null,
+        frameNumber: Number.isInteger(snapshot.frameNumber) ? snapshot.frameNumber : null,
+        pivotActor: frameActorKey(snapshot.pivotActor),
+        canonicalFrameOrderKeys: Array.isArray(snapshot.canonicalFrameOrderKeys)
+            ? snapshot.canonicalFrameOrderKeys.map(frameActorKey)
+            : null,
+        successorActor,
+        predecessorActor,
+        scoreByActor,
+        deskScoreTotal: (Number(scoreByActor[successorActor]) || 0) + (Number(scoreByActor[predecessorActor]) || 0),
+    };
+}
+
+function gameGetDA3PSkipLevelSet() {
+    let cfg = game && game.gameConfig ? game.gameConfig : (gResolvedGameSettings ? gResolvedGameSettings.ruleConfig : null);
+    let skipLevels = cfg && Array.isArray(cfg.skipLevels) ? cfg.skipLevels : [];
+    return new Set(skipLevels.filter(v => Number.isInteger(v) && v >= 0 && v <= 12));
+}
+
+function gameAdvanceDA3PLevelState(level, cycleIndex, delta, skipLevelSet) {
+    let nextLevel = Number(level);
+    if (!Number.isInteger(nextLevel)) nextLevel = 0;
+    let nextCycle = Number(cycleIndex);
+    if (!Number.isInteger(nextCycle) || nextCycle < 0) nextCycle = 0;
+
+    let steps = Math.max(0, Math.floor(Number(delta) || 0));
+    let safety = 0;
+    while (steps > 0 && safety < 256) {
+        safety++;
+        nextLevel = (nextLevel + 1) % 13;
+        if (nextLevel === 0) nextCycle += 1;
+        if (skipLevelSet && skipLevelSet.size > 0 && skipLevelSet.has(nextLevel)) {
+            continue;
+        }
+        steps -= 1;
+    }
+
+    return { level: nextLevel, cycleIndex: nextCycle };
+}
+
+function gameBuildDA3PPlayerLevelsForEngine(frameContext) {
+    let fallback = (gResolvedGameSettings && gResolvedGameSettings.ruleConfig && Number.isInteger(gResolvedGameSettings.ruleConfig.startLevel))
+        ? gResolvedGameSettings.ruleConfig.startLevel
+        : 0;
+    let actorLevels = gameCloneDA3PActorLevels(frameContext && frameContext.levelsByActor, fallback);
+    let frameActors = Array.isArray(frameContext && frameContext.frameActors) ? frameContext.frameActors : [];
+    let out = [fallback, fallback, fallback, fallback];
+    let pivotActor = frameContext && frameContext.pivotActor;
+    let pivotFallback = (pivotActor && Object.prototype.hasOwnProperty.call(actorLevels, pivotActor))
+        ? actorLevels[pivotActor]
+        : fallback;
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        let actor = frameActors[seat];
+        if (actor === 'D') {
+            out[seat] = pivotFallback;
+            continue;
+        }
+        let level = Number(actorLevels[actor]);
+        out[seat] = Number.isInteger(level) ? level : fallback;
+    }
+    return out;
+}
+
+function gameBuildDA3PFrameContextFromProgression(options) {
+    const opts = options || {};
+    const selectedReferenceActor = normalizeDA3PReferenceActor(
+        opts.selectedReferenceActor || (game && game.da3pSelectedReferenceActor) || getDraftDA3PReferenceActor()
+    );
+
+    const isQiangzhuangFrame = !!opts.isQiangzhuangFrame;
+    const pivotActor = isQiangzhuangFrame ? null : normalizeDA3PDealAnchor(opts.pivotActor);
+    const pivotStatus = isQiangzhuangFrame ? 'unresolved' : 'resolved';
+    const frameIndex = Number.isInteger(opts.frameIndex) && opts.frameIndex >= 0 ? opts.frameIndex : 0;
+    const frameNumber = Number.isInteger(opts.frameNumber) && opts.frameNumber >= 1 ? opts.frameNumber : (frameIndex + 1);
+
+    const fallbackLevel = (gResolvedGameSettings && gResolvedGameSettings.ruleConfig && Number.isInteger(gResolvedGameSettings.ruleConfig.startLevel))
+        ? gResolvedGameSettings.ruleConfig.startLevel
+        : 0;
+    const levelsByActor = gameCloneDA3PActorLevels(opts.levelsByActor, fallbackLevel);
+    const levelCyclesByActor = gameCloneDA3PActorCycles(opts.levelCyclesByActor);
+
+    const baseContext = gameBuildFrameContext({
+        tableFormat:               ShengjiTableFormat.DA3P,
+        frameKind:                 'da3p',
+        isQiangzhuangFrame,
+        pivotActor,
+        pivotStatus,
+        dealAnchor:                null,
+        frameActors:               ['N', 'Sw', 'D', 'Se'],
+        realActors:                ['N', 'Sw', 'Se'],
+        dummyActor:                'D',
+        actorKindByKey:            { N: 'real', Sw: 'real', Se: 'real', D: 'temporary-dummy-pile' },
+        declarationEligibleActors: ['N', 'Sw', 'Se'],
+        nonDeclaringActors:        ['D'],
+    });
+
+    const fixedDealAnchor = isQiangzhuangFrame ? normalizeDA3PDealAnchor(opts.fixedDealAnchor || generateDA3PDealAnchor()) : null;
+    const dealAnchor = resolveDealAnchorForFrameContext(baseContext, fixedDealAnchor ? { fixedDealAnchor } : undefined);
+    const frameActors = get3PDAQZTempLayout(dealAnchor);
+    const canonicalFrameOrder = pivotStatus === 'resolved' ? createDA3PCanonicalFrameOrderForPivot(pivotActor) : null;
+    const displayBasisOrder = Array.isArray(canonicalFrameOrder) ? canonicalFrameOrder : frameActors;
+    const displayMap = createDisplayMapFromFrameOrder(displayBasisOrder, selectedReferenceActor);
+
+    baseContext.dealAnchor = dealAnchor;
+    baseContext.frameActors = frameActors;
+    baseContext.dealOrder = frameActors;
+    baseContext.temporaryFrameOrder = [...frameActors];
+    baseContext.canonicalFrameOrder = Array.isArray(canonicalFrameOrder) ? [...canonicalFrameOrder] : null;
+    baseContext.playOrderSeats = null;
+    baseContext.playOrderActorKeys = Array.isArray(canonicalFrameOrder)
+        ? canonicalFrameOrder.map(frameActorKey)
+        : null;
+    baseContext.declarationResolvedActor = pivotStatus === 'resolved' ? pivotActor : null;
+    baseContext.declarationResolvedSeat = pivotStatus === 'resolved' ? frameActors.indexOf(pivotActor) : null;
+    baseContext.frameIndex = frameIndex;
+    baseContext.frameNumber = frameNumber;
+    baseContext.levelsByActor = levelsByActor;
+    baseContext.levelCyclesByActor = levelCyclesByActor;
+    baseContext.displayMapBasis = Array.isArray(canonicalFrameOrder) ? 'canonical-pivot-resolved' : 'temporary-deal-anchor';
+    baseContext.displayMap = displayMap;
+    baseContext.visibilityPolicy = { dummyInitiallyHidden: true };
+
+    return { frameContext: baseContext, selectedReferenceActor };
+}
+
+function gameStartDA3PSharedFrameFromContext(frameContext, selectedReferenceActor) {
     beginNewSessionBoundary(UiSessionKind.DA3P_SHARED_FRAME);
     resetBoardSurfacesForNewSession(UiSessionKind.DA3P_SHARED_FRAME);
     ensureResolvedSettings();
     clearTimers();
 
-    const fixedDealAnchor = (typeof window !== 'undefined' && window.__NOTE111F_TEST_FIXED_DEAL_ANCHOR)
-        ? normalizeDA3PDealAnchor(window.__NOTE111F_TEST_FIXED_DEAL_ANCHOR)
-        : null;
-    const built = gameBuildDA3PSharedFirstFrameContext({ fixedDealAnchor });
-    const frameContext = built.frameContext;
-    const selectedReferenceActor = built.selectedReferenceActor;
+    let context = frameContext;
+    let referenceActor = normalizeDA3PReferenceActor(selectedReferenceActor || getDraftDA3PReferenceActor());
+    if (!context) {
+        const built = gameBuildDA3PSharedFirstFrameContext();
+        context = built.frameContext;
+        referenceActor = built.selectedReferenceActor;
+    }
 
-    let level = (gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.startLevel !== undefined)
-        ? gResolvedGameSettings.ruleConfig.startLevel
-        : 0;
+    let levelSourceActor = (context.pivotStatus === 'resolved' && context.pivotActor && context.pivotActor !== 'D')
+        ? context.pivotActor
+        : 'N';
+    let level = Number(context.levelsByActor && context.levelsByActor[levelSourceActor]);
+    if (!Number.isInteger(level)) {
+        level = (gResolvedGameSettings.ruleConfig && gResolvedGameSettings.ruleConfig.startLevel !== undefined)
+            ? gResolvedGameSettings.ruleConfig.startLevel
+            : 0;
+    }
 
-    frameNumber = 1;
+    frameNumber = Number.isInteger(context.frameNumber) ? context.frameNumber : 1;
     attackersStreak = 0;
     wonCounterCards = [];
     updateCounterDrawer();
     document.getElementById('div-table-number').textContent = frameNumber;
 
-    const declarationOrderAnchor = frameContext.frameActors.indexOf(frameContext.dealAnchor);
-    engineStartGame(level, UNDETERMINED_PIVOT, null, true, gResolvedGameSettings.ruleConfig, declarationOrderAnchor);
+    const declarationOrderAnchor = Array.isArray(context.frameActors)
+        ? context.frameActors.indexOf(context.dealAnchor)
+        : 0;
+    const pivotSeatForEngine = (context.pivotStatus === 'resolved' && Array.isArray(context.frameActors))
+        ? context.frameActors.indexOf(context.pivotActor)
+        : UNDETERMINED_PIVOT;
+    const playerLevelsForEngine = gameBuildDA3PPlayerLevelsForEngine(context);
+
+    engineStartGame(
+        level,
+        pivotSeatForEngine,
+        playerLevelsForEngine,
+        !!context.isQiangzhuangFrame,
+        gResolvedGameSettings.ruleConfig,
+        declarationOrderAnchor >= 0 ? declarationOrderAnchor : 0
+    );
 
     game.tableFormat = ShengjiTableFormat.DA3P;
-    game.frameContext = frameContext;
-    game.frameActorByHandSeat = [...frameContext.frameActors];
+    game.frameContext = context;
+    game.da3pLevelsByActor = gameCloneDA3PActorLevels(context.levelsByActor, level);
+    game.da3pLevelCyclesByActor = gameCloneDA3PActorCycles(context.levelCyclesByActor);
+
+    game.frameActorByHandSeat = [...context.frameActors];
     game.handSeatByFrameActorKey = {};
     for (let seat = 0; seat < game.frameActorByHandSeat.length; seat++) {
         game.handSeatByFrameActorKey[frameActorKey(game.frameActorByHandSeat[seat])] = seat;
     }
     game.frameActorByDisplaySeat = [
-        frameContext.displayMap.bottom,
-        frameContext.displayMap.right,
-        frameContext.displayMap.top,
-        frameContext.displayMap.left,
+        context.displayMap.bottom,
+        context.displayMap.right,
+        context.displayMap.top,
+        context.displayMap.left,
     ];
     game.displaySeatByFrameActorKey = {};
     for (let seat = 0; seat < game.frameActorByDisplaySeat.length; seat++) {
         game.displaySeatByFrameActorKey[frameActorKey(game.frameActorByDisplaySeat[seat])] = seat;
     }
-    // Compatibility aliases: seat->actor is hand ownership mapping in DA3P.
     game.frameActorBySeat = game.frameActorByHandSeat;
     game.seatByFrameActorKey = game.handSeatByFrameActorKey;
     game.playOrderSeats = null;
     game.playOrderActorKeys = null;
-    game.da3pFlowStatus = 'shared-dealing-declaration';
-    game.da3pStopBeforeBasing = true;
-    game.da3pSelectedReferenceActor = selectedReferenceActor;
+
+    game.da3pFlowStatus = context.pivotStatus === 'resolved'
+        ? 'shared-basing-playing'
+        : 'shared-dealing-declaration';
+    game.da3pStopBeforeBasing = context.pivotStatus !== 'resolved';
+    game.da3pSelectedReferenceActor = referenceActor;
     game.displaySettings = {
         placeholder: true,
         userNaturalPosition: 'east',
-        selectedDA3PReferenceActor: selectedReferenceActor,
+        selectedDA3PReferenceActor: referenceActor,
         ...(gResolvedGameSettings.displaySettings || {})
     };
 
-    gameApplyDA3PSeatControlFromFrameContext(selectedReferenceActor);
+    if (context.pivotStatus === 'resolved' && context.pivotActor) {
+        gameApplyDA3PResolvedPivotReframe(context.pivotActor);
+        engineResetDA3PAttackerDeskScoreForCurrentFrame();
+    }
+
+    gameApplyDA3PSeatControlFromFrameContext(referenceActor);
     initPersistentNamebars();
     gLevelDiv.textContent = levelDisplayLabel(game.level);
     setSeatsTopLeftBoxView('seats');
+    refreshTopLeftSeatAndLevelPositionBoxFromGameState();
 
     clearDA3PFrameStartBoard();
+    gameResetTopDummyRevealState();
+    clearTopDummyHandSurface();
+    gameResetSideDummyRevealState();
+    clearSideDummyHandSurfaces();
     runFrameIntermittent();
     refreshPauseButtonState();
+}
+
+function gameStartDA3PSharedFirstFrameFromSettings() {
+    ensureResolvedSettings();
+    const fixedDealAnchor = (typeof window !== 'undefined' && window.__NOTE111F_TEST_FIXED_DEAL_ANCHOR)
+        ? normalizeDA3PDealAnchor(window.__NOTE111F_TEST_FIXED_DEAL_ANCHOR)
+        : null;
+    const built = gameBuildDA3PSharedFirstFrameContext({ fixedDealAnchor });
+    gameStartDA3PSharedFrameFromContext(built.frameContext, built.selectedReferenceActor);
 }
 
 function gameStopDA3PBeforeBasing(reasonText, options) {
@@ -360,6 +567,12 @@ function gameResetNormal4PSharedRuntimeFields() {
     game.da3pFlowStatus = null;
     game.da3pStopBeforeBasing = false;
     game.da3pSelectedReferenceActor = null;
+    game.da3pLevelsByActor = null;
+    game.da3pLevelCyclesByActor = null;
+    gameResetTopDummyRevealState();
+    clearTopDummyHandSurface();
+    gameResetSideDummyRevealState();
+    clearSideDummyHandSurfaces();
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +580,9 @@ function gameResetNormal4PSharedRuntimeFields() {
 // ---------------------------------------------------------------------------
 // gReferenceHandSurface: the bottom display hand surface — reference player's interactive hand.
 const gReferenceHandSurface = document.getElementById('hand-bottom');
+const gTopDummyHandSurface = document.getElementById('hand-top');
+const gLeftDummyHandSurface = document.getElementById('hand-left');
+const gRightDummyHandSurface = document.getElementById('hand-right');
 
 const gDeskSlots = [
     document.getElementById('desk-bottom'),
@@ -642,6 +858,7 @@ let gCrossingState = null;
 let gCrossingClaimControlsHost = null;
 let gBtnCrossClaim = null;
 let gBtnCrossDecline = null;
+let gDeskCardsBySeat = [[], [], [], []];
 
 // Sequential overbase decision state (note 41)
 let gOverbaseDecision = null;
@@ -652,6 +869,14 @@ let gDeclHistoryBox = null;
 let gDeclHistoryTbody = null;
 let gSeatsHoverLevelPositionBox = null;
 let gSeatsTopLeftBoxView = 'seats';
+let gDA3PTopDummyRevealState = { revealed: false, reason: '' };
+let gDA3PSideDummyRevealState = {
+    revealed: false,
+    folded: false,
+    displayPosition: null,
+    dummySeat: null,
+    reason: '',
+};
 
 function getDeclarationOrderAnchor() {
     if (game && typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
@@ -817,6 +1042,7 @@ function beginNewSessionBoundary(nextSessionKind) {
 
     // 7. Clear shared new-game UI surfaces (Note 105 — still applies).
     clearSharedGameStartUiStateForNewGame();
+    gameSetFCModeSelectorVisible(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -974,7 +1200,9 @@ function initPersistentNamebarsForNormal4P() {
 
         let nameArea = document.createElement('div');
         nameArea.className = 'name-area';
-        nameArea.textContent = isReferencePlayer ? t('players.youShort') : t('players.botShort');
+        nameArea.textContent = isReferencePlayer
+            ? t('players.youShort')
+            : t('players.botShort');
         nb.appendChild(nameArea);
 
         if (!isReferencePlayer) {
@@ -1079,6 +1307,16 @@ function updateExposedPreview(player) {
     let preview = nb.querySelector('.exposed-preview');
     if (!preview) return;
     preview.innerHTML = '';
+
+    // Note 115c: when dummy full hand is visible, suppress hanging-corner preview
+    // and render exposed style directly in the visible dummy hand.
+    if (gameIsDummyFullHandVisibleForSeat(player)) {
+        preview.classList.remove('has-exposed');
+        let slot = gameGetDeskSlotForSeat(player);
+        if (slot) slot.removeAttribute('data-has-exposed');
+        return;
+    }
+
     let exposed = game.exposedCards && game.exposedCards[player];
     if (!exposed || Object.keys(exposed).length === 0) {
         preview.classList.remove('has-exposed');
@@ -1106,6 +1344,143 @@ function updateExposedPreview(player) {
     preview.classList.add('has-exposed');
     let exposedSlot = gameGetDeskSlotForSeat(player);
     if (exposedSlot) exposedSlot.setAttribute('data-has-exposed', '');
+}
+
+function gameIsDummyFullHandVisibleForSeat(playerSeat) {
+    if (!Number.isInteger(playerSeat)) return false;
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat) || playerSeat !== dummySeat) return false;
+
+    let topVisible = !!(gDA3PTopDummyRevealState && gDA3PTopDummyRevealState.revealed && gameCanRevealTopDummyHandNow());
+    let sideVisible = !!(
+        gDA3PSideDummyRevealState
+        && gDA3PSideDummyRevealState.revealed
+        && !gDA3PSideDummyRevealState.folded
+        && gameCanRevealSideDummyHandNow()
+    );
+    return topVisible || sideVisible;
+}
+
+function gameShouldUseVisibleDummyHandForFC() {
+    if (!gFCInteraction || !Number.isInteger(gFCInteraction.target)) return false;
+    if (!isLocallyControlledSeat(gFCInteraction.controller)) return false;
+    return gameIsDummyFullHandVisibleForSeat(gFCInteraction.target);
+}
+
+function gameIsUnfoldedSideDummyFCLocalMode() {
+    if (!gFCInteraction || !gDA3PSideDummyRevealState) return false;
+    if (!gDA3PSideDummyRevealState.revealed || gDA3PSideDummyRevealState.folded) return false;
+    if (!Number.isInteger(gDA3PSideDummyRevealState.dummySeat)) return false;
+    if (gFCInteraction.target !== gDA3PSideDummyRevealState.dummySeat) return false;
+    return !!gFCInteraction.useVisibleDummyHand;
+}
+
+function gameMountForehandControlOnTargetNamebar(targetPlayer) {
+    if (!gFCInteraction) return;
+    let nb = gDeskNamebars[targetPlayer];
+    if (!nb) return;
+    let preview = nb.querySelector('.exposed-preview');
+    if (!preview) return;
+    preview.classList.add('fc-active');
+    renderFCCorners(targetPlayer, preview);
+    gFCInteraction.selectionMounted = true;
+    gFCInteraction.commitButtonsMounted = true;
+}
+
+function gameUnmountForehandControlOnTargetNamebar(targetPlayer) {
+    let nb = gDeskNamebars[targetPlayer];
+    if (!nb) return;
+    let preview = nb.querySelector('.exposed-preview');
+    if (!preview) return;
+    preview.classList.remove('fc-active');
+}
+
+function gameGetCurrentFCModeSelection() {
+    let selected = document.querySelector('input[name="fc-mode"]:checked');
+    return (selected && selected.value === 'must-hold') ? 'must-hold' : 'must-play';
+}
+
+function gameSetFCModeSelectorVisible(visible) {
+    let selector = document.getElementById('fc-mode-selector');
+    if (!selector) return;
+    selector.style.display = visible ? 'flex' : 'none';
+}
+
+function gameSetDummyFCSelectionVisual(cardContainer, selected) {
+    if (!cardContainer) return;
+    let cardEl = cardContainer.querySelector('.card');
+    if (!cardEl) return;
+    let existing = cardEl.querySelector('.fc-marker-selected');
+    if (selected) {
+        cardContainer.setAttribute('data-da3p-dummy-fc-selected', 'true');
+        if (!existing) {
+            let marker = document.createElement('div');
+            marker.className = 'fc-marker fc-marker-selected da3p-dummy-fc-checkmark';
+            let suitEl = cardEl.querySelector('.card-suit');
+            suitEl.after(marker);
+        }
+    } else {
+        cardContainer.removeAttribute('data-da3p-dummy-fc-selected');
+        if (existing) existing.remove();
+    }
+}
+
+function gameSetSideDummyFCSelectionBackgroundVisual(cardContainer, selected) {
+    if (!cardContainer) return;
+    let cardEl = cardContainer.querySelector('.corner-card, .card');
+    let existing = cardEl ? cardEl.querySelector('.fc-marker-selected') : null;
+    if (selected) {
+        cardContainer.setAttribute('data-da3p-dummy-fc-selected', 'true');
+        cardContainer.setAttribute('data-fc-selected', 'true');
+        if (cardEl) {
+            cardEl.style.setProperty('background-color', '#fff3b0', 'important');
+            cardEl.style.setProperty('outline', '0.2vh solid #f0c040', 'important');
+        }
+    } else {
+        cardContainer.removeAttribute('data-da3p-dummy-fc-selected');
+        cardContainer.removeAttribute('data-fc-selected');
+        if (cardEl) {
+            cardEl.style.removeProperty('background-color');
+            cardEl.style.removeProperty('outline');
+        }
+    }
+    if (existing) existing.remove();
+}
+
+function gameCreateDummyFCActionsRow() {
+    let host = document.createElement('div');
+    host.className = 'da3p-side-dummy-fc-actions-host';
+    host.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    let row = document.createElement('div');
+    row.className = 'da3p-dummy-fc-actions';
+
+    let btnPlay = document.createElement('button');
+    btnPlay.className = 'button fc-action-btn da3p-dummy-fc-action-btn';
+    btnPlay.type = 'button';
+    btnPlay.textContent = t('fc.mustPlay');
+    btnPlay.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        commitForehandControl('must-play');
+    });
+    row.appendChild(btnPlay);
+
+    let btnHold = document.createElement('button');
+    btnHold.className = 'button fc-action-btn da3p-dummy-fc-action-btn';
+    btnHold.type = 'button';
+    btnHold.textContent = t('fc.mustHold');
+    btnHold.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        commitForehandControl('must-hold');
+    });
+    row.appendChild(btnHold);
+
+    host.appendChild(row);
+    return host;
 }
 
 function resetAllNamebars() {
@@ -1198,11 +1573,21 @@ function hideLocalCrossingActionButtons() {
 
 function renderAllHands() {
     renderHand(activeLocalSeat);
+    renderTopDummyHand();
+    renderSideDummyHand();
 }
 
 function renderHand(player) {
-    if (!isLocallyControlledSeat(player)) return;
-    if (player !== activeLocalSeat) return;
+    if (!isLocallyControlledSeat(player)) {
+        renderTopDummyHand();
+        renderSideDummyHand();
+        return;
+    }
+    if (player !== activeLocalSeat) {
+        renderTopDummyHand();
+        renderSideDummyHand();
+        return;
+    }
     let el = gReferenceHandSurface;
     // Preserve persistent namebar; clear only hand content
     let existingNb = el.querySelector('.desk-namebar');
@@ -1261,6 +1646,8 @@ function renderHand(player) {
     }
 
     el.insertBefore(handRow, existingNb);
+    renderTopDummyHand();
+    renderSideDummyHand();
 }
 
 // ---------------------------------------------------------------------------
@@ -1271,18 +1658,45 @@ function toggleCardSelection(cardId, el) {
     // Allow selection during forehand control exercise — restrict to exposed cards only
     if (gFCInteraction) {
         if (!gFCInteraction.exposedCardIds.has(cardId)) return;
+        let isSideVisibleDummyFC = !!(
+            gFCInteraction.useVisibleDummyHand
+            && gDA3PSideDummyRevealState
+            && gDA3PSideDummyRevealState.revealed
+            && !gDA3PSideDummyRevealState.folded
+            && Number.isInteger(gFCInteraction.target)
+            && gFCInteraction.target === gDA3PSideDummyRevealState.dummySeat
+        );
         if (selectedCardIds.has(cardId)) {
             selectedCardIds.delete(cardId);
             el.setAttribute('card-selected', 'false');
+            if (gFCInteraction.useVisibleDummyHand) {
+                if (isSideVisibleDummyFC) {
+                    gameSetSideDummyFCSelectionBackgroundVisual(el, false);
+                } else {
+                    gameSetDummyFCSelectionVisual(el, false);
+                }
+            } else {
+                el.removeAttribute('data-fc-selected');
+            }
         } else {
             selectedCardIds.add(cardId);
             el.setAttribute('card-selected', 'true');
+            if (gFCInteraction.useVisibleDummyHand) {
+                if (isSideVisibleDummyFC) {
+                    gameSetSideDummyFCSelectionBackgroundVisual(el, true);
+                } else {
+                    gameSetDummyFCSelectionVisual(el, true);
+                }
+            } else {
+                el.setAttribute('data-fc-selected', 'true');
+            }
         }
+        updatePlayButton();
         return;
     }
     let allowCrossingSelection = isLocalCrossingSelectionMode();
     if (isPauseDialogBlockingGameplay()) return;
-    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !isLocallyControlledSeat(engineGetCurrentPlayer())) return;
+    if (game.phase === GamePhase.PLAYING && !allowCrossingSelection && !gameCanLocallyControlActingSeat(engineGetCurrentPlayer(), 'trick-play')) return;
     if (game.phase !== GamePhase.PLAYING && game.phase !== GamePhase.BASING) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked && !allowCrossingSelection) return;
 
@@ -1307,6 +1721,12 @@ function clearSelection() {
     document.querySelectorAll('[card-selected="true"]').forEach(el => {
         el.setAttribute('card-selected', 'false');
     });
+    document.querySelectorAll('[data-da3p-dummy-fc-selected="true"]').forEach(el => {
+        el.removeAttribute('data-da3p-dummy-fc-selected');
+        el.removeAttribute('data-fc-selected');
+        let marker = el.querySelector('.da3p-dummy-fc-checkmark');
+        if (marker) marker.remove();
+    });
 }
 
 function getSelectedCards(player) {
@@ -1316,18 +1736,20 @@ function getSelectedCards(player) {
 
 function updatePlayButton() {
     if (gFCInteraction) {
-        gBtnPlay.disabled = false;
+        gBtnPlay.disabled = gameIsUnfoldedSideDummyFCLocalMode();
         gBtnPlay.textContent = t('buttons.confirmMarks');
         return;
     }
     let crossingMode = getLocalCrossingActionMode();
     if (crossingMode === 'cross') {
-        gBtnPlay.disabled = !isValidCrossingSelection(localControlledPlayerIndex, getSelectedCards(localControlledPlayerIndex), true);
+        let actionSeat = (gCrossingState && gCrossingState.localAction) ? gCrossingState.localAction.seat : localControlledPlayerIndex;
+        gBtnPlay.disabled = !isValidCrossingSelection(actionSeat, getSelectedCards(actionSeat), true);
         gBtnPlay.textContent = t('buttons.toCross');
         return;
     }
     if (crossingMode === 'crossback') {
-        gBtnPlay.disabled = !isValidCrossingSelection(localControlledPlayerIndex, getSelectedCards(localControlledPlayerIndex), false);
+        let actionSeat = (gCrossingState && gCrossingState.localAction) ? gCrossingState.localAction.seat : localControlledPlayerIndex;
+        gBtnPlay.disabled = !isValidCrossingSelection(actionSeat, getSelectedCards(actionSeat), false);
         gBtnPlay.textContent = t('buttons.toCrossBack');
         return;
     }
@@ -1339,7 +1761,7 @@ function updatePlayButton() {
     if (game.phase === GamePhase.BASING) {
         gBtnPlay.disabled = (selectedCardIds.size !== BASE_SIZE);
         gBtnPlay.textContent = t('buttons.baseProgress', { current: selectedCardIds.size, total: BASE_SIZE });
-    } else if (game.phase === GamePhase.PLAYING && isLocallyControlledSeat(engineGetCurrentPlayer())) {
+    } else if (game.phase === GamePhase.PLAYING && gameCanLocallyControlActingSeat(engineGetCurrentPlayer(), 'trick-play')) {
         gBtnPlay.disabled = (selectedCardIds.size === 0);
         gBtnPlay.textContent = t('buttons.play');
     } else {
@@ -1360,9 +1782,628 @@ function clearDesk() {
         slot.removeAttribute('data-active');
         slot.removeAttribute('data-winner');
         slot.removeAttribute('data-has-exposed');
+        slot.removeAttribute('data-da3p-side-dummy-desk-hidden');
+        slot.removeAttribute('data-da3p-side-dummy-hidden');
+        gDeskCardsBySeat[i] = [];
     }
     if (gDeskInfo) gDeskInfo.textContent = '';
     resetAllNamebars();
+    renderSideDummyHand();
+}
+
+function gameResetTopDummyRevealState() {
+    gDA3PTopDummyRevealState = { revealed: false, reason: '' };
+}
+
+function gameGetDA3PDummyHandSeat() {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.handSeatByFrameActorKey) return null;
+    let seat = game.handSeatByFrameActorKey[frameActorKey('D')];
+    return Number.isInteger(seat) ? seat : null;
+}
+
+function gameCanRevealTopDummyHandNow() {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.frameContext) return false;
+    if (game.frameContext.pivotStatus !== 'resolved' || !game.frameContext.pivotActor) return false;
+
+    let selectedReferenceActor = normalizeDA3PReferenceActor(
+        game.da3pSelectedReferenceActor || getDraftDA3PReferenceActor()
+    );
+    if (selectedReferenceActor !== game.frameContext.pivotActor) return false;
+
+    let displayMap = game.frameContext.displayMap;
+    if (!displayMap || displayMap.top !== 'D') return false;
+
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat)) return false;
+    let dummyHand = game.hands && game.hands[dummySeat];
+    return Array.isArray(dummyHand);
+}
+
+function gameGetTopDummyPivotAuthorityRuntime() {
+    if (!gameCanRevealTopDummyHandNow()) return null;
+    if (!game || !game.frameContext || !game.handSeatByFrameActorKey) return null;
+
+    let pivotActor = game.frameContext.pivotActor;
+    if (!pivotActor) return null;
+
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat)) return null;
+
+    let pivotSeat = game.handSeatByFrameActorKey[frameActorKey(pivotActor)];
+    if (!Number.isInteger(pivotSeat)) return null;
+
+    return { pivotActor, pivotSeat, dummySeat };
+}
+
+function gameCanLocallyControlActingSeat(actingSeat, decisionType) {
+    if (isLocallyControlledSeat(actingSeat)) return true;
+    if (!Number.isInteger(actingSeat)) return false;
+
+    let authority = gameGetTopDummyPivotAuthorityRuntime();
+    if (!authority) return false;
+    if (actingSeat !== authority.dummySeat) return false;
+    if (!isLocallyControlledSeat(authority.pivotSeat)) return false;
+
+    if (decisionType === 'trick-play') {
+        if (!game || game.phase !== GamePhase.PLAYING) return false;
+        if (engineGetCurrentPlayer() !== actingSeat) return false;
+        if (gCrossingState && gCrossingState.trickPlayBlocked) return false;
+    }
+
+    return true;
+}
+
+function gameGetLocalControlSeatForActingSeat(actingSeat, decisionType) {
+    if (isLocallyControlledSeat(actingSeat)) return actingSeat;
+    if (!gameCanLocallyControlActingSeat(actingSeat, decisionType)) return null;
+    let authority = gameGetTopDummyPivotAuthorityRuntime();
+    return authority ? authority.pivotSeat : null;
+}
+
+function setTopDeskDummyNamebarLabel(active) {
+    let deskTop = document.getElementById('desk-top');
+    if (!deskTop) return;
+    let namebar = deskTop.querySelector('.desk-namebar');
+    if (!namebar) return;
+    let nameArea = namebar.querySelector('.name-area');
+    if (!nameArea) return;
+    let isDummyActor = namebar.getAttribute('data-frame-actor') === frameActorKey('D');
+    if (!isDummyActor) return;
+    nameArea.textContent = t('players.dummy');
+}
+
+function clearTopDummyHandSurface() {
+    if (!gTopDummyHandSurface) return;
+    gTopDummyHandSurface.removeAttribute('data-da3p-top-dummy-active');
+    gTopDummyHandSurface.removeAttribute('data-da3p-top-dummy-control-active');
+    gTopDummyHandSurface.removeAttribute('data-da3p-fc-select-active');
+    gTopDummyHandSurface.removeAttribute('data-da3p-select-active');
+    gTopDummyHandSurface.innerHTML = '';
+    setTopDeskDummyNamebarLabel(false);
+}
+
+function gameMarkDA3PDummyPublicForLegality(reason) {
+    if (!gameIsDA3PSharedFirstFrameActive()) return false;
+    if (reason === 'crossing-receive') return false;
+    if (typeof engineSetHandPublicForLegality !== 'function') return false;
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat)) return false;
+    return !!engineSetHandPublicForLegality(dummySeat, true, reason || 'da3p-dummy-public-reveal');
+}
+
+function gameRevealTopDummyHand(reason) {
+    if (!gameCanRevealTopDummyHandNow()) return false;
+    gameMarkDA3PDummyPublicForLegality(reason || 'top-dummy-reveal');
+    gDA3PTopDummyRevealState.revealed = true;
+    gDA3PTopDummyRevealState.reason = reason || '';
+    return true;
+}
+
+function maybeRevealTopDummyAtFirstTrickStart(currentPlayer, isLeading) {
+    if (!gameCanRevealTopDummyHandNow()) return;
+    if (gDA3PTopDummyRevealState.revealed) return;
+    if (!isLeading) return;
+    if (game.currentRound !== 1 || game.currentTurnIndex !== 0) return;
+    if (currentPlayer !== game.pivot) return;
+    gameRevealTopDummyHand('first-trick-start');
+}
+
+function renderTopDummyHand() {
+    if (!gTopDummyHandSurface) return;
+
+    let canRevealNow = gameCanRevealTopDummyHandNow();
+    let shouldShow = !!(canRevealNow && gDA3PTopDummyRevealState && gDA3PTopDummyRevealState.revealed);
+    if (!shouldShow) {
+        clearTopDummyHandSurface();
+        return;
+    }
+
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    let hand = (game.hands && Number.isInteger(dummySeat)) ? game.hands[dummySeat] : null;
+    if (!Array.isArray(hand)) {
+        clearTopDummyHandSurface();
+        return;
+    }
+
+    gTopDummyHandSurface.setAttribute('data-da3p-top-dummy-active', 'true');
+    let fcSelectActive = !!(gFCInteraction && gameShouldUseVisibleDummyHandForFC() && gFCInteraction.target === dummySeat);
+    let trickSelectActive = !!gameCanLocallyControlActingSeat(dummySeat, 'trick-play');
+    let crossingSelectActive = !!(
+        isLocalCrossingSelectionMode()
+        && gCrossingState
+        && gCrossingState.localAction
+        && gCrossingState.localAction.mode === 'crossback'
+        && gCrossingState.localAction.seat === dummySeat
+    );
+    let topDummyControlActive = !!(trickSelectActive || crossingSelectActive);
+    let dummySelectActive = !!(fcSelectActive || trickSelectActive || crossingSelectActive);
+    if (fcSelectActive) gTopDummyHandSurface.setAttribute('data-da3p-fc-select-active', 'true');
+    else gTopDummyHandSurface.removeAttribute('data-da3p-fc-select-active');
+    if (topDummyControlActive) gTopDummyHandSurface.setAttribute('data-da3p-top-dummy-control-active', 'true');
+    else gTopDummyHandSurface.removeAttribute('data-da3p-top-dummy-control-active');
+    if (dummySelectActive) gTopDummyHandSurface.setAttribute('data-da3p-select-active', 'true');
+    else gTopDummyHandSurface.removeAttribute('data-da3p-select-active');
+    gTopDummyHandSurface.innerHTML = '';
+
+    let handRow = document.createElement('div');
+    handRow.className = 'hand';
+    handRow.setAttribute('data-da3p-top-dummy-hand', 'true');
+    handRow.setAttribute('data-interactive', dummySelectActive ? 'true' : 'false');
+
+    let exposedCardIds = new Set();
+    if (game.exposedCards && game.exposedCards[dummySeat]) {
+        for (let div in game.exposedCards[dummySeat]) {
+            for (let c of game.exposedCards[dummySeat][div]) exposedCardIds.add(c.cardId);
+        }
+    }
+
+    let fcMarkedIds = null;
+    let fcMode = null;
+    if (game.forehandControl && game.forehandControl.target === dummySeat && game.forehandControl.selectedCards) {
+        fcMode = game.forehandControl.mode;
+        fcMarkedIds = new Set(game.forehandControl.selectedCards.map(c => c.cardId));
+    }
+
+    for (let card of hand) {
+        let cc = gameCreateCardContainer(card);
+        cc.setAttribute('data-da3p-dummy-card', 'true');
+        cc.setAttribute('data-selectable', dummySelectActive ? 'true' : 'false');
+        cc.style.cursor = dummySelectActive ? 'pointer' : 'default';
+        if (exposedCardIds.has(card.cardId)) {
+            cc.setAttribute('data-exposed', 'true');
+        }
+        if (fcMarkedIds && fcMarkedIds.has(card.cardId)) {
+            let marker = document.createElement('div');
+            marker.className = 'fc-marker fc-marker-' + fcMode;
+            let cardEl = cc.querySelector('.card');
+            let suitEl = cardEl.querySelector('.card-suit');
+            suitEl.after(marker);
+        }
+        let fcCardSelectable = !!(fcSelectActive && gFCInteraction.exposedCardIds.has(card.cardId));
+        let playCardSelectable = !!(!fcSelectActive && (trickSelectActive || crossingSelectActive));
+        if (fcCardSelectable || playCardSelectable) {
+            cc.addEventListener('click', () => toggleCardSelection(card.cardId, cc));
+            if (selectedCardIds.has(card.cardId)) {
+                cc.setAttribute('card-selected', 'true');
+                if (fcCardSelectable) {
+                    gameSetDummyFCSelectionVisual(cc, true);
+                }
+            }
+        }
+        handRow.appendChild(cc);
+    }
+
+    gTopDummyHandSurface.appendChild(handRow);
+    setTopDeskDummyNamebarLabel(true);
+}
+
+function gameResetSideDummyRevealState() {
+    gDA3PSideDummyRevealState = {
+        revealed: false,
+        folded: false,
+        displayPosition: null,
+        dummySeat: null,
+        reason: '',
+    };
+}
+
+function gameGetDA3PDummyDisplayPosition() {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.frameContext || !game.frameContext.displayMap) return null;
+    let displayMap = game.frameContext.displayMap;
+    for (let position of ['bottom', 'right', 'top', 'left']) {
+        if (displayMap[position] === 'D') return position;
+    }
+    return null;
+}
+
+function gameGetDummyDisplayPositionForSeat(dummySeat) {
+    if (!Number.isInteger(dummySeat)) return null;
+    return gameGetDisplayPositionForHandSeat(dummySeat);
+}
+
+function gameCanRevealSideDummyHandNow() {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.frameContext) return false;
+    if (game.frameContext.pivotStatus !== 'resolved') return false;
+
+    let displayPosition = gameGetDA3PDummyDisplayPosition();
+    if (!(displayPosition === 'left' || displayPosition === 'right')) return false;
+
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat)) return false;
+    let dummyHand = game.hands && game.hands[dummySeat];
+    return Array.isArray(dummyHand);
+}
+
+function gameGetDummyLabelText() {
+    let txt = t('players.dummy');
+    return (txt && txt !== 'players.dummy') ? txt : t('players.dummyShort');
+}
+
+function gameGetSideDummyFoldToggleText(folded) {
+    return folded ? t('players.dummyClickToUnfold') : t('players.dummyClickToFold');
+}
+
+function gameBindSideDummyFoldToggleTarget(namebar, preferredTarget) {
+    if (!namebar) return;
+
+    namebar.removeAttribute('data-da3p-side-dummy-toggle');
+    namebar.onclick = null;
+    namebar.style.cursor = '';
+
+    let oldTargets = namebar.querySelectorAll('[data-da3p-side-dummy-fold-toggle="true"]');
+    for (let node of oldTargets) {
+        node.removeAttribute('data-da3p-side-dummy-fold-toggle');
+        node.onclick = null;
+        node.style.cursor = '';
+    }
+
+    let toggleTarget = preferredTarget
+        || namebar.querySelector('.name-area')
+        || namebar.querySelector('.game-position-area');
+    if (!toggleTarget) return;
+
+    namebar.setAttribute('data-da3p-side-dummy-toggle', 'true');
+    toggleTarget.setAttribute('data-da3p-side-dummy-fold-toggle', 'true');
+    toggleTarget.style.cursor = 'pointer';
+    toggleTarget.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        gameToggleSideDummyFolded();
+    };
+}
+
+function applyDA3PSideDummyDeskVisibility(displayPosition, folded, revealed) {
+    if (!(displayPosition === 'left' || displayPosition === 'right')) return;
+    let slot = getDeskSlotForDisplayPosition(displayPosition);
+    if (!slot) return;
+    if (revealed && !folded) {
+        slot.setAttribute('data-da3p-side-dummy-desk-hidden', 'true');
+        slot.setAttribute('data-da3p-side-dummy-hidden', 'true');
+    } else {
+        slot.removeAttribute('data-da3p-side-dummy-desk-hidden');
+        slot.removeAttribute('data-da3p-side-dummy-hidden');
+    }
+}
+
+function setSideDummyDeskNamebarLabel(displayPosition, folded, revealed) {
+    if (!(displayPosition === 'left' || displayPosition === 'right')) return;
+    let slot = getDeskSlotForDisplayPosition(displayPosition);
+    if (!slot) return;
+    let namebar = slot.querySelector('.desk-namebar');
+    if (!namebar) return;
+    if (namebar.getAttribute('data-frame-actor') !== frameActorKey('D')) return;
+
+    let nameArea = namebar.querySelector('.name-area');
+    if (!nameArea) return;
+    nameArea.textContent = revealed ? gameGetSideDummyFoldToggleText(!!folded) : gameGetDummyLabelText();
+
+    if (revealed) {
+        gameBindSideDummyFoldToggleTarget(namebar, nameArea);
+    } else {
+        gameBindSideDummyFoldToggleTarget(namebar, null);
+    }
+}
+
+function clearSideDummyHandSurfaceForDisplayPosition(displayPosition) {
+    let surface = displayPosition === 'left' ? gLeftDummyHandSurface : (displayPosition === 'right' ? gRightDummyHandSurface : null);
+    if (surface) {
+        surface.removeAttribute('data-da3p-side-dummy-active');
+        surface.removeAttribute('data-da3p-side-dummy-folded');
+        surface.removeAttribute('data-da3p-fc-select-active');
+        surface.innerHTML = '';
+    }
+    applyDA3PSideDummyDeskVisibility(displayPosition, false, false);
+    setSideDummyDeskNamebarLabel(displayPosition, false, false);
+}
+
+function clearSideDummyHandSurfaces() {
+    clearSideDummyHandSurfaceForDisplayPosition('left');
+    clearSideDummyHandSurfaceForDisplayPosition('right');
+}
+
+function gameRevealSideDummyHand(reason) {
+    if (!gameCanRevealSideDummyHandNow()) return false;
+    gameMarkDA3PDummyPublicForLegality(reason || 'side-dummy-reveal');
+    let displayPosition = gameGetDA3PDummyDisplayPosition();
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    gDA3PSideDummyRevealState.revealed = true;
+    gDA3PSideDummyRevealState.folded = false;
+    gDA3PSideDummyRevealState.displayPosition = displayPosition;
+    gDA3PSideDummyRevealState.dummySeat = dummySeat;
+    gDA3PSideDummyRevealState.reason = reason || '';
+    return true;
+}
+
+function gameToggleSideDummyFolded() {
+    if (!gDA3PSideDummyRevealState.revealed) return;
+    if (
+        gFCInteraction
+        && Number.isInteger(gFCInteraction.target)
+        && gFCInteraction.target === gDA3PSideDummyRevealState.dummySeat
+    ) {
+        // Keep fold/unfold available during FC; clear only unsubmitted temporary selection.
+        clearSelection();
+    }
+    gDA3PSideDummyRevealState.folded = !gDA3PSideDummyRevealState.folded;
+    applyDA3PSideDummyDeskVisibility(
+        gDA3PSideDummyRevealState.displayPosition,
+        !!gDA3PSideDummyRevealState.folded,
+        true
+    );
+    renderSideDummyHand();
+    updatePlayButton();
+}
+
+function maybeRevealSideDummyAtFirstTrickStart(currentPlayer, isLeading) {
+    if (!gameCanRevealSideDummyHandNow()) return;
+    if (gDA3PSideDummyRevealState.revealed) return;
+    if (!isLeading) return;
+    if (game.currentRound !== 1 || game.currentTurnIndex !== 0) return;
+    if (currentPlayer !== game.pivot) return;
+    gameRevealSideDummyHand('first-trick-start');
+}
+
+function gameGetSideDummyRowPlan() {
+    let strain = Number(game && game.strain);
+    let cycle = ['s', 'h', 'c', 'd'];
+    if (strain === 4) {
+        return ['n', 's', 'h', 'c', 'd'];
+    }
+
+    let strainKey = numberToSuitName && numberToSuitName[strain];
+    if (!cycle.includes(strainKey)) {
+        return ['n', 's', 'h', 'c', 'd'];
+    }
+
+    let plain = [];
+    let start = (cycle.indexOf(strainKey) + 1) % cycle.length;
+    for (let i = 0; i < cycle.length; i++) {
+        let key = cycle[(start + i) % cycle.length];
+        if (key !== strainKey) plain.push(key);
+    }
+    return ['n', strainKey, plain[0], plain[1], plain[2]];
+}
+
+function gameIsNaturalTrumpCard(card) {
+    if (!card || !game) return false;
+    return card.suit === 4 || card.rank === game.level;
+}
+
+function gameGetCardDivisionKey(card) {
+    if (!card) return null;
+    if (Array.isArray(numberToDivisionName) && Number.isInteger(card.division)) {
+        return numberToDivisionName[card.division];
+    }
+    return (Array.isArray(numberToSuitName) && Number.isInteger(card.suit)) ? numberToSuitName[card.suit] : null;
+}
+
+function gameBuildSideDummyHandRows(cards) {
+    let rowPlan = gameGetSideDummyRowPlan();
+    let rows = rowPlan.map(group => ({ sortGroup: group, cards: [] }));
+    let bucketByGroup = {};
+    for (let row of rows) bucketByGroup[row.sortGroup] = row.cards;
+
+    let strain = Number(game && game.strain);
+    let strainKey = (Array.isArray(numberToSuitName) && Number.isInteger(strain)) ? numberToSuitName[strain] : null;
+
+    for (let card of cards) {
+        if (gameIsNaturalTrumpCard(card)) {
+            bucketByGroup['n'].push(card);
+            continue;
+        }
+
+        let targetGroup = null;
+        if (strain !== 4 && ['s', 'h', 'c', 'd'].includes(strainKey) && card.suit === strain) {
+            targetGroup = strainKey;
+        } else {
+            let divisionKey = gameGetCardDivisionKey(card);
+            if (['s', 'h', 'c', 'd'].includes(divisionKey)) {
+                targetGroup = divisionKey;
+            }
+        }
+
+        if (!targetGroup || !bucketByGroup[targetGroup]) {
+            let fallback = rowPlan.find(group => group !== 'n') || 's';
+            targetGroup = bucketByGroup[fallback] ? fallback : 'n';
+        }
+        bucketByGroup[targetGroup].push(card);
+    }
+
+    return rows;
+}
+
+function gameGetDummyDeskCardIdSet(dummySeat) {
+    let ids = new Set();
+    if (!Number.isInteger(dummySeat)) return ids;
+    let deskCards = gDeskCardsBySeat[dummySeat] || [];
+    for (let card of deskCards) {
+        if (card && card.cardId !== undefined && card.cardId !== null) ids.add(String(card.cardId));
+    }
+    return ids;
+}
+
+function renderSideDummyHandSurface(surface, dummySeat, displayPosition, folded) {
+    if (!surface) return;
+
+    surface.innerHTML = '';
+    surface.setAttribute('data-da3p-side-dummy-folded', folded ? 'true' : 'false');
+    surface.setAttribute('data-da3p-side-dummy-hand', 'true');
+    surface.setAttribute('data-interactive', 'false');
+
+    applyDA3PSideDummyDeskVisibility(displayPosition, folded, true);
+    setSideDummyDeskNamebarLabel(displayPosition, folded, true);
+
+    if (gFCInteraction && gFCInteraction.target === dummySeat) {
+        let shouldUseVisibleDummy = !!(!folded && gameShouldUseVisibleDummyHandForFC());
+        gFCInteraction.useVisibleDummyHand = shouldUseVisibleDummy;
+        if (shouldUseVisibleDummy) {
+            gameUnmountForehandControlOnTargetNamebar(dummySeat);
+        } else {
+            gameMountForehandControlOnTargetNamebar(dummySeat);
+        }
+        gameSetFCModeSelectorVisible(false);
+    }
+
+    if (folded) {
+        surface.removeAttribute('data-da3p-side-dummy-active');
+        surface.removeAttribute('data-da3p-fc-select-active');
+        return;
+    }
+
+    surface.setAttribute('data-da3p-side-dummy-active', 'true');
+    let fcSelectActive = !!(gFCInteraction && gFCInteraction.useVisibleDummyHand && gFCInteraction.target === dummySeat);
+    if (fcSelectActive) surface.setAttribute('data-da3p-fc-select-active', 'true');
+    else surface.removeAttribute('data-da3p-fc-select-active');
+
+    let hand = (game.hands && Number.isInteger(dummySeat)) ? game.hands[dummySeat] : null;
+    if (!Array.isArray(hand)) return;
+
+    let deskCards = gDeskCardsBySeat[dummySeat] || [];
+    let cards = [...hand];
+    let inHandIds = new Set(cards.map(card => String(card.cardId)));
+    for (let card of deskCards) {
+        let id = String(card.cardId);
+        if (!inHandIds.has(id)) {
+            cards.push(card);
+            inHandIds.add(id);
+        }
+    }
+
+    let sorted = [...cards];
+    engineSortHand(sorted);
+    let deskCardIds = gameGetDummyDeskCardIdSet(dummySeat);
+    let exposedCardIds = new Set();
+    if (game.exposedCards && game.exposedCards[dummySeat]) {
+        for (let div in game.exposedCards[dummySeat]) {
+            for (let c of game.exposedCards[dummySeat][div]) exposedCardIds.add(c.cardId);
+        }
+    }
+    let fcMarkedIds = null;
+    let fcMode = null;
+    if (game.forehandControl && game.forehandControl.target === dummySeat && game.forehandControl.selectedCards) {
+        fcMode = game.forehandControl.mode;
+        fcMarkedIds = new Set(game.forehandControl.selectedCards.map(c => c.cardId));
+    }
+    let rows = gameBuildSideDummyHandRows(sorted);
+    let rowsByGroup = {};
+    for (let rowModel of rows) {
+        let group = rowModel.sortGroup;
+        let row = document.createElement('div');
+        row.className = 'hand';
+        row.setAttribute('sort-group', group);
+        rowsByGroup[group] = { el: row, cards: rowModel.cards };
+        surface.appendChild(row);
+    }
+
+    for (let rowModel of rows) {
+        let group = rowModel.sortGroup;
+        let rowInfo = rowsByGroup[group];
+        if (!rowInfo) continue;
+        for (let card of rowModel.cards) {
+            let cc = gameCreateCardContainer(card);
+            cc.setAttribute('data-da3p-dummy-card', 'true');
+            cc.removeAttribute('data-da3p-dummy-fc-final');
+            cc.setAttribute('data-selectable', 'false');
+            cc.style.cursor = 'default';
+            if (exposedCardIds.has(card.cardId)) {
+                cc.setAttribute('data-exposed', 'true');
+            }
+            if (deskCardIds.has(String(card.cardId))) {
+                cc.classList.add('da3p-dummy-card-on-desk');
+            }
+            if (fcMarkedIds && fcMarkedIds.has(card.cardId)) {
+                cc.setAttribute('data-da3p-dummy-fc-final', fcMode);
+                let marker = document.createElement('div');
+                marker.className = 'fc-marker fc-marker-' + fcMode;
+                let cardEl = cc.querySelector('.card');
+                let suitEl = cardEl.querySelector('.card-suit');
+                suitEl.after(marker);
+            }
+            if (fcSelectActive && gFCInteraction.exposedCardIds.has(card.cardId)) {
+                cc.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleCardSelection(card.cardId, cc);
+                });
+                if (selectedCardIds.has(card.cardId)) {
+                    cc.setAttribute('card-selected', 'true');
+                    gameSetSideDummyFCSelectionBackgroundVisual(cc, true);
+                }
+            }
+            rowInfo.el.appendChild(cc);
+        }
+    }
+
+    let namebar = document.createElement('div');
+    namebar.className = 'namebar';
+    namebar.setAttribute('show', 'show');
+    namebar.setAttribute('status', 'idle');
+
+    let posArea = document.createElement('div');
+    posArea.className = 'game-position-area';
+    posArea.textContent = gameGetFrameActorLabel('D', { compact: true });
+    namebar.appendChild(posArea);
+
+    let nameArea = document.createElement('div');
+    nameArea.className = 'name-area';
+    nameArea.textContent = gameGetSideDummyFoldToggleText(!!folded);
+    namebar.appendChild(nameArea);
+    gameBindSideDummyFoldToggleTarget(namebar, nameArea);
+
+    surface.appendChild(namebar);
+    if (fcSelectActive) {
+        surface.appendChild(gameCreateDummyFCActionsRow());
+    }
+}
+
+function renderSideDummyHand() {
+    let canReveal = gameCanRevealSideDummyHandNow();
+    let shouldShow = !!(canReveal && gDA3PSideDummyRevealState.revealed);
+    if (!shouldShow) {
+        clearSideDummyHandSurfaces();
+        return;
+    }
+
+    let displayPosition = gameGetDA3PDummyDisplayPosition();
+    if (!(displayPosition === 'left' || displayPosition === 'right')) {
+        clearSideDummyHandSurfaces();
+        return;
+    }
+
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat)) {
+        clearSideDummyHandSurfaces();
+        return;
+    }
+
+    gDA3PSideDummyRevealState.displayPosition = displayPosition;
+    gDA3PSideDummyRevealState.dummySeat = dummySeat;
+
+    if (displayPosition === 'left') clearSideDummyHandSurfaceForDisplayPosition('right');
+    else clearSideDummyHandSurfaceForDisplayPosition('left');
+
+    let surface = displayPosition === 'left' ? gLeftDummyHandSurface : gRightDummyHandSurface;
+    renderSideDummyHandSurface(surface, dummySeat, displayPosition, !!gDA3PSideDummyRevealState.folded);
 }
 
 function clearDeskForOvercallDecisionStep() {
@@ -1373,9 +2414,12 @@ function clearDeskForOvercallDecisionStep() {
         slot.removeAttribute('data-active');
         slot.removeAttribute('data-winner');
         slot.removeAttribute('data-has-exposed');
+        slot.removeAttribute('data-da3p-side-dummy-desk-hidden');
+        gDeskCardsBySeat[i] = [];
     }
     if (gDeskInfo) gDeskInfo.textContent = '';
     resetAllNamebars();
+    renderSideDummyHand();
 }
 
 /**
@@ -1403,12 +2447,14 @@ function renderDeskCards(player, cards) {
         row.appendChild(cc);
     }
     slot.appendChild(row);
+    gDeskCardsBySeat[player] = [...sorted];
 
     if (player !== localControlledPlayerIndex) {
         // Update persistent namebar width to match cards (§3.3)
         updateNamebarWidth(player, sorted.length);
         updateNamebarStatus(player, 'played');
     }
+    renderSideDummyHand();
 }
 
 
@@ -2209,7 +3255,7 @@ function breakCallingWindowTimer() {
  * @param {Function} onTimeout - called when both shot clock and bank time expire
  */
 function startPlayerMoveTimer(player, moveType, onTimeout) {
-    if (!isLocallyControlledSeat(player)) return; // bots are untimed (note 24 §2)
+    if (!gameCanLocallyControlActingSeat(player, moveType === 'play' ? 'trick-play' : null)) return; // bots are untimed (note 24 §2)
     clearTimers();
     gTimingPhase = moveType === 'base' ? 'playerMove' : 'playerMove';
     let timingCfg = getTimingConfigForPage();
@@ -2286,7 +3332,7 @@ function applyBaseTimeIncrementAfterBaseCompletion(player) {
  * using remaining bank time so the timer remains visible during FC selection.
  */
 function continueFCTimingUnit(player, onTimeout) {
-    if (!isLocallyControlledSeat(player)) return;
+    if (!gameCanLocallyControlActingSeat(player, 'forehand-control')) return;
     gTimingPhase = 'fcContinuation';
     gTimerExpireCallback = onTimeout;
 
@@ -2442,6 +3488,10 @@ function clearSharedGameStartUiStateForNewGame() {
 
     // Reference hand: clear stale cards from previous game/frame
     if (gReferenceHandSurface) gReferenceHandSurface.innerHTML = '';
+    clearTopDummyHandSurface();
+    clearSideDummyHandSurfaces();
+    gameResetTopDummyRevealState();
+    gameResetSideDummyRevealState();
 
     // Denomination/declaration display: clear stale strain icon and text
     if (gDenomArea)    gDenomArea.removeAttribute('strain');
@@ -2469,6 +3519,8 @@ function clearSharedGameStartUiStateForNewGame() {
 function resetBoardSurfacesForNewSession(nextSessionKind) {
     // 1. Desk slots: clear played cards; reset namebar data-status to idle.
     clearDesk();
+    clearTopDummyHandSurface();
+    clearSideDummyHandSurfaces();
 
     // 2. For non-4P sessions (e.g. 3PDA shell): also remove persistent .desk-namebar
     //    elements so stale 4P player labels do not remain in the desk slots.
@@ -2632,7 +3684,7 @@ function runFrameIntermittent(remainingMs) {
     if (game.isQiangzhuang) {
         displayText = t('timing.intermittentQiangzhuang');
     } else {
-        let pivotPosition = POSITION_LABELS[game.pivot];
+        let pivotPosition = gameGetActorLabelForSeat(game.pivot);
         displayText = t('timing.intermittentNormal', { position: pivotPosition, level: numberToLevel[game.level] });
     }
 
@@ -3151,6 +4203,7 @@ function resolveDeclaredPhase() {
                 const resolvedActor = bestDeclaration.frameActor || gameGetFrameActorForSeat(bestDeclaration.player);
                 const reframed = gameApplyDA3PResolvedPivotReframe(resolvedActor);
                 if (reframed) {
+                    engineResetDA3PAttackerDeskScoreForCurrentFrame();
                     initPersistentNamebarsForFrameContext(game.frameContext);
                     refreshTopLeftSeatAndLevelPositionBoxFromGameState();
                 } else {
@@ -3789,7 +4842,7 @@ function getLocalCrossingActionMode() {
 function isLocalCrossingSelectionMode() {
     if (!gCrossingState || !gCrossingState.localAction || !gCrossingState.trickPlayBlocked) return false;
     let mode = gCrossingState.localAction.mode;
-    return (mode === 'cross' || mode === 'crossback') && gCrossingState.localAction.seat === localControlledPlayerIndex;
+    return (mode === 'cross' || mode === 'crossback') && gCrossingState.localAction.controlSeat === localControlledPlayerIndex;
 }
 
 function crossingHasAnyActiveTeamProcess() {
@@ -4013,6 +5066,10 @@ function performCrossMove(teamKey, cards) {
     if (!isValidCrossingSelection(ts.claimantSeat, cards, true)) return false;
 
     transferCardsBetweenSeats(ts.claimantSeat, ts.partnerSeat, cards);
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (Number.isInteger(dummySeat) && ts.partnerSeat === dummySeat) {
+        gameRevealTopDummyHand('crossing-receive');
+    }
     ts.phase = 'waiting-crossback';
     ts.botPending = false;
     appendLog(t('log.crossingMoveDone', { playerName: PLAYER_NAMES[ts.claimantSeat], partnerName: PLAYER_NAMES[ts.partnerSeat] }));
@@ -4042,12 +5099,15 @@ function refreshCrossingLocalActionState() {
             let ts = gCrossingState.teamState[teamKey];
             if (!ts) continue;
             if (ts.phase === 'waiting-cross' && ts.claimantSeat === localControlledPlayerIndex) {
-                nextAction = { mode: 'cross', teamKey, seat: localControlledPlayerIndex };
+                nextAction = { mode: 'cross', teamKey, seat: localControlledPlayerIndex, controlSeat: localControlledPlayerIndex };
                 break;
             }
-            if (ts.phase === 'waiting-crossback' && ts.partnerSeat === localControlledPlayerIndex) {
-                nextAction = { mode: 'crossback', teamKey, seat: localControlledPlayerIndex };
-                break;
+            if (ts.phase === 'waiting-crossback') {
+                let controlSeat = gameGetLocalControlSeatForActingSeat(ts.partnerSeat, 'crossback');
+                if (Number.isInteger(controlSeat) && controlSeat === localControlledPlayerIndex) {
+                    nextAction = { mode: 'crossback', teamKey, seat: ts.partnerSeat, controlSeat };
+                    break;
+                }
             }
         }
     }
@@ -4059,7 +5119,7 @@ function refreshCrossingLocalActionState() {
         updatePlayButton();
         return;
     }
-    let enteredNewAction = (!prev || prev.mode !== nextAction.mode || prev.teamKey !== nextAction.teamKey || prev.seat !== nextAction.seat);
+    let enteredNewAction = (!prev || prev.mode !== nextAction.mode || prev.teamKey !== nextAction.teamKey || prev.seat !== nextAction.seat || prev.controlSeat !== nextAction.controlSeat);
     if (enteredNewAction) {
         clearSelection();
         if (nextAction.mode === 'cross' && nextAction.seat === localControlledPlayerIndex) {
@@ -4128,7 +5188,7 @@ function driveCrossingProcesses() {
         if (!ts) continue;
         if (ts.phase === 'waiting-cross' && ts.claimantSeat !== localControlledPlayerIndex) {
             scheduleBotCrossingAction(teamKey, 'cross');
-        } else if (ts.phase === 'waiting-crossback' && ts.partnerSeat !== localControlledPlayerIndex) {
+        } else if (ts.phase === 'waiting-crossback' && !gameCanLocallyControlActingSeat(ts.partnerSeat, 'crossback')) {
             scheduleBotCrossingAction(teamKey, 'crossback');
         }
     }
@@ -4142,17 +5202,17 @@ function driveCrossingProcesses() {
 function trySubmitLocalCrossingSelection() {
     if (!gCrossingState || !gCrossingState.localAction) return false;
     let action = gCrossingState.localAction;
-    if (action.seat !== localControlledPlayerIndex) return false;
+    if (action.controlSeat !== localControlledPlayerIndex) return false;
     if (action.mode !== 'cross' && action.mode !== 'crossback') return false;
 
-    let cards = getSelectedCards(localControlledPlayerIndex);
+    let cards = getSelectedCards(action.seat);
     let requireAllTrumps = (action.mode === 'cross');
-    if (!isValidCrossingSelection(localControlledPlayerIndex, cards, requireAllTrumps)) {
+    if (!isValidCrossingSelection(action.seat, cards, requireAllTrumps)) {
         showError(requireAllTrumps ? t('errors.crossingRequireAllTrumps') : t('errors.crossingSelectFive'));
         return true;
     }
 
-    stopPlayerMoveTimer(localControlledPlayerIndex);
+    stopPlayerMoveTimer(action.seat);
     let ok = (action.mode === 'cross') ? performCrossMove(action.teamKey, cards) : performCrossbackMove(action.teamKey, cards);
     if (!ok) {
         showError(t('errors.playFailed'));
@@ -4306,12 +5366,13 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
         exposedDivisionCards: exposedDivCards,
         exposedCardIds: new Set(exposedDivCards.map(c => c.cardId)),
         selectedCornerIds: new Set(),
+        useVisibleDummyHand: false,
         mode: null,
         selectionMounted: false,
         commitButtonsMounted: false
     };
 
-    if (!isLocallyControlledSeat(controller)) {
+    if (!gameCanLocallyControlActingSeat(controller, 'forehand-control')) {
         // Bot controller: must-play with empty selectedCards (effectively a no-op)
         engineExerciseFC(targetPlayer, 'must-play', []);
         appendLog(t('log.forehandControlBotExercised', { controllerName: gameGetPlayerLogNameForSeat(controller) }));
@@ -4324,16 +5385,16 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
         updatePhaseDisplay(t('phase.forehandControl', { controllerName: gameGetPlayerLogNameForSeat(controller), targetName: gameGetPlayerLogNameForSeat(targetPlayer) }));
         updateStatus(t('status.forehandControl', { targetName: gameGetPlayerLogNameForSeat(targetPlayer) }));
 
-        // Show exposed-preview in interactive FC mode on the target's namebar
-        let nb = gDeskNamebars[targetPlayer];
-        if (nb) {
-            let preview = nb.querySelector('.exposed-preview');
-            if (preview) {
-                preview.classList.add('fc-active');
-                renderFCCorners(targetPlayer, preview);
-                gFCInteraction.selectionMounted = true;
-                gFCInteraction.commitButtonsMounted = true;
-            }
+        gFCInteraction.useVisibleDummyHand = gameShouldUseVisibleDummyHandForFC();
+        if (gFCInteraction.useVisibleDummyHand) {
+            clearSelection();
+            gameSetFCModeSelectorVisible(false);
+            gameUnmountForehandControlOnTargetNamebar(targetPlayer);
+            renderAllHands();
+            gFCInteraction.commitButtonsMounted = true;
+        } else {
+            gameMountForehandControlOnTargetNamebar(targetPlayer);
+            gameSetFCModeSelectorVisible(false);
         }
 
         // Enable main play button as FC commit fallback (must-play with current selection)
@@ -4353,6 +5414,9 @@ function exerciseForehandControl(targetPlayer, fcTrigger) {
 function renderFCCorners(targetPlayer, preview) {
     let fci = gFCInteraction;
     preview.innerHTML = '';
+    preview.addEventListener('click', (event) => {
+        event.stopPropagation();
+    });
 
     // Render selectable corner cards
     for (let card of fci.exposedDivisionCards) {
@@ -4361,7 +5425,9 @@ function renderFCCorners(targetPlayer, preview) {
             el.setAttribute('data-fc-selected', '');
         }
         el.style.cursor = 'pointer';
-        el.addEventListener('click', () => {
+        el.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (fci.selectedCornerIds.has(card.cardId)) {
                 fci.selectedCornerIds.delete(card.cardId);
             } else {
@@ -4379,13 +5445,21 @@ function renderFCCorners(targetPlayer, preview) {
     let btnPlay = document.createElement('button');
     btnPlay.className = 'button fc-action-btn';
     btnPlay.textContent = t('fc.mustPlay');
-    btnPlay.addEventListener('click', () => commitForehandControl('must-play'));
+    btnPlay.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        commitForehandControl('must-play');
+    });
     btnRow.appendChild(btnPlay);
 
     let btnHold = document.createElement('button');
     btnHold.className = 'button fc-action-btn';
     btnHold.textContent = t('fc.mustHold');
-    btnHold.addEventListener('click', () => commitForehandControl('must-hold'));
+    btnHold.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        commitForehandControl('must-hold');
+    });
     btnRow.appendChild(btnHold);
 
     preview.appendChild(btnRow);
@@ -4402,25 +5476,29 @@ function commitForehandControl(mode) {
     stopPlayerMoveTimer(fci.controller);
     let targetPlayer = fci.target;
 
-    // Get selected cards from the corner selection
-    let markedCards = fci.exposedDivisionCards.filter(c => fci.selectedCornerIds.has(c.cardId));
+    let selectedMode = mode || gameGetCurrentFCModeSelection();
 
-    engineExerciseFC(targetPlayer, mode, markedCards);
+    // Get selected cards from either visible dummy hand selection or corner selection.
+    let markedCards = null;
+    if (fci.useVisibleDummyHand) {
+        markedCards = fci.exposedDivisionCards.filter(c => selectedCardIds.has(c.cardId));
+    } else {
+        markedCards = fci.exposedDivisionCards.filter(c => fci.selectedCornerIds.has(c.cardId));
+    }
+
+    engineExerciseFC(targetPlayer, selectedMode, markedCards);
 
     // Clean up FC-active preview — deactivate ForehandControlInteractionState
-    let nb = gDeskNamebars[targetPlayer];
-    if (nb) {
-        let preview = nb.querySelector('.exposed-preview');
-        if (preview) {
-            preview.classList.remove('fc-active');
-        }
+    if (!fci.useVisibleDummyHand) {
+        gameUnmountForehandControlOnTargetNamebar(targetPlayer);
     }
+    gameSetFCModeSelectorVisible(false);
 
     if (markedCards.length > 0) {
         appendLog(t('log.forehandControlMarked', {
             controllerName: gameGetPlayerLogNameForSeat(fci.controller),
             count: markedCards.length,
-            mode: mode === 'must-play' ? t('fc.mustPlay') : t('fc.mustHold')
+            mode: selectedMode === 'must-play' ? t('fc.mustPlay') : t('fc.mustHold')
         }));
     } else {
         appendLog(t('log.forehandControlNoMarks', { controllerName: gameGetPlayerLogNameForSeat(fci.controller) }));
@@ -4434,6 +5512,7 @@ function commitForehandControl(mode) {
     }
 
     clearSelection();
+    renderAllHands();
     promptCurrentPlayer();
 }
 
@@ -4455,6 +5534,8 @@ function promptCurrentPlayer() {
     let cp = engineGetCurrentPlayer();
     let cpFrameActor = gameGetFrameActorForSeat(cp);
     let isLeading = (game.currentTurnIndex === 0);
+    maybeRevealSideDummyAtFirstTrickStart(cp, isLeading);
+    maybeRevealTopDummyAtFirstTrickStart(cp, isLeading);
 
     // Check if forehand control needs to be exercised before this player follows
     // At most one FC exercise per follow event — skip if already active
@@ -4480,9 +5561,10 @@ function promptCurrentPlayer() {
 
     highlightActivePlayer(cp);
 
-    if (isLocallyControlledSeat(cp) && !gameShouldAutoPlayFrameActor(cpFrameActor)) {
+    if (gameCanLocallyControlActingSeat(cp, 'trick-play')) {
         // Switch displayed hand to the active human player
-        activeLocalSeat = cp;
+        let controlSeat = gameGetLocalControlSeatForActingSeat(cp, 'trick-play');
+        activeLocalSeat = Number.isInteger(controlSeat) ? controlSeat : cp;
         clearSelection();
 
         if (isLeading) {
@@ -4578,6 +5660,176 @@ function gameStopDA3PAtCountingEntry(result) {
     }
 }
 
+function gameComputeDA3PResultCore(finalScore, gameConfig) {
+    const cfg = gameConfig || {};
+    const stageThreshold = (cfg.stageThreshold != null) ? Number(cfg.stageThreshold) : 80;
+    const rawLevelThreshold = (cfg.levelThreshold != null) ? Number(cfg.levelThreshold) : 40;
+    const levelThreshold = Math.max(1, Number(rawLevelThreshold) || 1);
+    const levelCap = (cfg.levelUpLimitPerFrame != null) ? Number(cfg.levelUpLimitPerFrame) : null;
+
+    let defenseHolds;
+    let levelDelta;
+    let resultKey;
+    if (finalScore < stageThreshold) {
+        defenseHolds = true;
+        levelDelta = Math.ceil((stageThreshold - finalScore) / levelThreshold);
+        if (finalScore === 0) levelDelta += 1;
+        if (Number.isFinite(levelCap) && levelCap >= 0 && levelDelta > levelCap) levelDelta = levelCap;
+        if (levelDelta <= 1) resultKey = 'retainStage';
+        else if (levelDelta === 2) resultKey = 'smallSlam';
+        else if (levelDelta === 3) resultKey = 'grandSlam';
+        else resultKey = 'defendUpN';
+    } else {
+        defenseHolds = false;
+        levelDelta = Math.floor((finalScore - stageThreshold) / levelThreshold);
+        if (Number.isFinite(levelCap) && levelCap >= 0 && levelDelta > levelCap) levelDelta = levelCap;
+        if (levelDelta === 0) resultKey = 'takeStage';
+        else if (levelDelta === 1) resultKey = 'upOne';
+        else if (levelDelta === 2) resultKey = 'upTwo';
+        else resultKey = 'upN';
+    }
+    return { defenseHolds, levelDelta, resultKey };
+}
+
+function gameGetDA3PSuccessorActor(pivotActor) {
+    let order = createDA3PCanonicalFrameOrderForPivot(pivotActor);
+    return Array.isArray(order) ? order[1] : null;
+}
+
+function gameBuildDA3PFrameResultFromFinalize(result) {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.frameContext) return null;
+    let frameContext = game.frameContext;
+    let pivotActor = frameContext.pivotActor;
+    let canonical = Array.isArray(frameContext.canonicalFrameOrder)
+        ? [...frameContext.canonicalFrameOrder]
+        : createDA3PCanonicalFrameOrderForPivot(pivotActor);
+    if (!Array.isArray(canonical) || canonical.length !== 4) return null;
+
+    let successorActor = canonical[1];
+    let predecessorActor = canonical[3];
+    let defendingActors = [pivotActor, 'D'];
+    let attackingActors = [successorActor, predecessorActor];
+
+    let oldLevelsByActor = gameCloneDA3PActorLevels(game.da3pLevelsByActor || frameContext.levelsByActor, game.level);
+    let oldCyclesByActor = gameCloneDA3PActorCycles(game.da3pLevelCyclesByActor || frameContext.levelCyclesByActor);
+
+    let settlement = gameComputeDA3PResultCore(result.totalScore, game.gameConfig || {});
+    let da3pAttackerDeskScore = gameCloneDA3PAttackerDeskScoreSnapshot(result && result.da3pAttackerDeskScore);
+    let deskScoreTotal = Number.isFinite(Number(result && result.deskScoreTotal))
+        ? Number(result.deskScoreTotal)
+        : Number(result && result.counterScore) || 0;
+    let sharedScore = {
+        baseScore: Number(result && result.baseScore) || 0,
+        compensationScore: Number(result && result.multiplayCompensation) || 0,
+        endingCompensationScore: Number(result && result.endingCompensation) || 0,
+        otherSharedAdjustments: 0,
+    };
+    let levelDeltaByActor = { N: 0, Sw: 0, Se: 0 };
+    if (settlement.defenseHolds) {
+        levelDeltaByActor[pivotActor] = settlement.levelDelta;
+    } else {
+        levelDeltaByActor[successorActor] = settlement.levelDelta;
+        levelDeltaByActor[predecessorActor] = settlement.levelDelta;
+    }
+
+    let skipLevelSet = gameGetDA3PSkipLevelSet();
+    let newLevelsByActor = gameCloneDA3PActorLevels(oldLevelsByActor, game.level);
+    let newCyclesByActor = gameCloneDA3PActorCycles(oldCyclesByActor);
+    for (let actor of DA3P_REAL_ACTORS) {
+        let step = Number(levelDeltaByActor[actor]) || 0;
+        if (step <= 0) continue;
+        let advanced = gameAdvanceDA3PLevelState(newLevelsByActor[actor], newCyclesByActor[actor], step, skipLevelSet);
+        newLevelsByActor[actor] = advanced.level;
+        newCyclesByActor[actor] = advanced.cycleIndex;
+    }
+
+    let pivotPassMode = (game.gameConfig && game.gameConfig.pivotPassMode) || 'rotate-pivot';
+    let nextPivotActor;
+    if (pivotPassMode === 'rotate-pivot') {
+        nextPivotActor = successorActor;
+    } else {
+        nextPivotActor = settlement.defenseHolds ? pivotActor : successorActor;
+    }
+
+    let nextContextBuilt = gameBuildDA3PFrameContextFromProgression({
+        isQiangzhuangFrame: false,
+        pivotActor: nextPivotActor,
+        frameIndex: (Number.isInteger(frameContext.frameIndex) ? frameContext.frameIndex : 0) + 1,
+        frameNumber: (Number.isInteger(frameContext.frameNumber) ? frameContext.frameNumber : 1) + 1,
+        levelsByActor: newLevelsByActor,
+        levelCyclesByActor: newCyclesByActor,
+        selectedReferenceActor: game.da3pSelectedReferenceActor || getDraftDA3PReferenceActor(),
+    });
+
+    return {
+        kind: 'frame-result',
+        tableFormat: ShengjiTableFormat.DA3P,
+        frameKind: 'da3p',
+        frameIndex: Number.isInteger(frameContext.frameIndex) ? frameContext.frameIndex : 0,
+        frameNumber: Number.isInteger(frameContext.frameNumber) ? frameContext.frameNumber : 1,
+        pivotActor,
+        canonicalFrameOrder: canonical,
+        realActors: [...DA3P_REAL_ACTORS],
+        dummyActor: 'D',
+        totalFrameScore: result.totalScore,
+        levelAdvanceBasisScore: Number.isFinite(Number(result.levelAdvanceBasisScore))
+            ? Number(result.levelAdvanceBasisScore)
+            : Number(result.totalScore) || 0,
+        finalCounterScore: result.totalScore,
+        deskScoreTotal,
+        da3pAttackerDeskScore,
+        sharedScore,
+        attackingActors,
+        defendingActors,
+        defenseHolds: settlement.defenseHolds,
+        levelDelta: settlement.levelDelta,
+        resultKey: settlement.resultKey,
+        levelDeltaByActor,
+        oldLevelsByActor,
+        oldLevelCyclesByActor: oldCyclesByActor,
+        newLevelsByActor,
+        newLevelCyclesByActor: newCyclesByActor,
+        nextPivotActor,
+        nextFrameContextDraft: nextContextBuilt.frameContext,
+    };
+}
+
+function gameConsumeDA3PFrameResult(frameResult) {
+    if (!frameResult || frameResult.tableFormat !== ShengjiTableFormat.DA3P) return null;
+    if (!Array.isArray(frameResult.realActors) || frameResult.realActors.join(',') !== DA3P_REAL_ACTORS.join(',')) return null;
+    if (!frameResult.levelDeltaByActor || Object.prototype.hasOwnProperty.call(frameResult.levelDeltaByActor, 'D')) return null;
+
+    game.da3pLevelsByActor = gameCloneDA3PActorLevels(frameResult.newLevelsByActor, game.level);
+    game.da3pLevelCyclesByActor = gameCloneDA3PActorCycles(frameResult.newLevelCyclesByActor);
+
+    let nextContext = frameResult.nextFrameContextDraft;
+    if (!nextContext) return null;
+    nextContext.levelsByActor = gameCloneDA3PActorLevels(game.da3pLevelsByActor, game.level);
+    nextContext.levelCyclesByActor = gameCloneDA3PActorCycles(game.da3pLevelCyclesByActor);
+
+    pendingNextFrame = {
+        tableFormat: ShengjiTableFormat.DA3P,
+        da3pFrameContext: nextContext,
+        selectedReferenceActor: game.da3pSelectedReferenceActor || getDraftDA3PReferenceActor(),
+    };
+
+    let cfg = game.gameConfig || {};
+    let gameWon = false;
+    let winners = [];
+    if (cfg.gameMode === 'pass-A') {
+        winners = DA3P_REAL_ACTORS.filter(actor => game.da3pLevelsByActor[actor] === 12);
+        gameWon = winners.length > 0;
+    }
+
+    return {
+        gameWon,
+        winners,
+        nextFrameContext: nextContext,
+        newLevelsByActor: gameCloneDA3PActorLevels(game.da3pLevelsByActor, game.level),
+        newLevelCyclesByActor: gameCloneDA3PActorCycles(game.da3pLevelCyclesByActor),
+    };
+}
+
 /**
  * Handle failed multiplay display sequence:
  * 1) Announce all blockers
@@ -4642,6 +5894,22 @@ function handleFailedMultiplay(player, fm, allIntendedCards, result, onContinue)
     }, 1000);
 }
 
+function maybeShowFakeMultiplayWarning(player, fakeMeta) {
+    if (!fakeMeta || !fakeMeta.isFakeMultiplay) return;
+    let cause = fakeMeta.fakeCause || 'unknown';
+    let evidence = fakeMeta.evidenceSource || 'existing-known-info';
+    let blockerSeat = Number.isInteger(fakeMeta.blockerSeat) ? fakeMeta.blockerSeat : null;
+    let blockerName = blockerSeat !== null ? gameGetPlayerLogNameForSeat(blockerSeat) : '-';
+    let warningKey = evidence.indexOf('public-dummy') >= 0 ? 'hints.fakeMultiplayWarningPublicDummy' : 'hints.fakeMultiplayWarningGeneric';
+    appendLog(t('log.fakeMultiplayWarning', {
+        playerName: gameGetPlayerLogNameForSeat(player),
+        cause,
+        evidence,
+        blockerName
+    }));
+    updateStatus(t(warningKey));
+}
+
 function botTakeTurn(player) {
     if (isPauseDialogBlockingGameplay()) return;
     let cards = botPlay(player);
@@ -4651,6 +5919,8 @@ function botTakeTurn(player) {
         appendLog(t('log.botError', { error: result.error }));
         return;
     }
+
+    maybeShowFakeMultiplayWarning(player, result.fakeMultiplay);
 
     if (result.failedMultiplay) {
         handleFailedMultiplay(player, result.failedMultiplay, cards, result, () => {
@@ -4680,9 +5950,10 @@ function botTakeTurn(player) {
 
 function humanPlayCards() {
     if (isPauseDialogBlockingGameplay()) return;
-    // During forehand control exercise, the main play button commits FC with must-play
+    // During forehand control exercise, the main play button commits FC with selected mode.
     if (gFCInteraction) {
-        commitForehandControl('must-play');
+        if (gameIsUnfoldedSideDummyFCLocalMode()) return;
+        commitForehandControl(gameGetCurrentFCModeSelection());
         return;
     }
 
@@ -5019,6 +6290,46 @@ function renderLevelPositionSquare(host, options) {
     host.appendChild(box);
 }
 
+function renderDA3PLevelPositionSquare(host, options) {
+    if (!host) return;
+    host.innerHTML = '';
+
+    let box = document.createElement('div');
+    box.className = 'level-position-box' + (options.boxClassName ? (' ' + options.boxClassName) : '');
+    if (options.boxId) box.id = options.boxId;
+
+    let square = document.createElement('div');
+    square.className = 'level-position-square' + (options.squareClassName ? (' ' + options.squareClassName) : '');
+    if (options.squareId) square.id = options.squareId;
+
+    let displayMap = options.displayMap || { bottom: null, right: null, top: null, left: null };
+    let levelsByActor = gameCloneDA3PActorLevels(options.levelsByActor || {}, Number.isInteger(game && game.level) ? game.level : 0);
+    let levelCyclesByActor = gameCloneDA3PActorCycles(options.levelCyclesByActor || {});
+    let pivotActor = options.pivotActor || null;
+
+    ['top', 'right', 'bottom', 'left'].forEach((position) => {
+        let section = document.createElement('div');
+        section.className = 'level-position-triangle' + (options.triangleClassName ? (' ' + options.triangleClassName) : '');
+        section.setAttribute('data-pos', position);
+
+        let actor = displayMap[position];
+        if (actor === 'D') {
+            section.setAttribute('data-team', 'ally');
+            square.appendChild(section);
+            return;
+        }
+
+        if (pivotActor && actor === pivotActor) section.setAttribute('data-team', 'pivot');
+        else section.setAttribute('data-team', 'other');
+
+        renderLevelWithCycle(section, levelsByActor[actor], levelCyclesByActor[actor]);
+        square.appendChild(section);
+    });
+
+    box.appendChild(square);
+    host.appendChild(box);
+}
+
 function ensureSeatsHoverLevelPositionBox() {
     if (!gSeatsDiv) return;
     if (gSeatsHoverLevelPositionBox) return;
@@ -5060,6 +6371,31 @@ function renderSeatsHoverLevelPositionSquare() {
     ensureSeatsHoverLevelPositionBox();
     if (!gSeatsHoverLevelPositionBox) return;
 
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        let frameContext = game.frameContext || {};
+        let displayMap = frameContext.displayMap;
+        if (!displayMap) {
+            let order = Array.isArray(frameContext.canonicalFrameOrder)
+                ? frameContext.canonicalFrameOrder
+                : (Array.isArray(frameContext.frameActors) ? frameContext.frameActors : ['N', 'Sw', 'D', 'Se']);
+            let selectedReferenceActor = normalizeDA3PReferenceActor((game && game.da3pSelectedReferenceActor) || getDraftDA3PReferenceActor());
+            displayMap = createDisplayMapFromFrameOrder(order, selectedReferenceActor);
+        }
+
+        renderDA3PLevelPositionSquare(gSeatsHoverLevelPositionBox, {
+            boxId: 'seats-toggle-level-position-box-root',
+            boxClassName: 'seats-toggle-level-position-box-root',
+            squareId: 'seats-toggle-level-position-square',
+            squareClassName: 'seats-toggle-level-position-square',
+            triangleClassName: 'seats-toggle-level-position-triangle',
+            displayMap,
+            levelsByActor: game.da3pLevelsByActor || (frameContext && frameContext.levelsByActor),
+            levelCyclesByActor: game.da3pLevelCyclesByActor || (frameContext && frameContext.levelCyclesByActor),
+            pivotActor: frameContext.pivotStatus === 'resolved' ? frameContext.pivotActor : null,
+        });
+        return;
+    }
+
     let state = getCurrentFrameSideLevelAndCycleState();
     
     // Compute box dimensions from the seats-box outer size
@@ -5084,9 +6420,6 @@ function renderSeatsHoverLevelPositionSquare() {
 
 function setSeatsTopLeftBoxView(view) {
     if (!gSeatsDiv) return;
-    if (view === 'level-position' && gameIsDA3PSharedFirstFrameActive()) {
-        view = 'seats';
-    }
     gSeatsTopLeftBoxView = (view === 'level-position') ? 'level-position' : 'seats';
 
     let tableNumber = document.getElementById('div-table-number');
@@ -7471,7 +8804,7 @@ function onNewGameButtonClick() {
 
 function humanPlayCardsCore(cp) {
     if (isPauseDialogBlockingGameplay()) return;
-    if (!isLocallyControlledSeat(cp)) return;
+    if (!gameCanLocallyControlActingSeat(cp, game.phase === GamePhase.PLAYING ? 'trick-play' : null)) return;
     if (gCrossingState && gCrossingState.trickPlayBlocked) {
         trySubmitLocalCrossingSelection();
         return;
@@ -7507,6 +8840,8 @@ function humanPlayCardsCore(cp) {
         showError(result.error);
         return;
     }
+
+    maybeShowFakeMultiplayWarning(cp, result.fakeMultiplay);
 
     stopPlayerMoveTimer(cp);
     clearSelection();
@@ -7620,9 +8955,29 @@ function finishGame() {
     // Base-score no longer shown in right-top corner (note 25 §2.1)
 
     if (gameIsDA3PSharedFirstFrameActive()) {
-        // Note 113: DA3P now reaches counting-entry boundary, but scoring/inter-frame
-        // progression is deferred.
-        gameStopDA3PAtCountingEntry(result);
+        let da3pFrameResult = gameBuildDA3PFrameResultFromFinalize(result);
+        let consumed = gameConsumeDA3PFrameResult(da3pFrameResult);
+        if (!da3pFrameResult || !consumed) {
+            gameStopDA3PAtCountingEntry(result);
+            return;
+        }
+
+        appendLog(t('log.levelAdvance', {
+            players: (da3pFrameResult.defenseHolds
+                ? [da3pFrameResult.pivotActor]
+                : da3pFrameResult.attackingActors
+            ).join(', '),
+            delta: da3pFrameResult.levelDelta,
+        }));
+
+        if (consumed.gameWon) {
+            appendLog(t('log.gameWon', { players: consumed.winners.join(', ') }));
+            updatePhaseDisplay(t('phase.gameWon'));
+        } else {
+            gBtnNewGame.textContent = t('buttons.nextFrame');
+        }
+
+        showCountingDialog(result, da3pFrameResult, consumed);
         return;
     }
 
@@ -7695,8 +9050,66 @@ function getCountingDialogResultName(frameResult, gameConfig) {
     return '上' + numberToChineseNumeral(frameResult.levelDelta);
 }
 
+function getDA3PResultActorsForCountingSummary(frameResult) {
+    if (!frameResult) return [];
+
+    if (frameResult.defenseHolds) {
+        return [frameResult.pivotActor].filter(actor => actor && actor !== 'D');
+    }
+
+    let canonical = Array.isArray(frameResult.canonicalFrameOrder)
+        ? frameResult.canonicalFrameOrder
+        : [];
+    let successorActor = canonical[1];
+    let predecessorActor = canonical[3];
+    let actors = [successorActor, predecessorActor].filter(actor => actor && actor !== 'D');
+
+    if (actors.length > 0) return actors;
+
+    let fallback = Array.isArray(frameResult.attackingActors)
+        ? frameResult.attackingActors.filter(actor => actor && actor !== 'D')
+        : [];
+    return fallback.slice(0, 2);
+}
+
+function getDA3PCountingResultPhrase(frameResult, actorCount) {
+    if (!frameResult) return '';
+
+    let count = Number.isInteger(actorCount) ? actorCount : 1;
+    let delta = Math.max(0, Math.floor(Number(frameResult.levelDelta) || 0));
+    let takeStage = !frameResult.defenseHolds && (delta === 0 || frameResult.resultKey === 'takeStage');
+    let locale = getLocale();
+
+    if (takeStage) {
+        return locale === 'en' ? ' take stage' : '上台';
+    }
+    if (delta <= 0) {
+        return locale === 'en' ? (' ' + t('counting.noLevelChange')) : t('counting.noLevelChange');
+    }
+    if (locale === 'en') {
+        if (delta === 1) return (count > 1) ? ' advance 1 level' : ' advances 1 level';
+        return (count > 1) ? (' advance ' + String(delta) + ' levels') : (' advances ' + String(delta) + ' levels');
+    }
+    return '升' + String(delta) + '级';
+}
+
+function getDA3PCountingResultSummary(frameResult) {
+    if (!frameResult) return '';
+    let locale = getLocale();
+    let actors = getDA3PResultActorsForCountingSummary(frameResult);
+    let labels = actors.map(actor => gameGetFrameActorLabel(actor)).filter(Boolean);
+    let phrase = getDA3PCountingResultPhrase(frameResult, labels.length);
+    if (labels.length === 0) return phrase.trim();
+    let joined = (locale === 'en') ? labels.join(' ') : labels.join('');
+    return joined + phrase;
+}
+
 function getCountingDialogResultDetail(frameResult) {
-    if (!frameResult || !Array.isArray(frameResult.advancingPlayers) || frameResult.advancingPlayers.length === 0) return '';
+    if (!frameResult) return '';
+    if (frameResult.tableFormat === ShengjiTableFormat.DA3P) {
+        return getDA3PCountingResultSummary(frameResult);
+    }
+    if (!Array.isArray(frameResult.advancingPlayers) || frameResult.advancingPlayers.length === 0) return '';
     let sideLabel = getNaturalSideLabelByPlayer(frameResult.advancingPlayers[0]);
     if (!frameResult.defenseHolds && frameResult.levelDelta === 0) return sideLabel + '上台';
     return sideLabel + '升' + String(frameResult.levelDelta) + '级';
@@ -7743,7 +9156,28 @@ function renderCountingDialogScoreCircle(totalScore) {
 function renderCountingDialogNextFrameSquare(applied) {
     let host = document.getElementById('cd-next-frame');
     if (!host) return;
-    if (!applied || !Array.isArray(applied.newLevels)) return;
+    if (!applied) return;
+
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        let nextContext = pendingNextFrame && pendingNextFrame.da3pFrameContext
+            ? pendingNextFrame.da3pFrameContext
+            : null;
+        if (!nextContext || !nextContext.displayMap) return;
+        renderDA3PLevelPositionSquare(host, {
+            boxId: 'cd-next-frame-box',
+            boxClassName: 'cd-next-frame-box',
+            squareId: 'cd-next-frame-square',
+            squareClassName: 'cd-next-frame-square',
+            triangleClassName: 'cd-next-frame-triangle',
+            displayMap: nextContext.displayMap,
+            levelsByActor: nextContext.levelsByActor,
+            levelCyclesByActor: nextContext.levelCyclesByActor,
+            pivotActor: nextContext.pivotStatus === 'resolved' ? nextContext.pivotActor : null,
+        });
+        return;
+    }
+
+    if (!Array.isArray(applied.newLevels)) return;
 
     let nextCycleIndexBySide = Array.isArray(applied.newCycleIndexBySide)
         ? applied.newCycleIndexBySide
@@ -7806,7 +9240,22 @@ function showCountingDialog(result, frameResult, applied) {
     let cdScore = document.getElementById('cd-score');
     cdScore.innerHTML = '<div class="cd-score-label text">' + t('counting.scoreLabel') + '</div>';
     let deskScore = breakdown.counterScore;
-    addScoreRow(cdScore, t('counting.deskScore'), deskScore);
+    let da3pDesk = (frameResult && frameResult.da3pAttackerDeskScore)
+        || result.da3pAttackerDeskScore
+        || breakdown.da3pAttackerDeskScore
+        || null;
+    let isDA3PSplit = !!(frameResult && frameResult.tableFormat === ShengjiTableFormat.DA3P && da3pDesk && da3pDesk.scoreByActor);
+    if (isDA3PSplit) {
+        let successorActor = da3pDesk.successorActor;
+        let predecessorActor = da3pDesk.predecessorActor;
+        let successorScore = Number(da3pDesk.scoreByActor[successorActor]) || 0;
+        let predecessorScore = Number(da3pDesk.scoreByActor[predecessorActor]) || 0;
+        addScoreRow(cdScore, t('counting.deskScore'), '');
+        addScoreRow(cdScore, t('counting.deskScoreSuccessor'), successorScore, { indentLevel: 1 });
+        addScoreRow(cdScore, t('counting.deskScorePredecessor'), predecessorScore, { indentLevel: 1 });
+    } else {
+        addScoreRow(cdScore, t('counting.deskScore'), deskScore);
+    }
     if (result.attackersWonBase) {
         let baseScoreLabel = t('counting.baseScore');
         addScoreRow(cdScore, baseScoreLabel, breakdown.baseScore);
@@ -7833,6 +9282,14 @@ function showCountingDialog(result, frameResult, applied) {
     if (btnSave) btnSave.disabled = true;
     btnReady.onclick = () => {
         hideCountingDialog();
+        if (pendingNextFrame && pendingNextFrame.tableFormat === ShengjiTableFormat.DA3P && pendingNextFrame.da3pFrameContext) {
+            gameStartDA3PSharedFrameFromContext(
+                pendingNextFrame.da3pFrameContext,
+                pendingNextFrame.selectedReferenceActor
+            );
+            pendingNextFrame = null;
+            return;
+        }
         startNewGame();
     };
     btnLeave.onclick = () => {
@@ -7849,9 +9306,13 @@ function showCountingDialog(result, frameResult, applied) {
 
 }
 
-function addScoreRow(parent, label, value) {
+function addScoreRow(parent, label, value, options) {
+    let opts = options || {};
     let row = document.createElement('div');
     row.className = 'cd-score-row';
+    if (Number.isInteger(opts.indentLevel) && opts.indentLevel > 0) {
+        row.style.paddingLeft = String(opts.indentLevel * 12) + 'px';
+    }
     row.innerHTML = '<span class="text">' + label + '</span><span class="cd-score-row-value">' + value + '</span>';
     parent.appendChild(row);
 }

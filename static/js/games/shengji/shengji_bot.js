@@ -1058,8 +1058,10 @@ function botFindKnownBlockerForElement(leader, ledElement) {
 }
 
 function botIsKnownFakeMultiplay(leader, candidateCards) {
-    let resolved = engineResolveLead(candidateCards || []);
-    if (!resolved || resolved.elements.length <= 1) {
+    let detection = (typeof engineDetectFakeMultiplay === 'function')
+        ? engineDetectFakeMultiplay(leader, candidateCards || [])
+        : { isMultiplay: false, isFakeMultiplay: false, fakeCause: null, evidenceSource: null, blockerSeat: null, blockedElement: null };
+    if (!detection || !detection.isMultiplay) {
         return {
             isMultiplay: false,
             isKnownFake: false,
@@ -1069,22 +1071,14 @@ function botIsKnownFakeMultiplay(leader, candidateCards) {
         };
     }
 
-    for (let element of resolved.elements) {
-        let blocker = botFindKnownBlockerForElement(leader, element);
-        if (blocker) {
-            return {
-                isMultiplay: true,
-                isKnownFake: true,
-                blockedElement: {
-                    copy: element.copy,
-                    span: element.span,
-                    division: element.division,
-                    order: element.order,
-                },
-                blocker,
-                reason: blocker.reason,
-            };
-        }
+    if (detection.isFakeMultiplay) {
+        return {
+            isMultiplay: true,
+            isKnownFake: true,
+            blockedElement: detection.blockedElement || null,
+            blocker: Number.isInteger(detection.blockerSeat) ? { seat: detection.blockerSeat } : null,
+            reason: detection.evidenceSource || detection.fakeCause || 'fake-multiplay',
+        };
     }
 
     return {

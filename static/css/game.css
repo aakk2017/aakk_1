@@ -32,10 +32,41 @@
     color: #444;
 }
 
+/* Note 115a: top dummy reveal hand is display-only and cropped for space. */
+#hand-top[data-da3p-top-dummy-active="true"] {
+    height: 100%;
+    align-items: flex-end;
+    overflow: hidden;
+}
+#hand-top[data-da3p-top-dummy-active="true"] .hand {
+    transform: translateY(calc(var(--card-height) * 0.37));
+    pointer-events: none;
+    user-select: none;
+}
+#hand-top[data-da3p-top-dummy-active="true"] .card-container {
+    cursor: default;
+    pointer-events: none;
+}
+#hand-top[data-da3p-fc-select-active="true"] .card-container {
+    pointer-events: auto;
+    cursor: pointer;
+}
+#hand-top[data-da3p-select-active="true"] .card-container {
+    pointer-events: auto;
+    cursor: pointer;
+}
+#hand-top[data-da3p-top-dummy-control-active="true"] .card-container[card-selected="true"] {
+    transform: translateY(-2vh);
+}
+#hand-top[data-da3p-top-dummy-control-active="true"] .card-container[card-selected="true"] .card {
+    box-shadow: 0 0 0.4vh #ddf;
+}
+
 /* Full-width desk container — 3 rows at 20vh each = 60vh.
    Budget: 98vh − 14vh (top) − 0vh (no margins) − 60vh (desk) − 17vh (hand-bottom) − 7vh (footer) = 98 ✓ */
 .game-desk-container {
     display: grid;
+    position: relative;
     width: 175vh;
     height: 60vh;
     margin: 0;
@@ -45,6 +76,103 @@
         ".     south  .";
     grid-template-columns: 1fr 80vh 1fr;
     grid-template-rows: 20vh 20vh 20vh;
+}
+
+/* Note 115b: side dummy full-hand surfaces overlay the left/right desk lanes. */
+#hand-left,
+#hand-right {
+    position: absolute;
+    top: 50%;
+    z-index: 4;
+    display: none;
+    pointer-events: none;
+    transform: translateY(-50%);
+}
+#hand-left {
+    left: 0;
+}
+#hand-right {
+    right: 0;
+}
+#hand-left[data-da3p-side-dummy-active="true"],
+#hand-right[data-da3p-side-dummy-active="true"] {
+    display: block;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .hand,
+#hand-right[data-da3p-side-dummy-active="true"] .hand {
+    pointer-events: none;
+    user-select: none;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .card-container,
+#hand-right[data-da3p-side-dummy-active="true"] .card-container {
+    cursor: default;
+    pointer-events: none;
+}
+#hand-left[data-da3p-fc-select-active="true"] .card-container,
+#hand-right[data-da3p-fc-select-active="true"] .card-container {
+    pointer-events: auto;
+    cursor: pointer;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-selected="true"] .card,
+#hand-right[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-selected="true"] .card,
+#hand-left[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-selected="true"] .corner-card,
+#hand-right[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-selected="true"] .corner-card {
+    background-color: #fff3b0;
+    outline: 0.2vh solid #f0c040;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-final="must-play"] .card,
+#hand-right[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-final="must-play"] .card {
+    background-color: #b3d9ff;
+    outline: 0.2vh solid #6fb6ff;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-final="must-hold"] .card,
+#hand-right[data-da3p-side-dummy-active="true"] .card-container[data-da3p-dummy-fc-final="must-hold"] .card {
+    background-color: #525;
+    color: #d66;
+    outline: 0.2vh solid #9a4a4a;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .namebar,
+#hand-right[data-da3p-side-dummy-active="true"] .namebar {
+    pointer-events: auto;
+    cursor: default;
+}
+#hand-left[data-da3p-side-dummy-active="true"] [data-da3p-side-dummy-fold-toggle="true"],
+#hand-right[data-da3p-side-dummy-active="true"] [data-da3p-side-dummy-fold-toggle="true"] {
+    cursor: pointer;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .da3p-side-dummy-fc-actions-host,
+#hand-right[data-da3p-side-dummy-active="true"] .da3p-side-dummy-fc-actions-host {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+    margin-top: 0.25vh;
+    margin-bottom: 0.2vh;
+    pointer-events: auto;
+    position: relative;
+    z-index: 30;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .da3p-dummy-fc-actions,
+#hand-right[data-da3p-side-dummy-active="true"] .da3p-dummy-fc-actions {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35vh;
+    pointer-events: auto;
+    position: relative;
+    z-index: 30;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .da3p-dummy-fc-action-btn,
+#hand-right[data-da3p-side-dummy-active="true"] .da3p-dummy-fc-action-btn {
+    min-width: 7.8vh;
+    pointer-events: auto;
+}
+.desk-slot[data-da3p-side-dummy-desk-hidden="true"] {
+    display: none;
+    pointer-events: none;
+}
+.da3p-dummy-card-on-desk .card {
+    background: #bff4ff;
+    box-shadow: 0 0 0.35vh 0.2vh rgba(20, 170, 200, 0.55);
 }
 
 /* Note 59a — Desk slot IDs renamed from natural-coded to display-coded names.
