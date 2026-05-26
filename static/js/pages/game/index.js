@@ -1187,7 +1187,7 @@ function initPersistentNamebarsForNormal4P() {
         if (old) old.remove();
 
         let nb = document.createElement('div');
-        nb.className = isReferencePlayer ? 'desk-namebar reference-hand-namebar' : 'desk-namebar';
+        nb.className = isReferencePlayer ? 'desk-namebar namebar reference-hand-namebar' : 'desk-namebar namebar';
         nb.setAttribute('data-status', 'idle');
         nb.setAttribute('data-actor-seat', String(p));
         nb.setAttribute('data-natural-position', naturalPosition);
@@ -1256,7 +1256,7 @@ function initPersistentNamebarsForFrameContext(frameContext) {
         if (old) old.remove();
 
         let nb = document.createElement('div');
-        nb.className = isReferencePlayer ? 'desk-namebar reference-hand-namebar' : 'desk-namebar';
+        nb.className = isReferencePlayer ? 'desk-namebar namebar reference-hand-namebar' : 'desk-namebar namebar';
         nb.setAttribute('data-status', 'idle');
         if (seat >= 0) nb.setAttribute('data-actor-seat', String(seat));
         nb.setAttribute('data-display-position', displayPosition);
@@ -1287,9 +1287,54 @@ function initPersistentNamebarsForFrameContext(frameContext) {
     }
 }
 
+function normalizeLiveNamebarVisualStatus(status) {
+    return status === 'on-play' ? 'on-play' : 'idle';
+}
+
+function setNamebarVisualStatusElement(namebar, status) {
+    if (!namebar) return;
+    namebar.setAttribute('data-status', normalizeLiveNamebarVisualStatus(status));
+}
+
+function gameGetVisibleSideDummyLocalNamebarForSeat(seat) {
+    if (!Number.isInteger(seat)) return null;
+    let dummySeat = gameGetDA3PDummyHandSeat();
+    if (!Number.isInteger(dummySeat) || seat !== dummySeat) return null;
+    return document.querySelector(
+        '#hand-left[data-da3p-side-dummy-active="true"] .da3p-side-dummy-namebar-shell > .namebar,'
+        + '#hand-right[data-da3p-side-dummy-active="true"] .da3p-side-dummy-namebar-shell > .namebar'
+    );
+}
+
+function gameGetVisibleNamebarsForSeat(seat) {
+    let out = [];
+    if (Number.isInteger(seat) && gDeskNamebars[seat]) {
+        out.push(gDeskNamebars[seat]);
+    }
+    let sideLocal = gameGetVisibleSideDummyLocalNamebarForSeat(seat);
+    if (sideLocal && !out.includes(sideLocal)) out.push(sideLocal);
+    return out;
+}
+
+function gameSetVisibleNamebarStatusForSeat(seat, status) {
+    for (let namebar of gameGetVisibleNamebarsForSeat(seat)) {
+        setNamebarVisualStatusElement(namebar, status);
+    }
+}
+
+function gameGetSeatVisualStatusFromState(seat) {
+    if (!Number.isInteger(seat) || !gDeskNamebars[seat]) return 'idle';
+    return normalizeLiveNamebarVisualStatus(gDeskNamebars[seat].getAttribute('data-status'));
+}
+
+function gameRefreshVisibleNamebarStatusesFromState() {
+    for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+        gameSetVisibleNamebarStatusForSeat(seat, gameGetSeatVisualStatusFromState(seat));
+    }
+}
+
 function updateNamebarStatus(player, status) {
-    let nb = gDeskNamebars[player];
-    if (nb) nb.setAttribute('data-status', status);
+    gameSetVisibleNamebarStatusForSeat(player, status);
 }
 
 function updateNamebarWidth(player, cardCount) {
@@ -1490,8 +1535,8 @@ function gameCreateDummyFCActionsRow(dummySeat) {
 
 function resetAllNamebars() {
     for (let p = 0; p < NUM_PLAYERS; p++) {
+        gameSetVisibleNamebarStatusForSeat(p, 'idle');
         if (gDeskNamebars[p]) {
-            gDeskNamebars[p].setAttribute('data-status', 'idle');
             gDeskNamebars[p].style.width = '';
             let preview = gDeskNamebars[p].querySelector('.exposed-preview');
             if (preview) {
@@ -2478,7 +2523,7 @@ function renderSideDummyHandSurface(surface, dummySeat, displayPosition, folded)
     let namebar = document.createElement('div');
     namebar.className = 'namebar';
     namebar.setAttribute('show', 'show');
-    namebar.setAttribute('status', 'idle');
+    namebar.setAttribute('data-status', gameGetSeatVisualStatusFromState(dummySeat));
 
     let posArea = document.createElement('div');
     posArea.className = 'game-position-area';
@@ -2490,12 +2535,6 @@ function renderSideDummyHandSurface(surface, dummySeat, displayPosition, folded)
     nameArea.textContent = gameGetSideDummyFoldToggleText(!!folded);
     namebar.appendChild(nameArea);
     gameBindSideDummyFoldToggleTarget(namebar, nameArea);
-
-    namebarShell.appendChild(namebar);
-    if (fcSelectActive) {
-        namebarShell.appendChild(gameCreateDummyFCActionsRow(dummySeat));
-    }
-    surface.appendChild(namebarShell);
 
     let rowsByGroup = {};
     for (let rowModel of rows) {
@@ -2546,6 +2585,12 @@ function renderSideDummyHandSurface(surface, dummySeat, displayPosition, folded)
         }
     }
 
+    if (fcSelectActive) {
+        namebarShell.appendChild(gameCreateDummyFCActionsRow(dummySeat));
+    }
+    namebarShell.appendChild(namebar);
+    surface.appendChild(namebarShell);
+
 }
 
 function renderSideDummyHand() {
@@ -2576,6 +2621,7 @@ function renderSideDummyHand() {
 
     let surface = displayPosition === 'left' ? gLeftDummyHandSurface : gRightDummyHandSurface;
     renderSideDummyHandSurface(surface, dummySeat, displayPosition, !!gDA3PSideDummyRevealState.folded);
+    gameRefreshVisibleNamebarStatusesFromState();
 }
 
 function clearDeskForOvercallDecisionStep() {
@@ -2635,12 +2681,10 @@ function highlightActivePlayer(player) {
     for (let i = 0; i < NUM_PLAYERS; i++) {
         let slot = gameGetDeskSlotForSeat(i);
         if (slot) slot.removeAttribute('data-active');
-        if (gDeskNamebars[i] && gDeskNamebars[i].getAttribute('data-status') === 'on-play') {
-            gDeskNamebars[i].setAttribute('data-status', 'idle');
-        }
+        gameSetVisibleNamebarStatusForSeat(i, 'idle');
     }
-    if (player >= 0 && gDeskNamebars[player]) {
-        gDeskNamebars[player].setAttribute('data-status', 'on-play');
+    if (Number.isInteger(player) && player >= 0 && player < NUM_PLAYERS) {
+        gameSetVisibleNamebarStatusForSeat(player, 'on-play');
     }
 }
 

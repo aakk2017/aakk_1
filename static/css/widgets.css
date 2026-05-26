@@ -286,29 +286,44 @@ body {
     display: flex;
     flex-shrink: 0;
     font-size: calc(var(--card-height) / 6.5);
-    transform: translateY(calc(var(--card-height) / -5));
     opacity: 1;
-    transition: all 0.3s;
-    z-index: 10;
+    transition: background-color 0.3s, opacity 0.3s;
     white-space: nowrap;
-    max-width: 100%;
     overflow: hidden;
+}
+.tbhand > .namebar,
+.nshand > .namebar,
+.lrhand > .namebar,
+.ewhand > .namebar {
+    transform: translateY(calc(var(--card-height) / -5));
+    z-index: 10;
+    max-width: 100%;
 }
 .namebar:hover {
     background-color: #e3e3e3;
 }
 .namebar[show="hide"] {
+    opacity: 0;
+}
+.tbhand > .namebar[show="hide"],
+.nshand > .namebar[show="hide"],
+.lrhand > .namebar[show="hide"],
+.ewhand > .namebar[show="hide"] {
     transform: translateY(0);
     opacity: 0;
 }
-.namebar[status="on-play"] {
+.namebar[data-status="on-play"] {
     background-color: #ffce00;
-    transition: all 1s;
+    transition: background-color 1s;
+    animation: namebar-breathe 1.5s ease-in-out infinite;
 }
-.namebar[status="played"] {
-    background-color: #ffce00;
+/* Shared breathing visual for active namebars in both recap and live views. */
+@keyframes namebar-breathe {
+    0%, 100% { background-color: #ffce00; }
+    50%      { background-color: #ffe680; }
 }
-.namebar .game-position-area {
+
+.namebar > .game-position-area {
     height: inherit;
     width: calc(var(--card-height) / 4);
     margin-right: 1vh;
@@ -318,7 +333,7 @@ body {
     font-family: "Noto Sans SC";
     color: white;
 }
-.namebar .name-area {
+.namebar > .name-area {
     height: calc(var(--card-height) / 5);
     line-height: calc(var(--card-height) / 5);
     font-family: "Roboto Mono", "Noto Sans SC";

@@ -382,7 +382,7 @@ function renderHands4() {
         let namebarDiv = document.createElement("div");
         namebarDiv.setAttribute("class", "namebar");
         namebarDiv.setAttribute("show", "show");
-        namebarDiv.setAttribute("status", "idle");
+        namebarDiv.setAttribute("data-status", "idle");
         let positionArea = document.createElement("div");
         positionArea.setAttribute("class", "game-position-area");
         if(gameName === 'shengji') {

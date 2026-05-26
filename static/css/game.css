@@ -142,20 +142,39 @@
     flex-direction: column;
     align-items: center;
     width: 100%;
-    position: relative;
+    position: absolute;
+    left: 0;
+    bottom: 0;
     z-index: 32;
+}
+#hand-left[data-da3p-side-dummy-active="true"] .da3p-side-dummy-namebar-shell > .namebar,
+#hand-right[data-da3p-side-dummy-active="true"] .da3p-side-dummy-namebar-shell > .namebar {
+    /* Keep local unfolded side-dummy namebar bottom-aligned and inside lrhand clip bounds. */
+    transform: none;
+    align-self: stretch;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
 }
 #hand-left[data-da3p-side-dummy-active="true"] [data-da3p-side-dummy-fold-toggle="true"],
 #hand-right[data-da3p-side-dummy-active="true"] [data-da3p-side-dummy-fold-toggle="true"] {
     cursor: pointer;
 }
+
+/* Expand side-dummy fold-toggle target to the full remaining name-area width.
+   Keep click binding on .name-area only to avoid broad namebar/shell click capture. */
+.namebar > .name-area[data-da3p-side-dummy-fold-toggle="true"] {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 #hand-left[data-da3p-side-dummy-active="true"] .da3p-side-dummy-fc-actions-host,
 #hand-right[data-da3p-side-dummy-active="true"] .da3p-side-dummy-fc-actions-host {
     display: flex;
     width: 100%;
     justify-content: center;
-    margin-top: 0.25vh;
-    margin-bottom: 0.2vh;
+    margin-top: 0;
+    margin-bottom: 0.25vh;
     pointer-events: auto;
     position: relative;
     z-index: 30;
@@ -512,20 +531,11 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    height: calc(var(--card-height) / 5);
     min-width: calc(var(--card-width) * 2);
     max-width: calc(var(--card-width) * 4);
-    background-color: #d3d3d3;
-    border: 1px solid #aaa;
-    border-radius: var(--radius);
-    box-sizing: border-box;
-    display: flex;
-    flex-shrink: 0;
-    font-size: calc(var(--card-height) / 6.5);
-    white-space: nowrap;
     overflow: visible;
     z-index: 20;
-    transition: width 0.2s, background-color 0.3s;
+    transition: width 0.2s;
 }
 /* §3.1: Align namebar bottom with the centered card-row bottom (not slot bottom)
    Formula: half the unused vertical space = (slot-row height - card height) / 2 */
@@ -539,27 +549,6 @@
 /* §1.3: Shift top slot up by one corner-card height when exposed cards are present */
 #desk-top[data-has-exposed] {
     transform: translateY(calc(var(--card-height) / -3));
-}
-.desk-namebar .game-position-area {
-    height: inherit;
-    width: calc(var(--card-height) / 4);
-    line-height: calc(var(--card-height) / 5);
-    text-align: center;
-    background-color: #004c4c;
-    font-family: "Noto Sans SC";
-    color: white;
-    flex-shrink: 0;
-}
-.desk-namebar .name-area {
-    height: calc(var(--card-height) / 5);
-    line-height: calc(var(--card-height) / 5);
-    font-family: "Roboto Mono", "Noto Sans SC";
-    text-align: left;
-    padding-left: 0.5vh;
-    padding-right: 1.5vh;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .crossing-controls {
@@ -633,15 +622,6 @@
 
 .crossing-action-btn {
     margin-left: 0;
-}
-
-/* Breathing animation for on-play name bar */
-@keyframes namebar-breathe {
-    0%, 100% { background-color: #ffce00; }
-    50%      { background-color: #ffe680; }
-}
-.desk-namebar[data-status="on-play"] {
-    animation: namebar-breathe 1.5s ease-in-out infinite;
 }
 
 /* Exposed-card preview on name bar hover (§3.5) */
