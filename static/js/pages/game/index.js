@@ -887,8 +887,45 @@ function getDeclarationOrderAnchor() {
     return anchor;
 }
 
+function gameGetDisplaySeatForFrameActor(actor) {
+    if (!gameIsDA3PSharedFirstFrameActive()) return null;
+    let key = frameActorKey(actor);
+    if (game.displaySeatByFrameActorKey && Number.isInteger(game.displaySeatByFrameActorKey[key])) {
+        return game.displaySeatByFrameActorKey[key];
+    }
+    if (Array.isArray(game.frameActorByDisplaySeat)) {
+        let seat = game.frameActorByDisplaySeat.findIndex(a => isSameFrameActor(a, actor));
+        if (seat >= 0) return seat;
+    }
+    return null;
+}
+
+function gameGetDA3PResolvedPivotActor() {
+    if (!gameIsDA3PSharedFirstFrameActive() || !game || !game.frameContext) return null;
+    let frameContext = game.frameContext;
+    if (frameContext.pivotStatus !== 'resolved') return null;
+    return frameContext.pivotActor || frameContext.declarationResolvedActor || null;
+}
+
 function renderSeatsBoxFromGameState() {
     if (!gSeatsDiv || !game) return;
+
+    if (gameIsDA3PSharedFirstFrameActive()) {
+        let pivotActor = gameGetDA3PResolvedPivotActor();
+        if (!pivotActor) {
+            gSeatsDiv.setAttribute('pivot', 'undetermined');
+            return;
+        }
+        let displaySeat = gameGetDisplaySeatForFrameActor(pivotActor);
+        let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
+        if (Number.isInteger(displaySeat) && displaySeat >= 0 && displaySeat < pivotPosNames.length) {
+            gSeatsDiv.setAttribute('pivot', pivotPosNames[displaySeat]);
+            return;
+        }
+        gSeatsDiv.setAttribute('pivot', 'undetermined');
+        return;
+    }
+
     if (typeof isPivotResolved === 'function' && isPivotResolved(game.pivot)) {
         let humanRelPivot = (game.pivot + 4 - selectedNaturalPositionIndex) % NUM_PLAYERS;
         let pivotPosNames = ['reference', 'afterhand', 'opposite', 'forehand'];
@@ -7395,12 +7432,32 @@ function setRuleConfigFieldValue(field, rawValue) {
             }
             if (typeof shengjiResolveGameRuleConfig === 'function' && window.shengjiSettingsPresets && window.shengjiSettingsPresets[rawValue]) {
                 gMainPresetSyncGuard = true;
+                let previousTableLevel = {
+                    tableFormat: normalizeTableFormat(gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.tableFormat),
+                    deckCount: gSettingsDraftRuleConfig && Number.isFinite(Number(gSettingsDraftRuleConfig.deckCount)) ? Math.floor(Number(gSettingsDraftRuleConfig.deckCount)) : undefined,
+                    pivotPassMode: (gSettingsDraftRuleConfig && (gSettingsDraftRuleConfig.pivotPassMode === 'winner-pivot' || gSettingsDraftRuleConfig.pivotPassMode === 'rotate-pivot'))
+                        ? gSettingsDraftRuleConfig.pivotPassMode
+                        : undefined,
+                };
                 let previousTiming = {
                     timingMode: gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingMode,
                     timingPreset: gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timingPreset,
                     timing: { ...((gSettingsDraftRuleConfig && gSettingsDraftRuleConfig.timing) || {}) },
                 };
                 gSettingsDraftRuleConfig = cloneRuleConfig(shengjiResolveGameRuleConfig({ presetName: rawValue }));
+                if (previousTableLevel.deckCount !== undefined) {
+                    gSettingsDraftRuleConfig.deckCount = previousTableLevel.deckCount;
+                }
+                if (previousTableLevel.tableFormat !== undefined) {
+                    gSettingsDraftRuleConfig.tableFormat = previousTableLevel.tableFormat;
+                }
+                if (previousTableLevel.pivotPassMode !== undefined) {
+                    gSettingsDraftRuleConfig.pivotPassMode = previousTableLevel.pivotPassMode;
+                }
+                if (gSettingsDraftRuleConfig.tableFormat === ShengjiTableFormat.DA3P &&
+                        gSettingsDraftRuleConfig.pivotPassMode === 'winner-pivot') {
+                    gSettingsDraftRuleConfig.pivotPassMode = 'rotate-pivot';
+                }
                 gSettingsDraftRuleConfig.timingMode = previousTiming.timingMode;
                 gSettingsDraftRuleConfig.timingPreset = previousTiming.timingPreset;
                 gSettingsDraftRuleConfig.timing = { ...previousTiming.timing };
