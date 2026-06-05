@@ -5,7 +5,7 @@ const messages_en = {
 
   // ── Page titles ──
   page: {
-    recapTitle: 'Qingyunpu - Shengji',
+    reviewTitle: 'Qingyunpu - Shengji',
     gameTitle:  'Qingyunpu - Shengji - Game',
   },
 
@@ -17,9 +17,11 @@ const messages_en = {
     noCrossing:     'no crossing',
     newGame:        'New Game',
     gameSettings:   'Settings',
-    gotoRecap:      '\u21A9 Recap',
-    gotoGame:       'Start Game',
-    openFile:       'Open recap (.upg)',
+    homePlayCards:  'play cards',
+    homeReview:     'review',
+    homeArchive:    'Archive',
+    backHome:       'Home',
+    openFile:       'Open review (.upg)',
     saveUpg:        'Save as .upg',
     baseProgress:   'Set Base ({current}/{total})',
     confirmMarks:   'Confirm Marks',
@@ -40,7 +42,7 @@ const messages_en = {
     leave:          'Leave',
   },
 
-  // ── Menu bar (recap page) ──
+  // ── Menu bar (review page) ──
   menus: {
     open:     'Open',
     save:     'Save',
@@ -51,7 +53,7 @@ const messages_en = {
     help:     'Help',
   },
 
-  // ── Toolbar tooltips (recap page) ──
+  // ── Toolbar tooltips (review page) ──
   tooltips: {
     toStart:             'Go to start',
     previousOfReference: 'Previous of self',
@@ -60,7 +62,7 @@ const messages_en = {
     nextOfReference:     'Next of self',
   },
 
-  // ── Table headers (recap page) ──
+  // ── Table headers (review page) ──
   table: {
     pivot:       'Zh',
     successor:   'Sc',
@@ -229,7 +231,7 @@ const messages_en = {
     forehand:  'Fh',
   },
 
-  // ── Natural positions (for recap) ──
+  // ── Natural positions (for review) ──
   natural: {
     east:  'E',
     north: 'N',
@@ -252,6 +254,7 @@ const messages_en = {
     mustFollowPairs:         'You must follow with pairs ({requiredPairs} required).',
     mustFollowTractor:       'You must follow with a tractor (length {K} required).',
     mustFollowStructure:     'You must follow the required structure.',
+    thirdSeatLow:            'Third-seat-low: you must play a non-covering legal follow when available.',
     fakeMultiplay:           'Multiplay blocked: a higher combination may exist.',
     forehandControlFillers:  'Forehand control: marked card count mismatch.',
     notPlayingPhase:         'Not in playing phase.',
@@ -260,7 +263,7 @@ const messages_en = {
     baseFailed:              'Failed to set base.',
     crossingSelectFive:      'Select exactly 5 cards for crossing.',
     crossingRequireAllTrumps:'Crossing requires including all trumps in your hand.',
-    openBeforeSave:          'Please open a recap file before saving.',
+    openBeforeSave:          'Please open a review file before saving.',
     threePDANotStarted:      '3P dummy-ally is not yet available. Please select normal 4P to start a game.',
   },
 

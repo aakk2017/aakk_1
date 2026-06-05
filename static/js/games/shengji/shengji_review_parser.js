@@ -1,5 +1,5 @@
 /**
- * games/shengji/shengji_recap_parser.js
+ * games/shengji/shengji_review_parser.js
  * Parses .upg (Shengji game replay) files
  * Handles binary buffer parsing and move construction
  */

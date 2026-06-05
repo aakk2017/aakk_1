@@ -1,6 +1,6 @@
 /**
- * games/shengji/shengji_recap_view.js
- * Rendering functions for Shengji recap page
+ * games/shengji/shengji_review_view.js
+ * Rendering functions for Shengji review page
  * Handles table record display, declarations, scores, penalties, etc.
  */
 

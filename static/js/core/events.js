@@ -1,6 +1,6 @@
 /**
  * core/events.js
- * Generic event handlers for recap page
+ * Generic event handlers for review page
  * Keyboard, mouse, and UI event handling that is game-agnostic
  */
 

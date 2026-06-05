@@ -14,12 +14,12 @@
 
    This file should NOT contain:
    - card face rendering
-   - recap-only table layout
+    - review-only table layout
    - game-table-only layout
    - page container geometry
 
    Notes:
-   - This file is shared by recap and game pages.
+    - This file is shared by review and game pages.
    - If a widget is reused in more than one page, it belongs here.
    - If a rule is only meaningful inside one page layout, move it
      to that page’s CSS file instead.
@@ -317,7 +317,7 @@ body {
     transition: background-color 1s;
     animation: namebar-breathe 1.5s ease-in-out infinite;
 }
-/* Shared breathing visual for active namebars in both recap and live views. */
+/* Shared breathing visual for active namebars in both review and live views. */
 @keyframes namebar-breathe {
     0%, 100% { background-color: #ffce00; }
     50%      { background-color: #ffe680; }

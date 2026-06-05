@@ -13,7 +13,7 @@
    This file should NOT contain:
    - card component layout
    - page-specific layout
-   - recap-only rules
+    - review-only rules
    - game-only rules
    - widget-specific structure
 
@@ -28,7 +28,7 @@
    1. tokens.css
    2. card.css
    3. widgets.css
-   4. recap.css
+    4. review.css
    5. game.css (future)
    ========================================================= */
 

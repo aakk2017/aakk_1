@@ -1,15 +1,15 @@
 /* =========================================================
-   recap.css
+    review.css
    ---------------------------------------------------------
    Purpose:
-   Recap / handwritten-recap page layout.
+    Review / handwritten-review page layout.
 
    This file should contain only:
-   - recap page container layout
-   - seat-region positioning for recap view
+    - review page container layout
+    - seat-region positioning for review view
    - central history / record table layout
-   - recap-specific scrolling regions
-   - recap-page-only structural rules
+    - review-specific scrolling regions
+    - review-page-only structural rules
 
    This file should NOT contain:
    - shared design tokens
@@ -18,7 +18,7 @@
    - future real-game table layout
 
    Notes:
-   - Scope this file to the recap page as much as possible.
+    - Scope this file to the review page as much as possible.
    - Prefer moving reusable rules to tokens.css, card.css,
      or widgets.css.
    - Future live-play layout should go to game.css, not here.

@@ -210,19 +210,19 @@ function generateInitialHands(m) {
 /**
  * Navigate to previous move
  */
-// OLD IMPLEMENTATION in shengji_recap.js
+// OLD IMPLEMENTATION in deprecated monolith file
 // function goToPreviousMove() {}
 
 /**
  * Navigate to next move
  */
-// OLD IMPLEMENTATION in shengji_recap.js
+// OLD IMPLEMENTATION in deprecated monolith file
 // function goToNextMove() {}
 
 /**
  * Go to a specific round
  */
-// OLD IMPLEMENTATION in shengji_recap.js
+// OLD IMPLEMENTATION in deprecated monolith file
 // function goToRoundShengji(rid) {}
 
 /**

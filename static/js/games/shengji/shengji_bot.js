@@ -600,7 +600,7 @@ function botGetUnseenByOrder(player, division) {
  * Returns array of { cards, copy, span, order, division }.
  */
 function botFindAllStructuredElements(cards, division) {
-    let sorted = [...cards].sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+    let sorted = [...cards].sort((a, b) => b.order - a.order || a.suit - b.suit || a.cardId - b.cardId);
     let pairs = [];
     let i = 0;
     while (i < sorted.length) {
@@ -718,7 +718,7 @@ function botFindTopEstablishedSingles(divCards, unseenMap) {
     }
 
     // Identify singles (cards that don't form a pair)
-    let sorted = [...divCards].sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+    let sorted = [...divCards].sort((a, b) => b.order - a.order || a.suit - b.suit || a.cardId - b.cardId);
     let singles = [];
     let i = 0;
     while (i < sorted.length) {
@@ -797,7 +797,7 @@ function botFindBestStructuredElement(hand) {
     for (let d in divGroups) {
         let cards = divGroups[d];
         // Find pairs
-        let sorted = [...cards].sort((a, b) => b.order - a.order || a.cardId - b.cardId);
+        let sorted = [...cards].sort((a, b) => b.order - a.order || a.suit - b.suit || a.cardId - b.cardId);
         let pairs = [];
         let i = 0;
         while (i < sorted.length) {
@@ -897,6 +897,309 @@ function botMultiplayTieBreak(a, b) {
     let aMinId = Math.min(...a.cards.map(c => c.cardId));
     let bMinId = Math.min(...b.cards.map(c => c.cardId));
     return aMinId - bMinId;
+}
+
+function botLeadCandidateTypeFromInfo(leadInfo) {
+    if (!leadInfo || !Array.isArray(leadInfo.elements) || leadInfo.elements.length === 0) {
+        return 'invalid';
+    }
+    if (leadInfo.elements.length > 1) return 'multiplay';
+
+    let core = leadInfo.elements[0];
+    if (core.copy === 2 && core.span > 1) return 'tractor';
+    if (core.copy === 2 && core.span === 1) return 'pair';
+    return 'single';
+}
+
+function botCandidateCardIds(cards) {
+    return (cards || []).map(c => c.cardId).sort((a, b) => a - b);
+}
+
+function botCandidateKey(cards) {
+    return botCandidateCardIds(cards).join(',');
+}
+
+function botBuildLeadCandidates(player, poolCards) {
+    let candidates = [];
+    let voidInfo = botGetVoidInfo();
+    let divGroups = {};
+    for (let c of poolCards) {
+        let d = c.division;
+        if (!divGroups[d]) divGroups[d] = [];
+        divGroups[d].push(c);
+    }
+
+    for (let d in divGroups) {
+        let div = parseInt(d);
+        let divCards = divGroups[d];
+        let unseenMap = botGetUnseenByOrder(player, div);
+        let allElements = botFindAllStructuredElements(divCards, div);
+        let gradedStructures = allElements.map(el => ({ ...el, grade: botComputeGrade(el, unseenMap) }));
+        let goodStructures = gradedStructures.filter(el => el.grade <= 4);
+        let allOthersOut = botAllOthersShowedOut(player, div, voidInfo);
+
+        if (allOthersOut && divCards.length >= 2 && allElements.length > 0) {
+            let coreOrder = Math.max(...allElements.map(el => el.order));
+            candidates.push({
+                cards: divCards,
+                division: div,
+                coreOrder,
+                sourceCase: 'case1-full-division-structured',
+                allOthersOut,
+            });
+        }
+
+        // Keep legal structured one-element leads in candidate space.
+        for (let el of gradedStructures) {
+            candidates.push({
+                cards: el.cards,
+                division: div,
+                coreOrder: el.order,
+                sourceCase: 'structured-element',
+                allOthersOut,
+                structuredGrade: el.grade,
+            });
+        }
+
+        if (goodStructures.length > 0) {
+            let structuredIds = new Set(goodStructures.flatMap(el => el.cards.map(c => c.cardId)));
+            let remainingDivCards = divCards.filter(c => !structuredIds.has(c.cardId));
+            let goodSingles = botFindTopEstablishedSingles(remainingDivCards, unseenMap);
+
+            let multiplayCards = [];
+            for (let el of goodStructures) multiplayCards.push(...el.cards);
+            multiplayCards.push(...goodSingles);
+            let elementCount = goodStructures.length + goodSingles.length;
+
+            if (elementCount > 1) {
+                let coreOrder = Math.max(...goodStructures.map(el => el.order));
+                let bestGrade = Math.min(...goodStructures.map(el => el.grade));
+                candidates.push({
+                    cards: multiplayCards,
+                    division: div,
+                    coreOrder,
+                    sourceCase: 'case2-good-structure-multiplay',
+                    allOthersOut,
+                    structuredGrade: bestGrade,
+                });
+            }
+        }
+
+        if (allOthersOut && divCards.length >= 2 && allElements.length === 0) {
+            let coreOrder = Math.max(...divCards.map(c => c.order));
+            candidates.push({
+                cards: divCards,
+                division: div,
+                coreOrder,
+                sourceCase: 'case3-full-division-single-only',
+                allOthersOut,
+            });
+        }
+
+        let goodSingles = botFindTopEstablishedSingles(divCards, unseenMap);
+        if (goodSingles.length >= 2) {
+            let coreOrder = Math.max(...goodSingles.map(c => c.order));
+            candidates.push({
+                cards: goodSingles,
+                division: div,
+                coreOrder,
+                sourceCase: 'case4-good-singles',
+                allOthersOut,
+            });
+        }
+    }
+
+    let structured = botFindBestStructuredElement(poolCards);
+    if (structured) {
+        candidates.push({
+            cards: structured.cards,
+            division: structured.division,
+            coreOrder: structured.order,
+            sourceCase: 'fallback-best-structured',
+            allOthersOut: false,
+        });
+    }
+
+    let trumps = poolCards.filter(c => c.division === 4);
+    if (trumps.length > 0) {
+        trumps.sort((a, b) => a.order - b.order || a.suit - b.suit || a.cardId - b.cardId);
+        candidates.push({
+            cards: [trumps[0]],
+            division: 4,
+            coreOrder: trumps[0].order,
+            sourceCase: 'fallback-lowest-trump-single',
+            allOthersOut: false,
+        });
+    }
+
+    let sorted = [...poolCards].sort((a, b) => a.order - b.order || a.suit - b.suit || a.cardId - b.cardId);
+    candidates.push({
+        cards: [sorted[0]],
+        division: sorted[0].division,
+        coreOrder: sorted[0].order,
+        sourceCase: 'fallback-lowest-single',
+        allOthersOut: false,
+    });
+
+    // Deterministic de-dup keeps earliest case for equivalent card sets.
+    let dedup = [];
+    let seen = new Set();
+    for (let c of candidates) {
+        let key = botCandidateKey(c.cards);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        dedup.push(c);
+    }
+    return dedup;
+}
+
+function botScoreLeadCandidate(candidate) {
+    let leadInfo = engineResolveLead(candidate.cards);
+    let type = botLeadCandidateTypeFromInfo(leadInfo);
+    let core = leadInfo && leadInfo.coreElement ? leadInfo.coreElement : null;
+    let score = 0;
+    let tags = [candidate.sourceCase || 'unknown'];
+
+    switch (type) {
+        case 'multiplay':
+            score += 520;
+            tags.push('structured-multiplay');
+            break;
+        case 'tractor':
+            score += 460;
+            tags.push('structured-tractor');
+            break;
+        case 'pair':
+            score += 400;
+            tags.push('structured-pair');
+            break;
+        case 'single':
+            score += (candidate.cards.length > 1) ? 180 : 120;
+            tags.push('single');
+            break;
+        default:
+            score -= 1000;
+            tags.push('invalid');
+            break;
+    }
+
+    if (leadInfo && leadInfo.division === 4) {
+        score += (type === 'single') ? 20 : 90;
+        tags.push('trump');
+    }
+
+    if (candidate.allOthersOut) {
+        score += 80;
+        tags.push('all-others-showed-out');
+    }
+
+    if (Number.isFinite(candidate.structuredGrade)) {
+        let gradeBonus = Math.max(0, 6 - candidate.structuredGrade) * 15;
+        score += gradeBonus;
+        tags.push('grade-' + candidate.structuredGrade);
+    }
+
+    if (core && Number.isFinite(core.order)) {
+        score += core.order * 2;
+    }
+    score += candidate.cards.length;
+
+    return { score, tags, leadInfo, type };
+}
+
+function botLeadCandidateCompare(a, b) {
+    if (a.score !== b.score) return b.score - a.score;
+    return botMultiplayTieBreak(a, b);
+}
+
+function botSelectBestLeadCandidate(player, candidates) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+        return { selected: null, evaluated: [], diagnostics: [] };
+    }
+
+    let filtered = botFilterSafeLeadCandidates(player, candidates);
+    let safeCandidates = filtered.safeCandidates;
+    if (safeCandidates.length === 0) {
+        return { selected: null, evaluated: [], diagnostics: filtered.diagnostics };
+    }
+
+    let evaluated = safeCandidates.map(candidate => {
+        let scored = botScoreLeadCandidate(candidate);
+        let coreOrder = Number.isFinite(candidate.coreOrder)
+            ? candidate.coreOrder
+            : (scored.leadInfo && scored.leadInfo.coreElement ? scored.leadInfo.coreElement.order : -1);
+        return {
+            ...candidate,
+            score: scored.score,
+            reasonTags: scored.tags,
+            leadInfo: scored.leadInfo,
+            candidateType: scored.type,
+            coreOrder,
+        };
+    });
+
+    evaluated.sort(botLeadCandidateCompare);
+    return {
+        selected: evaluated[0],
+        evaluated,
+        diagnostics: filtered.diagnostics,
+    };
+}
+
+function botChooseLeadFromPool(player, poolCards) {
+    if (!Array.isArray(poolCards) || poolCards.length === 0) return [];
+    let candidates = botBuildLeadCandidates(player, poolCards);
+    let selected = botSelectBestLeadCandidate(player, candidates);
+    if (selected.selected) {
+        return selected.selected.cards;
+    }
+    let sorted = [...poolCards].sort((a, b) => a.order - b.order || a.suit - b.suit || a.cardId - b.cardId);
+    return [sorted[0]];
+}
+
+function botDebugEvaluateLeadCandidates(player, handOverride) {
+    let hand = Array.isArray(handOverride) && handOverride.length > 0
+        ? handOverride
+        : game.hands[player];
+    let candidates = botBuildLeadCandidates(player, hand);
+    let selectedResult = botSelectBestLeadCandidate(player, candidates);
+    let diagnosticsByKey = new Map();
+    for (let d of selectedResult.diagnostics || []) {
+        diagnosticsByKey.set((d.cardIds || []).join(','), d.diagnosis || {});
+    }
+    let selectedKey = selectedResult.selected ? botCandidateKey(selectedResult.selected.cards) : null;
+
+    let rows = candidates.map(candidate => {
+        let scored = botScoreLeadCandidate(candidate);
+        let key = botCandidateKey(candidate.cards);
+        let diag = diagnosticsByKey.get(key) || { isMultiplay: false, isKnownFake: false };
+        let leadInfo = scored.leadInfo;
+        let decomposition = (leadInfo && Array.isArray(leadInfo.elements))
+            ? leadInfo.elements.map(el => ({ copy: el.copy, span: el.span, order: el.order, division: el.division }))
+            : [];
+
+        return {
+            cardIds: botCandidateCardIds(candidate.cards),
+            division: leadInfo ? leadInfo.division : candidate.division,
+            candidateType: scored.type,
+            decomposition,
+            fakeStatus: {
+                isMultiplay: !!diag.isMultiplay,
+                isKnownFake: !!diag.isKnownFake,
+                reason: diag.reason || null,
+            },
+            score: scored.score,
+            reasonTags: scored.tags,
+            selected: key === selectedKey,
+            sourceCase: candidate.sourceCase || null,
+        };
+    });
+
+    rows.sort((a, b) => b.score - a.score || a.cardIds[0] - b.cardIds[0]);
+    return {
+        selectedCardIds: selectedResult.selected ? botCandidateCardIds(selectedResult.selected.cards) : [],
+        rows,
+    };
 }
 
 function botRelativeSeatDistance(leader, seat) {
@@ -1126,235 +1429,13 @@ function botChooseLead(player) {
     if (isAttacker && isKnockbackFrame) {
         let nonLevelers = hand.filter(c => !botIsLeveler(c));
         if (nonLevelers.length > 0) {
-            // Build lead choice from non-levelers only
-            let divGroups = {};
-            for (let c of nonLevelers) {
-                let d = c.division;
-                if (!divGroups[d]) divGroups[d] = [];
-                divGroups[d].push(c);
-            }
-            
-            // Apply standard lead logic to non-levers only
-            let voidInfo = botGetVoidInfo();
-            
-            // --- Case 1: Others-showed-out full division WITH structure (non-levelers only) ---
-            let case1Candidates = [];
-            for (let d in divGroups) {
-                let div = parseInt(d);
-                if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
-                let divCards = divGroups[d];
-                if (divCards.length < 2) continue;
-                let elements = botFindAllStructuredElements(divCards, div);
-                if (elements.length === 0) continue;
-                let coreOrder = Math.max(...elements.map(el => el.order));
-                case1Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
-            }
-            if (case1Candidates.length > 0) {
-                case1Candidates.sort(botMultiplayTieBreak);
-                let filtered = botFilterSafeLeadCandidates(player, case1Candidates);
-                if (filtered.safeCandidates.length > 0) {
-                    return filtered.safeCandidates[0].cards;
-                }
-            }
-            
-            // --- Case 2: Good-structure core from non-levelers ---
-            let case2Candidates = [];
-            for (let d in divGroups) {
-                let div = parseInt(d);
-                let divCards = divGroups[d];
-                let unseenMap = botGetUnseenByOrder(player, div);
-                let allElements = botFindAllStructuredElements(divCards, div);
-                let goodStructures = allElements.filter(el => botComputeGrade(el, unseenMap) <= 4);
-                if (goodStructures.length === 0) continue;
-                let structuredIds = new Set(goodStructures.flatMap(el => el.cards.map(c => c.cardId)));
-                let remainingDivCards = divCards.filter(c => !structuredIds.has(c.cardId));
-                let goodSingles = botFindTopEstablishedSingles(remainingDivCards, unseenMap);
-                let multiplayCards = [];
-                for (let el of goodStructures) multiplayCards.push(...el.cards);
-                multiplayCards.push(...goodSingles);
-                let elementCount = goodStructures.length + goodSingles.length;
-                if (elementCount <= 1) continue;
-                let coreOrder = Math.max(...goodStructures.map(el => el.order));
-                case2Candidates.push({ cards: multiplayCards, division: div, coreOrder: coreOrder });
-            }
-            if (case2Candidates.length > 0) {
-                case2Candidates.sort(botMultiplayTieBreak);
-                let filtered = botFilterSafeLeadCandidates(player, case2Candidates);
-                if (filtered.safeCandidates.length > 0) {
-                    return filtered.safeCandidates[0].cards;
-                }
-            }
-            
-            // --- Case 3: Others-showed-out full division (non-levelers only) ---
-            let case3Candidates = [];
-            for (let d in divGroups) {
-                let div = parseInt(d);
-                if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
-                let divCards = divGroups[d];
-                if (divCards.length < 2) continue;
-                let elements = botFindAllStructuredElements(divCards, div);
-                if (elements.length > 0) continue;
-                let coreOrder = Math.max(...divCards.map(c => c.order));
-                case3Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
-            }
-            if (case3Candidates.length > 0) {
-                case3Candidates.sort(botMultiplayTieBreak);
-                let filtered = botFilterSafeLeadCandidates(player, case3Candidates);
-                if (filtered.safeCandidates.length > 0) {
-                    return filtered.safeCandidates[0].cards;
-                }
-            }
-            
-            // --- Case 4: Good singles from non-levelers ---
-            let case4Candidates = [];
-            for (let d in divGroups) {
-                let div = parseInt(d);
-                let divCards = divGroups[d];
-                let unseenMap = botGetUnseenByOrder(player, div);
-                let goodSingles = botFindTopEstablishedSingles(divCards, unseenMap);
-                if (goodSingles.length < 2) continue;
-                let coreOrder = Math.max(...goodSingles.map(c => c.order));
-                case4Candidates.push({ cards: goodSingles, division: div, coreOrder: coreOrder });
-            }
-            if (case4Candidates.length > 0) {
-                case4Candidates.sort(botMultiplayTieBreak);
-                let filtered = botFilterSafeLeadCandidates(player, case4Candidates);
-                if (filtered.safeCandidates.length > 0) {
-                    return filtered.safeCandidates[0].cards;
-                }
-            }
-            
-            // Fallback: lead any single non-leveler (worst case, holding only levelers was false)
-            return [nonLevelers[0]];
+            return botChooseLeadFromPool(player, nonLevelers);
         }
         // If holding only levelers, fall through to standard logic
     }
 
     // Standard lead logic (non-knock-back or defender or all levelers in knock-back frame)
-    let divGroups = {};
-    for (let c of hand) {
-        let d = c.division;
-        if (!divGroups[d]) divGroups[d] = [];
-        divGroups[d].push(c);
-    }
-
-    let voidInfo = botGetVoidInfo();
-
-    // --- Case 1: Others-showed-out full division WITH structure ---
-    let case1Candidates = [];
-    for (let d in divGroups) {
-        let div = parseInt(d);
-        if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
-        let divCards = divGroups[d];
-        if (divCards.length < 2) continue; // need multiple cards for multiplay
-        // Check if there's at least one structure
-        let elements = botFindAllStructuredElements(divCards, div);
-        if (elements.length === 0) continue;
-        // Case 1 applies: play the entire division
-        let coreOrder = Math.max(...elements.map(el => el.order));
-        case1Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
-    }
-    if (case1Candidates.length > 0) {
-        case1Candidates.sort(botMultiplayTieBreak);
-        let filtered = botFilterSafeLeadCandidates(player, case1Candidates);
-        if (filtered.safeCandidates.length > 0) {
-            return filtered.safeCandidates[0].cards;
-        }
-    }
-
-    // --- Case 2: Good-structure core + good singles appended if present ---
-    let case2Candidates = [];
-    for (let d in divGroups) {
-        let div = parseInt(d);
-        let divCards = divGroups[d];
-        let unseenMap = botGetUnseenByOrder(player, div);
-
-        // Find all structured elements
-        let allElements = botFindAllStructuredElements(divCards, div);
-        // Filter to good structures (grade <= 4)
-        let goodStructures = allElements.filter(el => botComputeGrade(el, unseenMap) <= 4);
-        if (goodStructures.length === 0) continue;
-
-        // Build multiplay: all good structures + good singles
-        let structuredIds = new Set(goodStructures.flatMap(el => el.cards.map(c => c.cardId)));
-        let remainingDivCards = divCards.filter(c => !structuredIds.has(c.cardId));
-        let goodSingles = botFindTopEstablishedSingles(remainingDivCards, unseenMap);
-
-        let multiplayCards = [];
-        for (let el of goodStructures) multiplayCards.push(...el.cards);
-        multiplayCards.push(...goodSingles);
-
-        // Must form a multiplay (more than one element after decomposition)
-        let elementCount = goodStructures.length + goodSingles.length;
-        if (elementCount <= 1) continue;
-
-        let coreOrder = Math.max(...goodStructures.map(el => el.order));
-        case2Candidates.push({ cards: multiplayCards, division: div, coreOrder: coreOrder });
-    }
-    if (case2Candidates.length > 0) {
-        case2Candidates.sort(botMultiplayTieBreak);
-        let filtered = botFilterSafeLeadCandidates(player, case2Candidates);
-        if (filtered.safeCandidates.length > 0) {
-            return filtered.safeCandidates[0].cards;
-        }
-    }
-
-    // --- Case 3: Others-showed-out full division single-only ---
-    let case3Candidates = [];
-    for (let d in divGroups) {
-        let div = parseInt(d);
-        if (!botAllOthersShowedOut(player, div, voidInfo)) continue;
-        let divCards = divGroups[d];
-        if (divCards.length < 2) continue;
-        // Must NOT have structure (those went to Case 1)
-        let elements = botFindAllStructuredElements(divCards, div);
-        if (elements.length > 0) continue;
-        // Play entire division (all singles)
-        let coreOrder = Math.max(...divCards.map(c => c.order));
-        case3Candidates.push({ cards: divCards, division: div, coreOrder: coreOrder });
-    }
-    if (case3Candidates.length > 0) {
-        case3Candidates.sort(botMultiplayTieBreak);
-        let filtered = botFilterSafeLeadCandidates(player, case3Candidates);
-        if (filtered.safeCandidates.length > 0) {
-            return filtered.safeCandidates[0].cards;
-        }
-    }
-
-    // --- Case 4: A few good singles ---
-    let case4Candidates = [];
-    for (let d in divGroups) {
-        let div = parseInt(d);
-        let divCards = divGroups[d];
-        let unseenMap = botGetUnseenByOrder(player, div);
-        let goodSingles = botFindTopEstablishedSingles(divCards, unseenMap);
-        if (goodSingles.length < 2) continue;
-        let coreOrder = Math.max(...goodSingles.map(c => c.order));
-        case4Candidates.push({ cards: goodSingles, division: div, coreOrder: coreOrder });
-    }
-    if (case4Candidates.length > 0) {
-        case4Candidates.sort(botMultiplayTieBreak);
-        let filtered = botFilterSafeLeadCandidates(player, case4Candidates);
-        if (filtered.safeCandidates.length > 0) {
-            return filtered.safeCandidates[0].cards;
-        }
-    }
-
-    // --- Fallback: no multiplay applies ---
-    // 2. Try highest structured element (single element lead)
-    let structured = botFindBestStructuredElement(hand);
-    if (structured) return structured.cards;
-
-    // 3. Lead lowest trump
-    let trumps = hand.filter(c => c.division === 4);
-    if (trumps.length > 0) {
-        trumps.sort((a, b) => a.order - b.order);
-        return [trumps[0]];
-    }
-
-    // 4. Lead lowest card in any division
-    let sorted = [...hand].sort((a, b) => a.order - b.order);
-    return [sorted[0]];
+    return botChooseLeadFromPool(player, hand);
 }
 
 // ---------------------------------------------------------------------------
@@ -1650,6 +1731,9 @@ function botChooseFollow(player) {
     let discards = [];
 
     for (let move of legalFollows) {
+        let strictLegal = engineIsLegalFollow(hand, leadInfo, move, fc, { player: player });
+        if (!strictLegal.valid) continue;
+
         let cls = botClassifyFollow(leadInfo, move);
 
         if (cls.kind === 'POTENTIAL_RUFF') {

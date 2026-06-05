@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="page.gameTitle">青云谱 - 升级 - 对局</title>
-    <link rel="icon" href="favicon.ico">
-    <link rel="stylesheet" href="static/css/tokens.css">
-    <link rel="stylesheet" href="static/css/card.css">
-    <link rel="stylesheet" href="static/css/widgets.css">
-    <link rel="stylesheet" href="static/css/recap.css">
-    <link rel="stylesheet" href="static/css/game.css">
+    <link rel="icon" href="../../favicon.ico">
+    <link rel="stylesheet" href="../css/tokens.css">
+    <link rel="stylesheet" href="../css/card.css">
+    <link rel="stylesheet" href="../css/widgets.css">
+    <link rel="stylesheet" href="../css/review.css">
+    <link rel="stylesheet" href="../css/game.css">
 </head>
 <body>
     <div class="container">
@@ -97,7 +97,7 @@
         </div>
         <div class="footer">
             <menu class="menubar">
-                <li><button class="footer-link-btn" id="btn-goto-recap" data-i18n="buttons.gotoRecap">&#8617; 牌谱</button></li>
+                <li><a href="../../index.html" class="footer-link-btn home-link" data-i18n="buttons.backHome">返回主页</a></li>
                 <li><button class="footer-link-btn" id="btn-game-settings" data-i18n="buttons.gameSettings">设置</button></li>
                 <li class="footer-switch-item">
                     <label class="footer-switch" for="switch-bot-passive-declaration">
@@ -186,22 +186,22 @@
     </div>
 
     <!-- i18n -->
-    <script src="static/js/i18n/zh-CN.js"></script>
-    <script src="static/js/i18n/en.js"></script>
-    <script src="static/js/i18n/index.js"></script>
+    <script src="../js/i18n/zh-CN.js"></script>
+    <script src="../js/i18n/en.js"></script>
+    <script src="../js/i18n/index.js"></script>
 
     <!-- Shared core -->
-    <script src="static/js/core/cards.js"></script>
-    <script src="static/js/games/shengji/shengji_types.js"></script>
-    <script src="static/js/games/shengji/shengji_cards.js"></script>
-    <script src="static/js/games/shengji/shengji_settings.js"></script>
+    <script src="../js/core/cards.js"></script>
+    <script src="../js/games/shengji/shengji_types.js"></script>
+    <script src="../js/games/shengji/shengji_cards.js"></script>
+    <script src="../js/games/shengji/shengji_settings.js"></script>
 
     <!-- Game engine & bot -->
-    <script src="static/js/games/shengji/shengji_engine.js"></script>
-    <script src="static/js/games/shengji/shengji_bot.js"></script>
+    <script src="../js/games/shengji/shengji_engine.js"></script>
+    <script src="../js/games/shengji/shengji_bot.js"></script>
 
     <!-- Page entry -->
-    <script src="static/js/pages/game/index.js"></script>
+    <script src="../js/pages/game/index.js"></script>
     <script>document.addEventListener('DOMContentLoaded', applyI18n);</script>
 </body>
 </html>

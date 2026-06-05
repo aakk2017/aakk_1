@@ -1,5 +1,5 @@
 // Legacy Shengji bridge
-// Contains old shengji_recap.js functions moved into modular load path without changing function internals.
+// Contains old Shengji monolith functions moved into modular load path without changing function internals.
 
 // game info
 let pivotPosition = 0;

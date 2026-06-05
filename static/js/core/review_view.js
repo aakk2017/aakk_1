@@ -1,6 +1,6 @@
 /**
- * core/recap_view.js
- * Generic rendering helpers for the recap page
+ * core/review_view.js
+ * Generic rendering helpers for the review page
  * Does not include game-specific rendering logic
  */
 

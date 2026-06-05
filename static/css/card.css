@@ -12,14 +12,14 @@
    - hand-level card arrangement primitives
 
    This file should NOT contain:
-   - recap page layout
+    - review page layout
    - game page layout
    - table / history panel layout
    - corner widget layout
    - footer / menu / toolbar layout
 
    Notes:
-   - This file is shared by recap and game pages.
+    - This file is shared by review and game pages.
    - Keep this file component-oriented, not page-oriented.
    - Any size or color constants should come from tokens.css.
    - Avoid coupling card styles to one specific page structure.

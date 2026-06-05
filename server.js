@@ -7,7 +7,7 @@ const PORT = 5000;
 const server = http.createServer((req, res) => {
     let filePath = path.join(__dirname, req.url);
     if (req.url === '/') {
-        filePath = path.join(__dirname, 'game.html');
+        filePath = path.join(__dirname, 'index.html');
     }
 
     fs.readFile(filePath, (err, data) => {

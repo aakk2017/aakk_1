@@ -5,7 +5,7 @@ const messages_zhCN = {
 
   // ── Page titles ──
   page: {
-    recapTitle: '青云谱 - 升级',
+    reviewTitle: '青云谱 - 升级',
     gameTitle:  '升级 - 人机对局',
   },
 
@@ -17,8 +17,10 @@ const messages_zhCN = {
     noCrossing:     '不过河',
     newGame:        '新对局',
     gameSettings:   '设置',
-    gotoRecap:      '\u21A9 牌谱',       // ↩ 牌谱
-    gotoGame:       '开始对局',
+    homePlayCards:  '打牌',
+    homeReview:     '复盘',
+    homeArchive:    '文库',
+    backHome:       '返回主页',
     openFile:       '选择牌谱(.upg)',
     saveUpg:        '保存为.upg',
     baseProgress:   '扣底 ({current}/{total})',
@@ -40,7 +42,7 @@ const messages_zhCN = {
     leave:          '离开',
   },
 
-  // ── Menu bar (recap page) ──
+  // ── Menu bar (review page) ──
   menus: {
     open:     '打开',
     save:     '保存',
@@ -51,7 +53,7 @@ const messages_zhCN = {
     help:     '指南',
   },
 
-  // ── Toolbar tooltips (recap page) ──
+  // ── Toolbar tooltips (review page) ──
   tooltips: {
     toStart:             '回到开始',
     previousOfReference: '本家上一手',
@@ -60,7 +62,7 @@ const messages_zhCN = {
     nextOfReference:     '本家下一手',
   },
 
-  // ── Table headers (recap page) ──
+  // ── Table headers (review page) ──
   table: {
     pivot:       '庄',
     successor:   '右',
@@ -191,10 +193,10 @@ const messages_zhCN = {
 
   // ── Player names ──
   players: {
-    south: '南 (你)',
-    east:  '东 (Bot)',
-    north: '北 (Bot)',
-    west:  '西 (Bot)',
+    south: '南',
+    east:  '东',
+    north: '北',
+    west:  '西',
     youShort: '你',
     dummyShort: '明手',
     dummy: '明手',
@@ -215,10 +217,10 @@ const messages_zhCN = {
 
   // ── Seat labels (game-relative) ──
   seats: {
-    pivot:       '庄家',
-    successor:   '右家',
-    ally:        '前家',
-    predecessor: '左家',
+    pivot:       '庄',
+    successor:   '右',
+    ally:        '前',
+    predecessor: '左',
   },
 
   // ── Relative positions ──
@@ -229,7 +231,7 @@ const messages_zhCN = {
     forehand:  '上家',
   },
 
-  // ── Natural positions (for recap) ──
+  // ── Natural positions (for review) ──
   natural: {
     east:  '东',
     north: '北',
@@ -252,6 +254,7 @@ const messages_zhCN = {
     mustFollowPairs:         '你有对子必须跟对子 (需跟 {requiredPairs} 对)',
     mustFollowTractor:       '必须跟出拖拉机 (需跟长度 {K} 的拖拉机)',
     mustFollowStructure:     '必须跟出相应的型部结构',
+    thirdSeatLow:            '第三家压家限制：有合法不压选择时必须先出不压牌',
     fakeMultiplay:           '甩牌不成立：存在可能被大过的组合',
     forehandControlFillers:  '上控门跟: 标记牌数量不符',
     notPlayingPhase:         '当前不在行牌阶段',
@@ -347,7 +350,7 @@ const messages_zhCN = {
       berkeley: '伯克利规则（炒底，过河，分级必停）',
       experimental: '实验规则（台限76，级限38，终盘补分）',
       plain: '平打（无附加规则）',
-      shortLevelRotatePivot: '短级轮庄（轮庄，级限20，终盘补分）',
+      shortLevelRotatePivot: '短级轮庄（轮庄，级限20，终盘补分，抠底两分）',
     },
     options: {
       yes: '是',
@@ -376,6 +379,7 @@ const messages_zhCN = {
       traditional: '传统',
       traditionalPower: '传统幂底',
       sevenThreeFive: '7-3-5',
+      shortLevel: '短级',
       eightFourFour: '8-4-4',
       noPreset: '(无)',
       normalFourPlayer: '普通四人',

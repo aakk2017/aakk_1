@@ -548,6 +548,13 @@ let game = {
         reasonBySeatKey: {}
     },
 
+    // Actor-visible knowledge event ledger for fake-multiplay reasoning (note 122ca).
+    // Each event: { id, seq, type, actor, visibleTo, cards, hiddenCardCount, source, metadata }
+    actorVisibleKnowledgeEvents: [],
+    knowledgeTransferSeq: 0,
+    pendingBaseSetTransferId: null,
+    pendingBaseSetOwner: null,
+
     // DA3P attacker desk-score split (note 117).
     // Actor-keyed and desk-score-only; never replaces frameScore.
     da3pAttackerDeskScore: null,
@@ -879,7 +886,7 @@ function engineIsLegalLead(player, cards) {
         return { valid: true };
     }
 
-    let fakeMultiplay = engineDetectFakeMultiplay(player, cards);
+    let fakeMultiplay = engineDetectFakeMultiplay(player, cards, { resolvedLead: leadInfo });
 
     // Multiplay: detect blocked elements per Section 9
     // Each element is checked independently against each follower's hand
@@ -995,8 +1002,19 @@ function engineResolveFailedMultiplay(leader, leadInfo, blockedEvents) {
  * - single part checked first
  * - structured part compressed by type, each checked individually
  */
-function engineDetectFakeMultiplay(leader, leadCards) {
-    let resolvedLead = engineResolveLead(leadCards);
+function engineDetectFakeMultiplayFromSnapshot(snapshot) {
+    if (!snapshot || !snapshot.resolvedLead) {
+        return {
+            isMultiplay: false,
+            isFakeMultiplay: false,
+            fakeCause: null,
+            evidenceSource: null,
+            blockerSeat: null,
+            blockedElement: null
+        };
+    }
+
+    let resolvedLead = snapshot.resolvedLead;
     if (!resolvedLead || resolvedLead.elements.length <= 1) {
         return {
             isMultiplay: false,
@@ -1010,9 +1028,7 @@ function engineDetectFakeMultiplay(leader, leadCards) {
 
     let singlePart = resolvedLead.elements.filter(e => e.copy === 1);
     let structuredPart = resolvedLead.elements.filter(e => e.copy >= 2);
-
-    // Build leader-known information
-    let info = engineBuildLeaderKnownInfo(leader, leadCards);
+    let info = snapshot;
 
     // Single-part check
     if (singlePart.length > 0) {
@@ -1062,27 +1078,329 @@ function engineDetectFakeMultiplay(leader, leadCards) {
     };
 }
 
+function engineDetectFakeMultiplay(leader, leadCards, resolvedLeadOrOptions) {
+    let providedResolvedLead = null;
+    if (resolvedLeadOrOptions && typeof resolvedLeadOrOptions === 'object') {
+        if (resolvedLeadOrOptions.resolvedLead) providedResolvedLead = resolvedLeadOrOptions.resolvedLead;
+        else if (resolvedLeadOrOptions.elements) providedResolvedLead = resolvedLeadOrOptions;
+    }
+
+    let resolvedLead = providedResolvedLead || engineResolveLead(leadCards);
+    let snapshot = engineBuildActorVisibleKnowledgeSnapshot(game, leader, leadCards, resolvedLead);
+    return engineDetectFakeMultiplayFromSnapshot(snapshot);
+}
+
 /**
- * Build leader-known information state for fake multiplay detection.
+ * Build declaration-known value counts for actor-visible fake-multiplay detection.
+ *
+ * Returns a map: seat -> Map("suit|rank", knownCount)
  */
-function engineBuildLeaderKnownInfo(leader, leadCards) {
-    let playedCards = [];
-    for (let rh of game.roundHistory) {
-        for (let hand of rh.played) {
-            if (hand) playedCards.push(...hand);
+function engineCanActorSeeKnowledgeEvent(event, actor) {
+    if (!event) return false;
+    let visibleTo = event.visibleTo;
+    if (visibleTo === 'public') {
+        let exceptActors = event.metadata && Array.isArray(event.metadata.exceptActors)
+            ? event.metadata.exceptActors
+            : [];
+        return !exceptActors.includes(actor);
+    }
+    if (Number.isInteger(visibleTo)) return visibleTo === actor;
+    if (Array.isArray(visibleTo)) return visibleTo.includes(actor);
+    return false;
+}
+
+function engineNextKnowledgeTransferId() {
+    let seq = Number.isInteger(game.knowledgeTransferSeq) ? game.knowledgeTransferSeq : 0;
+    seq += 1;
+    game.knowledgeTransferSeq = seq;
+    return 'kt-' + seq;
+}
+
+function engineEnsureActorVisibleKnowledgeEvents(gameState) {
+    if (!gameState || typeof gameState !== 'object') return [];
+    if (!Array.isArray(gameState.actorVisibleKnowledgeEvents)) {
+        gameState.actorVisibleKnowledgeEvents = [];
+    }
+    return gameState.actorVisibleKnowledgeEvents;
+}
+
+function engineGetActorVisibleKnowledgeEvents(gameState, actor) {
+    let ledger = engineEnsureActorVisibleKnowledgeEvents(gameState);
+    return ledger
+        .filter(ev => engineCanActorSeeKnowledgeEvent(ev, actor))
+        .sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+}
+
+function engineRecordActorVisibleKnowledgeEvent(type, actor, visibleTo, cards, hiddenCardCount, source, metadata) {
+    let ledger = engineEnsureActorVisibleKnowledgeEvents(game);
+    let seq = ledger.length + 1;
+    let id = 'kev-' + seq;
+    let event = {
+        id,
+        seq,
+        type: String(type || 'UNKNOWN'),
+        actor: Number.isInteger(actor) ? actor : null,
+        visibleTo: (visibleTo === 'public' || Number.isInteger(visibleTo) || Array.isArray(visibleTo)) ? visibleTo : 'public',
+        cards: Array.isArray(cards) ? cards.slice() : [],
+        hiddenCardCount: Number.isInteger(hiddenCardCount) ? hiddenCardCount : 0,
+        source: source ? String(source) : 'engine',
+        metadata: metadata && typeof metadata === 'object' ? { ...metadata } : {}
+    };
+    ledger.push(event);
+    return event;
+}
+
+function engineCountCardsByValue(cards) {
+    let m = new Map();
+    for (let c of (cards || [])) {
+        if (!c) continue;
+        let key = c.suit + '|' + c.rank;
+        m.set(key, (m.get(key) || 0) + 1);
+    }
+    return m;
+}
+
+function engineBuildCardByIdMap(deck) {
+    let m = new Map();
+    for (let c of (deck || [])) {
+        if (!c || !Number.isInteger(c.cardId)) continue;
+        m.set(c.cardId, c);
+    }
+    return m;
+}
+
+function engineGetDeclarationImpliedValueCounts(gameState, declaration) {
+    let m = new Map();
+    if (!declaration) return m;
+    if (declaration.suit === 4) {
+        let rank = (declaration.count >= 4) ? 15 : 14;
+        let key = '4|' + rank;
+        let known = Math.min(2, Math.max(0, (declaration.count >= 3) ? 2 : declaration.count));
+        if (known > 0) m.set(key, known);
+        return m;
+    }
+    if (declaration.suit >= 0 && declaration.suit <= 3) {
+        let key = declaration.suit + '|' + gameState.level;
+        let known = Math.min(2, Math.max(0, declaration.count));
+        if (known > 0) m.set(key, known);
+    }
+    return m;
+}
+
+function engineCollectLegacyDeclarationFacts(gameState) {
+    if (!Array.isArray(gameState && gameState.declarations)) return [];
+    return gameState.declarations
+        .filter(decl => decl && Number.isInteger(decl.player))
+        .map(decl => ({ seat: decl.player, declaration: decl }));
+}
+
+function engineCollectLegacyRoundHistoryPlayedFacts(gameState) {
+    let out = [];
+    if (!Array.isArray(gameState && gameState.roundHistory)) return out;
+    for (let rh of gameState.roundHistory) {
+        if (!rh || !Array.isArray(rh.played)) continue;
+        for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+            let cards = rh.played[seat];
+            if (!Array.isArray(cards) || cards.length === 0) continue;
+            out.push({ seat, cards });
+        }
+    }
+    return out;
+}
+
+function engineBuildDeclarationKnownValueCountsBySeat(gameState, observer) {
+    let result = {};
+    let events = engineGetActorVisibleKnowledgeEvents(gameState, observer);
+    let transferOutTypes = new Set(['BASE_SET', 'CROSS_SENT', 'CROSSBACK_SENT']);
+    let sawDeclarationEvent = false;
+    let unresolvedHiddenTransfersBySeat = {};
+    let unresolvedHiddenTransferById = {};
+    let visiblePlayedCardIds = new Set();
+
+    let ensureSeat = (seat) => {
+        if (!result[seat]) result[seat] = new Map();
+        if (!unresolvedHiddenTransfersBySeat[seat]) unresolvedHiddenTransfersBySeat[seat] = new Set();
+    };
+
+    let subtractPlayedCardsFromSeat = (seat, cards, markCardIdsConsumed) => {
+        if (!Number.isInteger(seat) || !Array.isArray(cards) || cards.length === 0) return;
+        ensureSeat(seat);
+        let played = engineCountCardsByValue(cards);
+        for (let [key, count] of played) {
+            let cur = result[seat].get(key) || 0;
+            if (cur <= 0) continue;
+            let next = Math.max(0, cur - count);
+            if (next <= 0) result[seat].delete(key);
+            else result[seat].set(key, next);
+        }
+        if (markCardIdsConsumed) {
+            for (let c of cards) {
+                if (c && Number.isInteger(c.cardId)) visiblePlayedCardIds.add(c.cardId);
+            }
+        }
+    };
+
+    let resolveTransferForSeatWithExactCards = (seat, transferId, cards, resolveAllForSeat) => {
+        if (!Number.isInteger(seat)) return;
+        ensureSeat(seat);
+        let moved = engineCountCardsByValue(cards || []);
+        for (let [key, count] of moved) {
+            let cur = result[seat].get(key) || 0;
+            if (cur <= 0) continue;
+            let next = Math.max(0, cur - count);
+            if (next <= 0) result[seat].delete(key);
+            else result[seat].set(key, next);
+        }
+        if (transferId) {
+            unresolvedHiddenTransfersBySeat[seat].delete(transferId);
+        }
+        if (resolveAllForSeat) {
+            unresolvedHiddenTransfersBySeat[seat].clear();
+        }
+    };
+
+    for (let ev of events) {
+        if (!ev || !Number.isInteger(ev.actor)) continue;
+        let seat = ev.actor;
+        ensureSeat(seat);
+
+        if (ev.type === 'DECLARATION_MADE' || ev.type === 'OVERBASE_DECLARED') {
+            sawDeclarationEvent = true;
+            let implied = engineGetDeclarationImpliedValueCounts(gameState, ev.metadata || {});
+            for (let [key, count] of implied) {
+                result[seat].set(key, Math.max(result[seat].get(key) || 0, count));
+            }
         }
     }
 
-    let followers = [];
-    for (let i = 1; i < NUM_PLAYERS; i++) {
-        followers.push(engineGetPlayerAtTurnOffset(leader, i));
+    // Backward compatibility: if no declaration events were produced, derive from stored declarations.
+    if (!sawDeclarationEvent) {
+        for (let fact of engineCollectLegacyDeclarationFacts(gameState)) {
+            ensureSeat(fact.seat);
+            let implied = engineGetDeclarationImpliedValueCounts(gameState, fact.declaration);
+            for (let [key, count] of implied) {
+                result[fact.seat].set(key, Math.max(result[fact.seat].get(key) || 0, count));
+            }
+        }
     }
 
-    // Track void info: if a player has shown out of a division
+    // Apply visible ledger consumptions after declarations are loaded (ledger or fallback).
+    for (let ev of events) {
+        if (!ev || !Number.isInteger(ev.actor)) continue;
+        let seat = ev.actor;
+        ensureSeat(seat);
+
+        if (ev.type === 'CARD_PLAYED') {
+            subtractPlayedCardsFromSeat(seat, ev.cards || [], true);
+            continue;
+        }
+
+        if (transferOutTypes.has(ev.type)) {
+            let transferId = ev.metadata && ev.metadata.transferId;
+            if (Array.isArray(ev.cards) && ev.cards.length > 0) {
+                let moved = engineCountCardsByValue(ev.cards);
+                for (let [key, count] of moved) {
+                    let cur = result[seat].get(key) || 0;
+                    if (cur <= 0) continue;
+                    let next = Math.max(0, cur - count);
+                    if (next <= 0) result[seat].delete(key);
+                    else result[seat].set(key, next);
+                }
+                if (transferId) unresolvedHiddenTransfersBySeat[seat].delete(transferId);
+            } else if ((ev.hiddenCardCount || 0) > 0) {
+                // Hidden transfer opportunity; defer final invalidation until replay end unless
+                // a later exact transfer with same transferId resolves it for this observer.
+                if (transferId) {
+                    unresolvedHiddenTransfersBySeat[seat].add(transferId);
+                    unresolvedHiddenTransferById[transferId] = seat;
+                } else {
+                    unresolvedHiddenTransfersBySeat[seat].add('opaque-' + ev.seq);
+                }
+            }
+        }
+
+        if ((ev.type === 'OVERBASE_BASE_TAKEN' || ev.type === 'BASE_PICKED_UP')
+            && Array.isArray(ev.cards) && ev.cards.length > 0) {
+            let transferId = ev.metadata && ev.metadata.transferId;
+            let sourceHiddenTransferId = ev.metadata && ev.metadata.baseSetTransferId;
+            let priorBaseOwner = Number.isInteger(ev.metadata && ev.metadata.priorBaseOwner)
+                ? ev.metadata.priorBaseOwner
+                : (transferId && Number.isInteger(unresolvedHiddenTransferById[transferId])
+                    ? unresolvedHiddenTransferById[transferId]
+                    : null);
+            if (Number.isInteger(priorBaseOwner)) {
+                resolveTransferForSeatWithExactCards(
+                    priorBaseOwner,
+                    sourceHiddenTransferId || transferId,
+                    ev.cards,
+                    !sourceHiddenTransferId
+                );
+            }
+        }
+    }
+
+    // Round-history fallback: consume only cards not already represented by visible ledger CARD_PLAYED events.
+    for (let fact of engineCollectLegacyRoundHistoryPlayedFacts(gameState)) {
+        let missing = [];
+        for (let c of fact.cards) {
+            if (!c) continue;
+            if (Number.isInteger(c.cardId) && visiblePlayedCardIds.has(c.cardId)) continue;
+            missing.push(c);
+        }
+        subtractPlayedCardsFromSeat(fact.seat, missing, false);
+    }
+
+    // Any unresolved hidden transfer for a seat downgrades declaration certainty to unknown location.
+    for (let seatKey in unresolvedHiddenTransfersBySeat) {
+        let seat = Number(seatKey);
+        if (!Number.isInteger(seat)) continue;
+        let unresolved = unresolvedHiddenTransfersBySeat[seat];
+        if (unresolved && unresolved.size > 0 && result[seat]) {
+            result[seat].clear();
+        }
+    }
+
+    return result;
+}
+
+function engineGetFramePlayOrderSeatsForState(gameState) {
+    if (gameState && engineIsValidPlayOrderSeats(gameState.playOrderSeats)) {
+        return gameState.playOrderSeats;
+    }
+    return [0, 1, 2, 3];
+}
+
+function engineGetPlayerAtTurnOffsetForState(gameState, leaderSeat, turnIndex) {
+    const order = engineGetFramePlayOrderSeatsForState(gameState);
+    const leaderIndex = order.indexOf(leaderSeat);
+    if (leaderIndex < 0) {
+        return (leaderSeat + turnIndex) % NUM_PLAYERS;
+    }
+    const n = order.length;
+    const normalizedOffset = ((turnIndex % n) + n) % n;
+    return order[(leaderIndex + normalizedOffset) % n];
+}
+
+function engineCollectVisibleKnowledgeEvents(gameState, observer) {
+    return engineGetActorVisibleKnowledgeEvents(gameState, observer);
+}
+
+function engineCollectPlayedCardsFromRoundHistory(gameState) {
+    let playedCards = [];
+    for (let rh of (gameState.roundHistory || [])) {
+        for (let seat = 0; seat < NUM_PLAYERS; seat++) {
+            let hand = rh && rh.played ? rh.played[seat] : null;
+            if (Array.isArray(hand)) playedCards.push(...hand);
+        }
+    }
+    return playedCards;
+}
+
+function engineCollectVoidInfoFromRoundHistory(gameState) {
     let voidInfo = {};
     for (let p = 0; p < NUM_PLAYERS; p++) voidInfo[p] = {};
-    for (let rh of game.roundHistory) {
-        if (!rh.played[rh.leader]) continue;
+    for (let rh of (gameState.roundHistory || [])) {
+        if (!rh || !rh.played || !rh.played[rh.leader]) continue;
         let leadDiv = rh.played[rh.leader][0] ? rh.played[rh.leader][0].division : null;
         if (leadDiv === null) continue;
         for (let i = 0; i < NUM_PLAYERS; i++) {
@@ -1091,42 +1409,254 @@ function engineBuildLeaderKnownInfo(leader, leadCards) {
             if (!hasDiv) voidInfo[i][leadDiv] = true;
         }
     }
+    return voidInfo;
+}
 
-    let publicKnownHandCardsBySeat = engineGetPublicKnownHandCardsBySeat();
+function engineBuildSampleCardByValueKey(deck) {
+    let m = new Map();
+    for (let c of (deck || [])) {
+        if (!c) continue;
+        let key = c.suit + '|' + c.rank;
+        if (!m.has(key)) m.set(key, c);
+    }
+    return m;
+}
+
+function engineCollectDirectKnownCardFacts(gameState, observer, visibleEvents, seedVoidInfo) {
+    let publicKnownHandCardsBySeat = engineGetPublicKnownHandCardsBySeat(gameState);
     let publicKnownCards = [];
     let publicVoidInfo = {};
     let publicHandSeats = new Set();
+    let cardById = engineBuildCardByIdMap(gameState.deck);
+    let directKnownCardIdsBySeat = {};
+    let voidInfo = seedVoidInfo || {};
+
+    let ensureSeatCardIdSet = (seat) => {
+        if (!Number.isInteger(seat)) return null;
+        if (!directKnownCardIdsBySeat[seat]) directKnownCardIdsBySeat[seat] = new Set();
+        return directKnownCardIdsBySeat[seat];
+    };
+    let addDirectKnownCard = (seat, card) => {
+        if (!Number.isInteger(seat) || !card || !Number.isInteger(card.cardId)) return;
+        let s = ensureSeatCardIdSet(seat);
+        if (s) s.add(card.cardId);
+    };
+    let removeDirectKnownCard = (seat, card) => {
+        if (!Number.isInteger(seat) || !card || !Number.isInteger(card.cardId)) return;
+        let s = ensureSeatCardIdSet(seat);
+        if (s) s.delete(card.cardId);
+    };
+
     for (let seatKey in publicKnownHandCardsBySeat) {
         let seat = Number(seatKey);
         if (!Number.isInteger(seat)) continue;
         publicHandSeats.add(seat);
         let cards = Array.isArray(publicKnownHandCardsBySeat[seat]) ? publicKnownHandCardsBySeat[seat] : [];
         publicKnownCards.push(...cards);
+        for (let c of cards) addDirectKnownCard(seat, c);
+
         if (!publicVoidInfo[seat]) publicVoidInfo[seat] = {};
         let hasDivision = new Set(cards.map(c => c.division));
         for (let div = 0; div <= 4; div++) {
             if (!hasDivision.has(div)) {
                 publicVoidInfo[seat][div] = true;
+                if (!voidInfo[seat]) voidInfo[seat] = {};
                 voidInfo[seat][div] = true;
             }
         }
     }
 
+    let exposedKnownCards = [];
+    if (gameState.exposedCards && typeof gameState.exposedCards === 'object') {
+        for (let seatKey in gameState.exposedCards) {
+            let seat = Number(seatKey);
+            if (!Number.isInteger(seat)) continue;
+            let byDivision = gameState.exposedCards[seatKey];
+            if (!byDivision || typeof byDivision !== 'object') continue;
+            for (let div in byDivision) {
+                let cards = Array.isArray(byDivision[div]) ? byDivision[div] : [];
+                for (let c of cards) {
+                    exposedKnownCards.push(c);
+                    addDirectKnownCard(seat, c);
+                }
+            }
+        }
+    }
+
+    for (let ev of (visibleEvents || [])) {
+        if (!ev || !Number.isInteger(ev.actor) || !Array.isArray(ev.cards) || ev.cards.length === 0) continue;
+        if (ev.type === 'CROSS_RECEIVED'
+            || ev.type === 'CROSSBACK_RECEIVED'
+            || ev.type === 'PUBLIC_HAND_REVEALED'
+            || ev.type === 'DUMMY_REVEALED'
+            || ev.type === 'CARD_EXPOSED') {
+            for (let c of ev.cards) addDirectKnownCard(ev.actor, c);
+            continue;
+        }
+        if (ev.type === 'CROSS_SENT'
+            || ev.type === 'CROSSBACK_SENT'
+            || ev.type === 'BASE_SET'
+            || ev.type === 'CARD_PLAYED') {
+            for (let c of ev.cards) removeDirectKnownCard(ev.actor, c);
+            continue;
+        }
+    }
+
     return {
-        leader: leader,
-        leaderHandCards: game.hands[leader],
-        intendedLeadCards: leadCards,
-        playedCards: playedCards,
-        knownBaseCards: (leader === game.pivot) ? game.base : [],
-        followers: followers,
-        currentHandCounts: game.hands.map(h => h.length),
-        voidInfo: voidInfo,
-        fullDeck: game.deck,
+        cardById,
+        directKnownCardIdsBySeat,
         publicKnownHandCardsBySeat,
         publicKnownCards,
+        exposedKnownCards,
         publicVoidInfo,
-        publicHandSeats
+        publicHandSeats,
+        voidInfo
     };
+}
+
+function engineBuildDirectKnownValueCountsBySeat(directKnownCardIdsBySeat, cardById) {
+    let out = {};
+    for (let seatKey in (directKnownCardIdsBySeat || {})) {
+        let seat = Number(seatKey);
+        if (!Number.isInteger(seat)) continue;
+        let m = new Map();
+        let idSet = directKnownCardIdsBySeat[seat];
+        if (!(idSet instanceof Set)) continue;
+        for (let cardId of idSet) {
+            let c = cardById.get(cardId);
+            if (!c) continue;
+            let key = c.suit + '|' + c.rank;
+            m.set(key, (m.get(key) || 0) + 1);
+        }
+        out[seat] = m;
+    }
+    return out;
+}
+
+function engineMergeKnownHeldLowerBounds(directKnownValueCountsBySeat, declarationKnownValueCountsBySeat, publicHandSeats) {
+    let knownHeldValueCountsBySeat = {};
+    let allSeats = new Set();
+    for (let seatKey in (directKnownValueCountsBySeat || {})) allSeats.add(Number(seatKey));
+    for (let seatKey in (declarationKnownValueCountsBySeat || {})) allSeats.add(Number(seatKey));
+
+    for (let seat of allSeats) {
+        if (!Number.isInteger(seat)) continue;
+        let merged = new Map();
+        let direct = directKnownValueCountsBySeat[seat] || new Map();
+        let decl = declarationKnownValueCountsBySeat[seat] || new Map();
+        let keys = new Set([...direct.keys(), ...decl.keys()]);
+        for (let key of keys) {
+            let directCount = direct.get(key) || 0;
+            let declCount = decl.get(key) || 0;
+            let lowerBound = Math.max(directCount, declCount);
+            if (lowerBound > 0) merged.set(key, lowerBound);
+        }
+        if (merged.size > 0) knownHeldValueCountsBySeat[seat] = merged;
+    }
+
+    for (let seatKey in (declarationKnownValueCountsBySeat || {})) {
+        let seat = Number(seatKey);
+        if (!Number.isInteger(seat)) continue;
+        if (publicHandSeats && publicHandSeats.has(seat)) continue;
+        if (!knownHeldValueCountsBySeat[seat]) knownHeldValueCountsBySeat[seat] = new Map();
+    }
+
+    return knownHeldValueCountsBySeat;
+}
+
+function engineBuildVisibleKnownValueCountsByDivision(knownHeldValueCountsBySeat, sampleCardByValueKey) {
+    let out = {};
+    for (let seatKey in (knownHeldValueCountsBySeat || {})) {
+        let m = knownHeldValueCountsBySeat[seatKey];
+        for (let [key, count] of m) {
+            let sample = sampleCardByValueKey && sampleCardByValueKey.get ? sampleCardByValueKey.get(key) : null;
+            if (!sample) continue;
+            let division = sample.division;
+            if (!out[division]) out[division] = new Map();
+            out[division].set(key, (out[division].get(key) || 0) + count);
+        }
+    }
+    return out;
+}
+
+function engineBuildActorVisibleKnowledgeSnapshot(gameState, actor, leadCards, resolvedLead) {
+    let visibleEvents = engineCollectVisibleKnowledgeEvents(gameState, actor);
+    let playedCards = engineCollectPlayedCardsFromRoundHistory(gameState);
+    let voidInfo = engineCollectVoidInfoFromRoundHistory(gameState);
+
+    let followers = [];
+    for (let i = 1; i < NUM_PLAYERS; i++) {
+        followers.push(engineGetPlayerAtTurnOffsetForState(gameState, actor, i));
+    }
+
+    let directFacts = engineCollectDirectKnownCardFacts(gameState, actor, visibleEvents, voidInfo);
+    let directKnownValueCountsBySeat = engineBuildDirectKnownValueCountsBySeat(directFacts.directKnownCardIdsBySeat, directFacts.cardById);
+    let declarationKnownValueCountsBySeat = engineBuildDeclarationKnownValueCountsBySeat(gameState, actor);
+    let knownHeldValueCountsBySeat = engineMergeKnownHeldLowerBounds(
+        directKnownValueCountsBySeat,
+        declarationKnownValueCountsBySeat,
+        directFacts.publicHandSeats
+    );
+
+    let sampleCardByValueKey = engineBuildSampleCardByValueKey(gameState.deck);
+    let visibleKnownValueCountsByDivision = engineBuildVisibleKnownValueCountsByDivision(
+        knownHeldValueCountsBySeat,
+        sampleCardByValueKey
+    );
+
+    let knownBaseCards = (actor === gameState.pivot) ? gameState.base : [];
+    let unknownBaseCapacity = (actor === gameState.pivot)
+        ? 0
+        : Math.max(0, (gameState.base || []).length - knownBaseCards.length);
+
+    return {
+        gameState,
+        observer: actor,
+        leader: actor,
+        followers,
+        resolvedLead: resolvedLead || null,
+        playOrderSeats: engineGetFramePlayOrderSeatsForState(gameState),
+        pivot: gameState.pivot,
+        baseSize: (gameState.base || []).length,
+        knownBaseCards,
+        unknownBaseCapacity,
+        leaderHandCards: gameState.hands[actor],
+        intendedLeadCards: leadCards,
+        playedCards,
+        currentHandCounts: gameState.hands.map(h => h.length),
+        voidInfo: directFacts.voidInfo,
+        fullDeck: gameState.deck,
+        cardById: directFacts.cardById,
+        sampleCardByValueKey,
+        publicKnownHandCardsBySeat: directFacts.publicKnownHandCardsBySeat,
+        publicKnownCards: directFacts.publicKnownCards,
+        exposedKnownCards: directFacts.exposedKnownCards,
+        publicVoidInfo: directFacts.publicVoidInfo,
+        publicHandSeats: directFacts.publicHandSeats,
+        directKnownCardsBySeat: directFacts.directKnownCardIdsBySeat,
+        directKnownValueCountsBySeat,
+        declarationKnownValueCountsBySeat,
+        knownHeldValueCountsBySeat,
+        visibleKnownValueCountsByDivision,
+        diagnostics: {
+            visibleEventCount: visibleEvents.length,
+            directKnownSeatCount: Object.keys(directFacts.directKnownCardIdsBySeat || {}).length,
+        }
+    };
+}
+
+/**
+ * Build actor-visible information state for fake multiplay detection.
+ */
+function engineBuildActorVisibleKnowledge(gameState, actor, leadCards, resolvedLead) {
+    return engineBuildActorVisibleKnowledgeSnapshot(gameState, actor, leadCards, resolvedLead || null);
+}
+
+/**
+ * Backward-compatible alias for older call sites.
+ */
+function engineBuildLeaderKnownInfo(leader, leadCards) {
+    return engineBuildActorVisibleKnowledge(game, leader, leadCards);
 }
 
 function engineCollectKnownCardsForFakeMultiplay(info) {
@@ -1143,6 +1673,7 @@ function engineCollectKnownCardsForFakeMultiplay(info) {
     addCards(info.playedCards);
     addCards(info.knownBaseCards);
     addCards(info.publicKnownCards);
+    addCards(info.exposedKnownCards);
 
     return [...byId.values()];
 }
@@ -1177,6 +1708,14 @@ function engineBuildUnknownValueCounts(info, division) {
 
     addSeen(engineCollectKnownCardsForFakeMultiplay(info));
 
+    // Actor-visible value-count evidence from declarations/public hands/exposed cards.
+    if (info.visibleKnownValueCountsByDivision && info.visibleKnownValueCountsByDivision[division]) {
+        for (let [key, count] of info.visibleKnownValueCountsByDivision[division]) {
+            if (!count || count <= 0) continue;
+            seenCounts.set(key, Math.max(seenCounts.get(key) || 0, count));
+        }
+    }
+
     let result = new Map();
     for (let [key, total] of totalCounts) {
         let seen = seenCounts.get(key) || 0;
@@ -1184,6 +1723,31 @@ function engineBuildUnknownValueCounts(info, division) {
         if (remaining > 0) result.set(key, remaining);
     }
     return result;
+}
+
+function engineGetUnknownBaseCapacityFromSnapshot(info) {
+    if (!info) return 0;
+    if (Number.isInteger(info.unknownBaseCapacity)) return Math.max(0, info.unknownBaseCapacity);
+    if (Number.isInteger(info.baseSize) && Array.isArray(info.knownBaseCards)) {
+        return Math.max(0, info.baseSize - info.knownBaseCards.length);
+    }
+    return 0;
+}
+
+function engineGetSampleCardForValueKey(info, key, division) {
+    if (!info || !key) return null;
+    let sample = null;
+    if (info.sampleCardByValueKey && typeof info.sampleCardByValueKey.get === 'function') {
+        sample = info.sampleCardByValueKey.get(key) || null;
+    }
+    if (!sample && Array.isArray(info.fullDeck)) {
+        let parts = key.split('|');
+        let suit = parseInt(parts[0]);
+        let rank = parseInt(parts[1]);
+        sample = info.fullDeck.find(c => c.suit === suit && c.rank === rank) || null;
+    }
+    if (sample && Number.isInteger(division) && sample.division !== division) return null;
+    return sample;
 }
 
 /**
@@ -1196,12 +1760,26 @@ function engineSinglePartIsFake(info, singlePart) {
 
     for (let follower of info.followers) {
         if (follower === info.leader) continue;
+        let blocker = null;
+
         let publicCards = info.publicKnownHandCardsBySeat[follower] || [];
-        let blocker = publicCards.find(c => c.division === division && c.order > minSingleOrder);
+        blocker = publicCards.find(c => c.division === division && c.order > minSingleOrder);
+
+        if (!blocker && info.knownHeldValueCountsBySeat && info.knownHeldValueCountsBySeat[follower]) {
+            for (let [key, count] of info.knownHeldValueCountsBySeat[follower]) {
+                if (!count || count <= 0) continue;
+                let sample = engineGetSampleCardForValueKey(info, key, division);
+                if (sample && sample.order > minSingleOrder) {
+                    blocker = sample;
+                    break;
+                }
+            }
+        }
+
         if (blocker) {
             return {
                 isFake: true,
-                evidenceSource: 'public-dummy-single-blocker',
+                evidenceSource: 'actor-visible-single-blocker',
                 blockerSeat: follower,
                 blockedElement: {
                     copy: 1,
@@ -1215,18 +1793,13 @@ function engineSinglePartIsFake(info, singlePart) {
 
     let unknownCounts = engineBuildUnknownValueCounts(info, division);
 
-    let unknownBaseCapacity = (info.leader === game.pivot)
-        ? 0  // pivot knows the base
-        : game.base.length - info.knownBaseCards.length;
+    let unknownBaseCapacity = engineGetUnknownBaseCapacityFromSnapshot(info);
 
     let totalRelevantUnknown = 0;
 
     for (let [key, count] of unknownCounts) {
         // Reconstruct order for this value key
-        let parts = key.split('|');
-        let suit = parseInt(parts[0]), rank = parseInt(parts[1]);
-        // Find a card in the deck with this value to get its order
-        let sample = info.fullDeck.find(c => c.suit === suit && c.rank === rank && c.division === division);
+        let sample = engineGetSampleCardForValueKey(info, key, division);
         if (!sample) continue;
         if (sample.order <= minSingleOrder) continue;
 
@@ -1283,12 +1856,34 @@ function engineStructuredElementIsSurelyBlocked(info, ledElement) {
     for (let follower of info.followers) {
         if (follower === info.leader) continue;
         let publicCards = (info.publicKnownHandCardsBySeat[follower] || []).filter(c => c.division === division);
-        if (publicCards.length === 0) continue;
-        let candidates = engineFindPotentialElements(publicCards, ledElement.copy, ledElement.span);
-        if (candidates.some(el => el.order > ledElement.order)) {
+        let hasKnownBlock = false;
+        if (publicCards.length > 0) {
+            let candidates = engineFindPotentialElements(publicCards, ledElement.copy, ledElement.span);
+            hasKnownBlock = candidates.some(el => el.order > ledElement.order);
+        }
+
+        if (!hasKnownBlock && info.knownHeldValueCountsBySeat && info.knownHeldValueCountsBySeat[follower]) {
+            let reconstructed = [];
+            for (let [key, count] of info.knownHeldValueCountsBySeat[follower]) {
+                if (!count || count <= 0) continue;
+                let parts = key.split('|');
+                let suit = parseInt(parts[0]);
+                let rank = parseInt(parts[1]);
+                let candidatesByValue = info.fullDeck.filter(c => c.suit === suit && c.rank === rank && c.division === division);
+                for (let i = 0; i < Math.min(count, candidatesByValue.length); i++) {
+                    reconstructed.push(candidatesByValue[i]);
+                }
+            }
+            if (reconstructed.length > 0) {
+                let candidates = engineFindPotentialElements(reconstructed, ledElement.copy, ledElement.span);
+                hasKnownBlock = candidates.some(el => el.order > ledElement.order);
+            }
+        }
+
+        if (hasKnownBlock) {
             return {
                 isFake: true,
-                evidenceSource: 'public-dummy-structured-blocker',
+                evidenceSource: 'actor-visible-structured-blocker',
                 blockerSeat: follower,
                 blockedElement: {
                     copy: ledElement.copy,
@@ -1314,19 +1909,14 @@ function engineFindForcedSameFollowerStructuredBlocker(info, ledElement) {
     let byOrder = new Map();
 
     for (let [key, count] of unknownCounts) {
-        let parts = key.split('|');
-        let suit = parseInt(parts[0]);
-        let rank = parseInt(parts[1]);
-        let sample = info.fullDeck.find(c => c.suit === suit && c.rank === rank && c.division === division);
+        let sample = engineGetSampleCardForValueKey(info, key, division);
         if (!sample || sample.order <= ledElement.order || count < ledElement.copy) continue;
         if (!byOrder.has(sample.order)) byOrder.set(sample.order, []);
-        byOrder.get(sample.order).push({ key, count, suit, rank, order: sample.order });
+        byOrder.get(sample.order).push({ key, count, order: sample.order });
     }
 
     let higherOrders = [...byOrder.keys()].sort((a, b) => a - b);
-    let unknownBaseCapacity = (info.leader === game.pivot)
-        ? 0
-        : game.base.length - info.knownBaseCards.length;
+    let unknownBaseCapacity = engineGetUnknownBaseCapacityFromSnapshot(info);
 
     for (let startIdx = 0; startIdx <= higherOrders.length - ledElement.span; startIdx++) {
         let consecutive = true;
@@ -1467,6 +2057,7 @@ function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allB
 
     // FailedMultiplayState
     game.failedMultiplay = {
+        round: game.currentRound,
         failer: failer,
         intendedLead: intendedLead,
         actualElement: actualElement,
@@ -1486,6 +2077,15 @@ function engineRegisterFailedMultiplay(failer, intendedLead, actualElement, allB
         // Avoid duplicates by cardId
         if (!game.exposedCards[failer][div].some(c => c.cardId === card.cardId)) {
             game.exposedCards[failer][div].push(card);
+            engineRecordActorVisibleKnowledgeEvent(
+                'CARD_EXPOSED',
+                failer,
+                'public',
+                [card],
+                0,
+                'engineRegisterFailedMultiplay',
+                { failer, division: div }
+            );
         }
     }
 
@@ -1870,7 +2470,85 @@ function engineContainsAllCards(bigSet, smallSet) {
     return true;
 }
 
-function engineIsLegalFollow(hand, leadInfo, selectedCards, forehandControl) {
+function engineGenerateCardCombinationsExhaustive(cards, k) {
+    if (k < 0 || k > cards.length) return [];
+    if (k === 0) return [[]];
+    if (k === cards.length) return [[...cards]];
+
+    let results = [];
+    let current = [];
+
+    function dfs(start) {
+        if (current.length === k) {
+            results.push([...current]);
+            return;
+        }
+        for (let i = start; i < cards.length; i++) {
+            current.push(cards[i]);
+            dfs(i + 1);
+            current.pop();
+        }
+    }
+
+    dfs(0);
+    return results;
+}
+
+function engineCombinationCount(n, k) {
+    if (!Number.isInteger(n) || !Number.isInteger(k) || k < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+    k = Math.min(k, n - k);
+    let result = 1;
+    for (let i = 1; i <= k; i++) {
+        result = (result * (n - k + i)) / i;
+        if (!Number.isFinite(result)) return Infinity;
+    }
+    return Math.round(result);
+}
+
+function engineGetActiveDeckCount() {
+    // Reliable-source priority for legality helpers:
+    // 1) active runtime config, 2) published resolved settings.
+    let configDeckCount = Number(game && game.gameConfig && game.gameConfig.deckCount);
+    if (Number.isInteger(configDeckCount) && configDeckCount > 0) {
+        return { value: configDeckCount, source: 'game.gameConfig.deckCount', reliable: true };
+    }
+
+    let resolved = globalThis && globalThis.__SHENGJI_RESOLVED_GAME_SETTINGS__;
+    let resolvedDeckCount = Number(resolved && resolved.ruleConfig && resolved.ruleConfig.deckCount);
+    if (Number.isInteger(resolvedDeckCount) && resolvedDeckCount > 0) {
+        return { value: resolvedDeckCount, source: '__SHENGJI_RESOLVED_GAME_SETTINGS__.ruleConfig.deckCount', reliable: true };
+    }
+
+    return { value: null, source: 'unknown', reliable: false };
+}
+
+function engineDoesFollowCoverCurrentWinner(roundState, followCards) {
+    if (!roundState) return false;
+
+    let followState = engineClassifyFollowForCover(roundState, followCards);
+    if (followState.kind === 'DISCARD') return false;
+
+    if (followState.kind === 'POTENTIAL_RUFF') {
+        return !roundState.ruffed || followState.orderKey > roundState.highestOrder;
+    }
+
+    // DIVISION_FOLLOW
+    if (roundState.ruffed) return false;
+    if (!roundState.leadIsOneElement) return false;
+    if (followState.orderKey === null || followState.orderKey === undefined) return false;
+    return followState.orderKey > roundState.highestOrder;
+}
+
+function engineIsDefaultFailedMultiplayAftermathRound() {
+    let handling = (game && game.gameConfig && game.gameConfig.failedMultiplayHandling) || 'default';
+    if (handling !== 'default') return false;
+    if (!game || !game.failedMultiplay) return false;
+    if (!game.failedMultiplay.actualElement || !Array.isArray(game.failedMultiplay.actualElement.cards)) return false;
+    return game.failedMultiplay.round === game.currentRound;
+}
+
+function engineIsLegalFollowBeforeThirdSeatLow(hand, leadInfo, selectedCards, forehandControl) {
     if (selectedCards.length !== leadInfo.volume)
         return { valid: false, error: t('errors.followCount', { volume: leadInfo.volume }) };
 
@@ -1882,40 +2560,31 @@ function engineIsLegalFollow(hand, leadInfo, selectedCards, forehandControl) {
 
     for (let outcome of outcomes) {
         if (outcome.shortDivisionCase) {
-            // Must contain all forced division cards
             if (!engineContainsAllCards(selectedCards, outcome.forcedDivisionCards)) continue;
 
             let fillerCards = engineRemoveCards(selectedCards, outcome.forcedDivisionCards);
             if (fillerCards.length !== outcome.fillerCount) continue;
             if (!engineContainsAllCards(outcome.fillerPool, fillerCards)) continue;
 
-            // Forehand control on fillers
             if (outcome.legalMarkedCountInFillers !== null) {
                 if (countMarkedCards(fillerCards, forehandControl) !== outcome.legalMarkedCountInFillers) continue;
             }
-            return { valid: true };
+            return { valid: true, matchedOutcome: outcome };
         } else {
-            // Must contain all structured cards
             if (!engineContainsAllCards(selectedCards, outcome.structuredCards)) continue;
 
             let fillerCards = engineRemoveCards(selectedCards, outcome.structuredCards);
             if (fillerCards.length !== outcome.fillerCount) continue;
-
-            // All filler cards must be in the led division
             if (fillerCards.some(c => c.division !== leadInfo.division)) continue;
-
-            // Filler cards must come from the filler pool
             if (!engineContainsAllCards(outcome.fillerPool, fillerCards)) continue;
 
-            // Forehand control on fillers
             if (outcome.legalMarkedCountInFillers !== null) {
                 if (countMarkedCards(fillerCards, forehandControl) !== outcome.legalMarkedCountInFillers) continue;
             }
-            return { valid: true };
+            return { valid: true, matchedOutcome: outcome };
         }
     }
 
-    // No valid DFP outcome matched — determine a useful error message
     let divCardsOnHand = hand.filter(c => c.division === leadInfo.division);
     let selectedDivCards = selectedCards.filter(c => c.division === leadInfo.division);
 
@@ -1928,8 +2597,251 @@ function engineIsLegalFollow(hand, leadInfo, selectedCards, forehandControl) {
     if (selectedDivCards.length !== leadInfo.volume) {
         return { valid: false, error: t('errors.mustFollowDivision') };
     }
-    // Structural obligation not met
     return { valid: false, error: t('errors.mustFollowStructure') };
+}
+
+function engineFindAnyNonCoveringMoveFromCandidates(hand, leadInfo, forehandControl, roundState, followContext, moves, proofMethod) {
+    for (let move of moves) {
+        let legal = engineIsLegalFollowBeforeThirdSeatLow(hand, leadInfo, move, forehandControl);
+        if (!legal.valid) continue;
+        if (!engineDoesFollowCoverCurrentWinner(roundState, move)) {
+            return {
+                exists: true,
+                proof: {
+                    method: proofMethod,
+                    exampleMoveCardIds: move.map(c => c.cardId).sort((a, b) => a - b),
+                }
+            };
+        }
+    }
+    return null;
+}
+
+function engineExistsNonCoveringForSingleActualLead(hand, leadInfo, forehandControl, roundState) {
+    for (let card of hand) {
+        let move = [card];
+        let legal = engineIsLegalFollowBeforeThirdSeatLow(hand, leadInfo, move, forehandControl);
+        if (!legal.valid) continue;
+        if (!engineDoesFollowCoverCurrentWinner(roundState, move)) {
+            return {
+                exists: true,
+                proof: {
+                    method: 'single-scan',
+                    exampleMoveCardIds: [card.cardId],
+                }
+            };
+        }
+    }
+    return {
+        exists: false,
+        proof: { method: 'single-scan-exhaustive' }
+    };
+}
+
+function engineTryConstructShortDivisionNonCoveringMove2Deck(hand, leadInfo, forehandControl, roundState) {
+    let core = leadInfo && leadInfo.elements && leadInfo.elements.length === 1 ? leadInfo.elements[0] : null;
+    if (!core || core.copy <= 1) return null;
+
+    // This helper is a constructive fast path.
+    // Returning exists=true is a proof because an example legal non-covering move was found.
+    // Returning null is not a proof that cover is forced; callers must fall back to
+    // exhaustive bounded search or conservative rejection.
+    let deckCountState = engineGetActiveDeckCount();
+    if (!deckCountState.reliable || deckCountState.value !== 2) return null;
+
+    let ledDiv = leadInfo.division;
+    let volume = leadInfo.volume;
+    let ledDivCards = hand.filter(c => c.division === ledDiv);
+    if (ledDivCards.length >= volume) return null;
+
+    let forced = [...ledDivCards];
+    let need = volume - forced.length;
+    let forcedIds = new Set(forced.map(c => c.cardId));
+    let fillerPool = hand.filter(c => !forcedIds.has(c.cardId));
+    if (need < 0 || need > fillerPool.length) return null;
+
+    // Constructive attempt set: deterministic low-risk fillers first.
+    let preferred = [...fillerPool].sort((a, b) => {
+        let aTrump = a.division === 4 ? 1 : 0;
+        let bTrump = b.division === 4 ? 1 : 0;
+        if (aTrump !== bTrump) return aTrump - bTrump;
+        return a.order - b.order || a.suit - b.suit || a.cardId - b.cardId;
+    });
+
+    let attempts = [];
+    attempts.push(preferred.slice(0, need));
+    if (preferred.length >= need) {
+        attempts.push(preferred.slice(Math.max(0, preferred.length - need)));
+    }
+    if (need > 0) {
+        for (let i = 0; i < preferred.length && attempts.length < 12; i++) {
+            let window = preferred.slice(i, i + need);
+            if (window.length === need) attempts.push(window);
+        }
+    }
+
+    let seen = new Set();
+    for (let filler of attempts) {
+        let key = filler.map(c => c.cardId).sort((a, b) => a - b).join(',');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let move = [...forced, ...filler];
+        let legal = engineIsLegalFollowBeforeThirdSeatLow(hand, leadInfo, move, forehandControl);
+        if (!legal.valid) continue;
+        if (!engineDoesFollowCoverCurrentWinner(roundState, move)) {
+            return {
+                exists: true,
+                proof: {
+                    method: 'two-deck-short-division-constructive',
+                    exampleMoveCardIds: move.map(c => c.cardId).sort((a, b) => a - b),
+                }
+            };
+        }
+    }
+
+    return null;
+}
+
+function engineExistsNonCoveringForNonSingleCanFollowDivision(hand, leadInfo, forehandControl, roundState, followContext) {
+    const SAFE_EXHAUSTIVE_LIMIT = 4000;
+    let ledDivCards = hand.filter(c => c.division === leadInfo.division);
+    let volume = leadInfo.volume;
+
+    if (ledDivCards.length >= volume) {
+        let count = engineCombinationCount(ledDivCards.length, volume);
+        if (count > SAFE_EXHAUSTIVE_LIMIT) {
+            return {
+                exists: true,
+                incomplete: true,
+                proof: { method: 'conservative-incomplete-reject-cover', reason: 'same-division-search-too-large' }
+            };
+        }
+        let combos = engineGenerateCardCombinationsExhaustive(ledDivCards, volume);
+        let found = engineFindAnyNonCoveringMoveFromCandidates(
+            hand,
+            leadInfo,
+            forehandControl,
+            roundState,
+            followContext,
+            combos,
+            'same-division-structured-search'
+        );
+        if (found) return found;
+        return {
+            exists: false,
+            proof: { method: 'same-division-structured-exhaustive' }
+        };
+    }
+
+    let forced = [...ledDivCards];
+    let need = volume - forced.length;
+    let forcedIds = new Set(forced.map(c => c.cardId));
+    let fillerPool = hand.filter(c => !forcedIds.has(c.cardId));
+    let count = engineCombinationCount(fillerPool.length, need);
+    if (count > SAFE_EXHAUSTIVE_LIMIT) {
+        return {
+            exists: true,
+            incomplete: true,
+            proof: { method: 'conservative-incomplete-reject-cover', reason: 'short-division-search-too-large' }
+        };
+    }
+
+    let fillerCombos = engineGenerateCardCombinationsExhaustive(fillerPool, need);
+    let moves = fillerCombos.map(filler => [...forced, ...filler]);
+    let found = engineFindAnyNonCoveringMoveFromCandidates(
+        hand,
+        leadInfo,
+        forehandControl,
+        roundState,
+        followContext,
+        moves,
+        'short-division-exhaustive-search'
+    );
+    if (found) return found;
+
+    return {
+        exists: false,
+        proof: { method: 'short-division-exhaustive-no-non-cover' }
+    };
+}
+
+function engineExistsLegalNonCoveringFollowAfterFC(hand, leadInfo, forehandControl, roundState, followContext) {
+    // Guardrail: forced-cover legality proof must not rely on capped enumeration.
+    // Search space here is FC-legal follows only; incomplete proof must reject cover conservatively.
+    if (!leadInfo || !Array.isArray(leadInfo.elements) || leadInfo.elements.length !== 1) {
+        return {
+            exists: true,
+            incomplete: true,
+            proof: { method: 'conservative-incomplete-reject-cover', reason: 'non-single-element-round-state-unsupported' }
+        };
+    }
+
+    let core = leadInfo.elements[0];
+    if (core.copy === 1 && core.span === 1) {
+        return engineExistsNonCoveringForSingleActualLead(hand, leadInfo, forehandControl, roundState);
+    }
+
+    // Non-single actual lead.
+    let shortDivisionConstructive = engineTryConstructShortDivisionNonCoveringMove2Deck(
+        hand,
+        leadInfo,
+        forehandControl,
+        roundState
+    );
+    if (shortDivisionConstructive && shortDivisionConstructive.exists) {
+        return shortDivisionConstructive;
+    }
+
+    return engineExistsNonCoveringForNonSingleCanFollowDivision(
+        hand,
+        leadInfo,
+        forehandControl,
+        roundState,
+        followContext
+    );
+}
+
+function engineShouldRejectByThirdSeatLow(hand, leadInfo, selectedCards, forehandControl, followContext) {
+    if (!engineIsDefaultFailedMultiplayAftermathRound()) return false;
+    if (!game || !game.roundState || !game.leadInfo) return false;
+
+    let context = followContext || {};
+    let player = Number.isInteger(context.player) ? context.player : engineGetCurrentPlayer();
+
+    // Third seat in round order only.
+    if (game.currentTurnIndex !== 2) return false;
+    if (player !== engineGetPlayerAtTurnOffset(game.currentLeader, 2)) return false;
+
+    // Third-seat-low only constrains covering follows.
+    if (!engineDoesFollowCoverCurrentWinner(game.roundState, selectedCards)) return false;
+
+    // Guardrail: third-seat-low forced-cover proof must not use capped enumeration.
+    // FC-legal follows define the candidate space.
+    let nonCover = engineExistsLegalNonCoveringFollowAfterFC(
+        hand,
+        leadInfo,
+        forehandControl,
+        game.roundState,
+        { player: player }
+    );
+
+    // Incomplete proof cannot allow forced cover; reject conservatively.
+    if (nonCover && nonCover.incomplete) {
+        return true;
+    }
+
+    return !!(nonCover && nonCover.exists);
+}
+
+function engineIsLegalFollow(hand, leadInfo, selectedCards, forehandControl, followContext) {
+    let base = engineIsLegalFollowBeforeThirdSeatLow(hand, leadInfo, selectedCards, forehandControl);
+    if (!base.valid) return base;
+
+    if (engineShouldRejectByThirdSeatLow(hand, leadInfo, selectedCards, forehandControl, followContext)) {
+        return { valid: false, error: t('errors.thirdSeatLow') };
+    }
+
+    return { valid: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -2347,17 +3259,18 @@ function engineResetFailedMultiplayCompensationState() {
     game.multiplayCompensationEvents = [];
 }
 
-function engineEnsurePublicHandInfo() {
-    if (!game.publicHandInfo || typeof game.publicHandInfo !== 'object') {
-        game.publicHandInfo = { publicHandSeatKeys: [], reasonBySeatKey: {} };
+function engineEnsurePublicHandInfo(gameState) {
+    let state = gameState || game;
+    if (!state.publicHandInfo || typeof state.publicHandInfo !== 'object') {
+        state.publicHandInfo = { publicHandSeatKeys: [], reasonBySeatKey: {} };
     }
-    if (!Array.isArray(game.publicHandInfo.publicHandSeatKeys)) {
-        game.publicHandInfo.publicHandSeatKeys = [];
+    if (!Array.isArray(state.publicHandInfo.publicHandSeatKeys)) {
+        state.publicHandInfo.publicHandSeatKeys = [];
     }
-    if (!game.publicHandInfo.reasonBySeatKey || typeof game.publicHandInfo.reasonBySeatKey !== 'object') {
-        game.publicHandInfo.reasonBySeatKey = {};
+    if (!state.publicHandInfo.reasonBySeatKey || typeof state.publicHandInfo.reasonBySeatKey !== 'object') {
+        state.publicHandInfo.reasonBySeatKey = {};
     }
-    return game.publicHandInfo;
+    return state.publicHandInfo;
 }
 
 function engineResetPublicHandInfo() {
@@ -2366,11 +3279,35 @@ function engineResetPublicHandInfo() {
 
 function engineSetHandPublicForLegality(seat, isPublic, reason) {
     if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) return false;
-    let info = engineEnsurePublicHandInfo();
+    let info = engineEnsurePublicHandInfo(game);
     let key = String(seat);
+    let wasPublic = info.publicHandSeatKeys.includes(seat);
     if (isPublic) {
         if (!info.publicHandSeatKeys.includes(seat)) info.publicHandSeatKeys.push(seat);
         if (reason) info.reasonBySeatKey[key] = String(reason);
+        if (!wasPublic) {
+            let revealedCards = Array.isArray(game.hands[seat]) ? game.hands[seat].slice() : [];
+            engineRecordActorVisibleKnowledgeEvent(
+                'PUBLIC_HAND_REVEALED',
+                seat,
+                'public',
+                revealedCards,
+                0,
+                'engineSetHandPublicForLegality',
+                { seat, reason: reason ? String(reason) : '' }
+            );
+            if (String(reason || '').toLowerCase().includes('dummy')) {
+                engineRecordActorVisibleKnowledgeEvent(
+                    'DUMMY_REVEALED',
+                    seat,
+                    'public',
+                    revealedCards,
+                    0,
+                    'engineSetHandPublicForLegality',
+                    { seat, reason: String(reason || '') }
+                );
+            }
+        }
     } else {
         info.publicHandSeatKeys = info.publicHandSeatKeys.filter(s => s !== seat);
         delete info.reasonBySeatKey[key];
@@ -2380,16 +3317,17 @@ function engineSetHandPublicForLegality(seat, isPublic, reason) {
 
 function engineIsHandPublicForLegality(seat) {
     if (!Number.isInteger(seat)) return false;
-    let info = engineEnsurePublicHandInfo();
+    let info = engineEnsurePublicHandInfo(game);
     return info.publicHandSeatKeys.includes(seat);
 }
 
-function engineGetPublicKnownHandCardsBySeat() {
+function engineGetPublicKnownHandCardsBySeat(gameState) {
+    let state = gameState || game;
     let bySeat = {};
-    let info = engineEnsurePublicHandInfo();
+    let info = engineEnsurePublicHandInfo(state);
     for (let seat of info.publicHandSeatKeys) {
         if (!Number.isInteger(seat) || seat < 0 || seat >= NUM_PLAYERS) continue;
-        bySeat[seat] = Array.isArray(game.hands[seat]) ? game.hands[seat].slice() : [];
+        bySeat[seat] = Array.isArray(state.hands[seat]) ? state.hands[seat].slice() : [];
     }
     return bySeat;
 }
@@ -2555,6 +3493,10 @@ function engineStartGame(level, pivot, playerLevels, isQiangzhuang, resolvedRule
     game.frameScore     = 0;
     game.currentRound   = 0;
     game.roundHistory   = [];
+    game.actorVisibleKnowledgeEvents = [];
+    game.knowledgeTransferSeq = 0;
+    game.pendingBaseSetTransferId = null;
+    game.pendingBaseSetOwner = null;
     game.declarations   = [];
     game.currentBaser   = null;
     game.finalBaserSeat = null;
@@ -2657,8 +3599,7 @@ function engineSetStrain(strain) {
  */
 function engineIsHighestPossibleDeclaration(declaration) {
     if (!declaration) return false;
-    let deckCount = (game.gameConfig && game.gameConfig.deckCount) || 2;
-    // Highest possible = deckCount copies of big joker (suit=4, count=deckCount*2 for pairs? no)
+    // Highest possible = double big joker (count=4) in the active 2-deck runtime.
     // In 2-deck: double W = count 4 (two big jokers). That's the max.
     // The count field: 1=single, 2=double suited, 3=double small joker, 4=double big joker
     // Highest possible is always count=4 (double W / big joker pair) regardless of deck count for now.
@@ -2668,12 +3609,32 @@ function engineIsHighestPossibleDeclaration(declaration) {
 /** Pivot picks up base */
 function enginePickUpBase() {
     if (!isPivotResolved(game.pivot)) return false;
+    let picked = Array.isArray(game.base) ? game.base.slice() : [];
+    let transferId = engineNextKnowledgeTransferId();
     game.hands[game.pivot] = game.hands[game.pivot].concat(game.base);
     game.base = [];
     engineSortHand(game.hands[game.pivot]);
     game.currentBaser = game.pivot;
     game.phase = GamePhase.BASING;
     game.dealingStage = DealingStage.NONE;  // Note 103a
+    engineRecordActorVisibleKnowledgeEvent(
+        'BASE_PICKED_UP',
+        game.pivot,
+        [game.pivot],
+        picked,
+        0,
+        'enginePickUpBase',
+        { seat: game.pivot, transferId }
+    );
+    engineRecordActorVisibleKnowledgeEvent(
+        'BASE_PICKED_UP',
+        game.pivot,
+        'public',
+        [],
+        picked.length,
+        'enginePickUpBase',
+        { seat: game.pivot, hidden: true, transferId, exceptActors: [game.pivot] }
+    );
     return true;
 }
 
@@ -2723,11 +3684,32 @@ function engineSetBase(selectedCards, options) {
 
     let ids = new Set(selectedCards.map(c => c.cardId));
     game.base = selectedCards;
+    let transferId = engineNextKnowledgeTransferId();
+    game.pendingBaseSetTransferId = transferId;
+    game.pendingBaseSetOwner = activeBaser;
     game.hands[activeBaser] = hand.filter(c => !ids.has(c.cardId));
     engineSortHand(game.hands[activeBaser]);
     // finalBaserSeat tracks who set the accepted base — updated here, not at overbase-declaration time.
     game.finalBaserSeat = activeBaser;
     game.finalBaser = activeBaser;
+    engineRecordActorVisibleKnowledgeEvent(
+        'BASE_SET',
+        activeBaser,
+        [activeBaser],
+        selectedCards,
+        0,
+        'engineSetBase',
+        { seat: activeBaser, transferId }
+    );
+    engineRecordActorVisibleKnowledgeEvent(
+        'BASE_SET',
+        activeBaser,
+        'public',
+        [],
+        selectedCards.length,
+        'engineSetBase',
+        { seat: activeBaser, hidden: true, transferId, exceptActors: [activeBaser] }
+    );
 
     let deferPlaying = !!(options && options.deferPlaying);
     if (deferPlaying) {
@@ -2751,11 +3733,49 @@ function engineApplyOverbaseDeclaration(player, declaration) {
     if (!declaration) return false;
     // Do NOT rewrite game.pivot — the frame pivot is fixed for the whole frame.
     // Only update currentBaser to track the active base-setter.
+    let priorBaseOwner = Number.isInteger(game.finalBaserSeat)
+        ? game.finalBaserSeat
+        : (Number.isInteger(game.currentBaser) ? game.currentBaser : game.pivot);
+    let takenBaseCards = Array.isArray(game.base) ? game.base.slice() : [];
+    let transferId = engineNextKnowledgeTransferId();
+    let baseSetTransferId = (Number.isInteger(game.pendingBaseSetOwner)
+        && game.pendingBaseSetOwner === priorBaseOwner)
+        ? game.pendingBaseSetTransferId
+        : null;
     game.currentBaser = player;
     engineSetStrain(declaration.suit);
     game.declarations.push({ player: player, suit: declaration.suit, count: declaration.count });
+    engineRecordActorVisibleKnowledgeEvent(
+        'OVERBASE_DECLARED',
+        player,
+        'public',
+        [],
+        0,
+        'engineApplyOverbaseDeclaration',
+        { player, suit: declaration.suit, count: declaration.count }
+    );
+    engineRecordActorVisibleKnowledgeEvent(
+        'OVERBASE_BASE_TAKEN',
+        player,
+        [player],
+        takenBaseCards,
+        0,
+        'engineApplyOverbaseDeclaration',
+        { taker: player, priorBaseOwner, transferId, baseSetTransferId }
+    );
+    engineRecordActorVisibleKnowledgeEvent(
+        'OVERBASE_BASE_TAKEN',
+        player,
+        'public',
+        [],
+        takenBaseCards.length,
+        'engineApplyOverbaseDeclaration',
+        { taker: player, priorBaseOwner, hidden: true, transferId, baseSetTransferId, exceptActors: [player] }
+    );
     game.hands[player] = game.hands[player].concat(game.base);
     game.base = [];
+    game.pendingBaseSetTransferId = null;
+    game.pendingBaseSetOwner = null;
     engineSortHand(game.hands[player]);
     game.phase = GamePhase.BASING;
     game.dealingStage = DealingStage.NONE;  // Note 103a
@@ -2771,6 +3791,15 @@ function engineApplyNonOverbaseDeclaration(player, declaration) {
     if (!declaration) return false;
     engineSetStrain(declaration.suit);
     game.declarations.push({ player: player, suit: declaration.suit, count: declaration.count });
+    engineRecordActorVisibleKnowledgeEvent(
+        'DECLARATION_MADE',
+        player,
+        'public',
+        [],
+        0,
+        'engineApplyNonOverbaseDeclaration',
+        { player, suit: declaration.suit, count: declaration.count }
+    );
     // phase stays BASING — the current baser still holds the committed base
     return true;
 }
@@ -2827,12 +3856,21 @@ function enginePlayCards(player, cards) {
                 failedMultiplay.revokedCards
             );
         }
+        engineRecordActorVisibleKnowledgeEvent(
+            'CARD_PLAYED',
+            player,
+            'public',
+            Array.isArray(game.roundPlayed[player]) ? game.roundPlayed[player].slice() : [],
+            0,
+            'enginePlayCards',
+            { round: game.currentRound, turnIndex: game.currentTurnIndex }
+        );
     } else {
         // Build the active forehand control for this follow
         let fc = game.forehandControl;
         if (fc && fc.target !== player) fc = null;
 
-        let followValid = engineIsLegalFollow(game.hands[player], game.leadInfo, cards, fc);
+        let followValid = engineIsLegalFollow(game.hands[player], game.leadInfo, cards, fc, { player: player });
         if (!followValid.valid)
             return { success: false, error: followValid.error };
 
@@ -2845,6 +3883,16 @@ function enginePlayCards(player, cards) {
 
         // Decay exposed cards for this player
         engineDecayExposedCards(player, cards);
+
+        engineRecordActorVisibleKnowledgeEvent(
+            'CARD_PLAYED',
+            player,
+            'public',
+            Array.isArray(cards) ? cards.slice() : [],
+            0,
+            'enginePlayCards',
+            { round: game.currentRound, turnIndex: game.currentTurnIndex }
+        );
 
         // Clear active FC after the target follows (one-shot per exercise)
         if (fc) {

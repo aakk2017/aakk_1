@@ -2757,7 +2757,7 @@ function updateScoreDisplay() {
 }
 
 function getScoreBorderColorForValue(score) {
-    // Hue 0->60 for score 0->40, same formula as recap: h = s * 3 / 2
+    // Hue 0->60 for score 0->40, same formula as review: h = s * 3 / 2
     const h = score * 3 / 2;
     return 'hsl(' + h + ', 100%, 50%)';
 }
@@ -4470,6 +4470,17 @@ function resolveDeclaredPhase() {
             }
         }
         game.declarations.push(bestDeclaration);
+        if (typeof engineRecordActorVisibleKnowledgeEvent === 'function') {
+            engineRecordActorVisibleKnowledgeEvent(
+                'DECLARATION_MADE',
+                bestDeclaration.player,
+                'public',
+                [],
+                0,
+                'resolveDeclaredPhase',
+                { player: bestDeclaration.player, suit: bestDeclaration.suit, count: bestDeclaration.count }
+            );
+        }
 
         gDenomArea.setAttribute('strain', suitName);
         gStrainDiv.innerHTML = getDenominationHtml(bestDeclaration.suit, bestDeclaration.count);
@@ -5321,6 +5332,46 @@ function performCrossMove(teamKey, cards) {
     if (!isValidCrossingSelection(ts.claimantSeat, cards, true)) return false;
 
     transferCardsBetweenSeats(ts.claimantSeat, ts.partnerSeat, cards);
+    if (typeof engineRecordActorVisibleKnowledgeEvent === 'function') {
+        let visibleSeats = [ts.claimantSeat, ts.partnerSeat];
+        let transferId = (typeof engineNextKnowledgeTransferId === 'function')
+            ? engineNextKnowledgeTransferId()
+            : ('cross-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+        engineRecordActorVisibleKnowledgeEvent(
+            'CROSS_SENT',
+            ts.claimantSeat,
+            visibleSeats,
+            cards,
+            0,
+            'performCrossMove',
+            { fromSeat: ts.claimantSeat, toSeat: ts.partnerSeat, teamKey, transferId }
+        );
+        engineRecordActorVisibleKnowledgeEvent(
+            'CROSS_RECEIVED',
+            ts.partnerSeat,
+            visibleSeats,
+            cards,
+            0,
+            'performCrossMove',
+            { fromSeat: ts.claimantSeat, toSeat: ts.partnerSeat, teamKey, transferId }
+        );
+        engineRecordActorVisibleKnowledgeEvent(
+            'CROSS_SENT',
+            ts.claimantSeat,
+            'public',
+            [],
+            Array.isArray(cards) ? cards.length : 0,
+            'performCrossMove',
+            {
+                fromSeat: ts.claimantSeat,
+                toSeat: ts.partnerSeat,
+                teamKey,
+                hidden: true,
+                transferId,
+                exceptActors: visibleSeats
+            }
+        );
+    }
     let dummySeat = gameGetDA3PDummyHandSeat();
     if (Number.isInteger(dummySeat) && ts.partnerSeat === dummySeat) {
         gameRevealTopDummyHand('crossing-receive');
@@ -5339,6 +5390,46 @@ function performCrossbackMove(teamKey, cards) {
     if (!isValidCrossingSelection(ts.partnerSeat, cards, false)) return false;
 
     transferCardsBetweenSeats(ts.partnerSeat, ts.claimantSeat, cards);
+    if (typeof engineRecordActorVisibleKnowledgeEvent === 'function') {
+        let visibleSeats = [ts.partnerSeat, ts.claimantSeat];
+        let transferId = (typeof engineNextKnowledgeTransferId === 'function')
+            ? engineNextKnowledgeTransferId()
+            : ('crossback-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+        engineRecordActorVisibleKnowledgeEvent(
+            'CROSSBACK_SENT',
+            ts.partnerSeat,
+            visibleSeats,
+            cards,
+            0,
+            'performCrossbackMove',
+            { fromSeat: ts.partnerSeat, toSeat: ts.claimantSeat, teamKey, transferId }
+        );
+        engineRecordActorVisibleKnowledgeEvent(
+            'CROSSBACK_RECEIVED',
+            ts.claimantSeat,
+            visibleSeats,
+            cards,
+            0,
+            'performCrossbackMove',
+            { fromSeat: ts.partnerSeat, toSeat: ts.claimantSeat, teamKey, transferId }
+        );
+        engineRecordActorVisibleKnowledgeEvent(
+            'CROSSBACK_SENT',
+            ts.partnerSeat,
+            'public',
+            [],
+            Array.isArray(cards) ? cards.length : 0,
+            'performCrossbackMove',
+            {
+                fromSeat: ts.partnerSeat,
+                toSeat: ts.claimantSeat,
+                teamKey,
+                hidden: true,
+                transferId,
+                exceptActors: visibleSeats
+            }
+        );
+    }
     ts.phase = 'done';
     ts.botPending = false;
     appendLog(t('log.crossingCrossbackDone', { playerName: PLAYER_NAMES[ts.partnerSeat], partnerName: PLAYER_NAMES[ts.claimantSeat] }));
@@ -6240,7 +6331,7 @@ const SETTINGS_SELECT_OPTIONS = {
     overbaseRestrictions: ['none', 'default'],
     failedMultiplayHandling: ['default', 'compensation', 'lian-zhong-compensation'],
     allowCrossings: ['false', 'true'],
-    scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', '8-4-4'],
+    scoringPreset: ['', 'traditional', 'traditional-power', '7-3-5', 'short-level', '8-4-4'],
     baseMultiplierScheme: ['limited', 'single-or-not', 'exponential', 'power'],
     levelsPreset: ['', 'default', 'high-school', 'plain', 'skip-468'],
     gameMode: ['endless', 'pass-A'],
@@ -6362,6 +6453,7 @@ function ensureResolvedSettings() {
     if (!gResolvedGameSettings) {
         gResolvedGameSettings = getDefaultResolvedSettings();
     }
+    globalThis.__SHENGJI_RESOLVED_GAME_SETTINGS__ = gResolvedGameSettings;
 }
 
 function commitResolvedSettingsFromDraft() {
@@ -6398,6 +6490,8 @@ function commitResolvedSettingsFromDraft() {
             gResolvedGameSettings.displaySettings.selectedDA3PReferenceActor
         );
     }
+
+    globalThis.__SHENGJI_RESOLVED_GAME_SETTINGS__ = gResolvedGameSettings;
 
     return gResolvedGameSettings;
 }
@@ -6740,6 +6834,7 @@ function settingsOptionLabel(value) {
         'traditional': 'traditional',
         'traditional-power': 'traditionalPower',
         '7-3-5': 'sevenThreeFive',
+        'short-level': 'shortLevel',
         '8-4-4': 'eightFourFour',
         // levels preset values
         'skip-468': 'skip468',
@@ -9664,14 +9759,6 @@ for (let tlTabBtn of gSettingsTopLevelTabs) {
     tlTabBtn.addEventListener('click', () => {
         gSettingsTopLevelTab = tlTabBtn.getAttribute('data-toplevel');
         renderSettingsDialog();
-    });
-}
-
-const gBtnGotoRecap = document.getElementById('btn-goto-recap');
-if (gBtnGotoRecap) {
-    gBtnGotoRecap.addEventListener('click', function (e) {
-        e.preventDefault();
-        window.location.href = 'index.html';
     });
 }
 

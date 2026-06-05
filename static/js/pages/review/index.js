@@ -1,6 +1,6 @@
 /**
- * pages/recap/index.js
- * Entry point for the Shengji recap page
+ * pages/review/index.js
+ * Entry point for the Shengji review page
  * Orchestrates the generic replay layer with Shengji-specific layer
  * 
  * This file imports and initializes both generic replay functionality
@@ -21,7 +21,7 @@
 // (dom_refs.js - all document.getElementById() calls, DOM object)
 
 // Import generic rendering helpers
-// (recap_view.js - createCardContainer, updateTableRecordHighlight, etc.)
+// (review_view.js - createCardContainer, updateTableRecordHighlight, etc.)
 
 // Import generic event handlers
 // (events.js - keyboard, mouse, UI event handling)
@@ -43,7 +43,7 @@
 // (shengji_rules.js - card evaluation, trump logic, scoring)
 
 // Import Shengji-specific rendering and formatting
-// (shengji_recap_view.js - hand rendering, table generation)
+// (shengji_review_view.js - hand rendering, table generation)
 // (shengji_formatters.js - move text, display formatting)
 
 // ============================================================================
@@ -51,10 +51,10 @@
 // ============================================================================
 
 /**
- * Initialize the recap page
+ * Initialize the review page
  * Sets up the replay system with all game-specific components
  */
-function initializeRecapPage() {
+function initializeReviewPage() {
     // Initialize event listeners
     initializeEventListeners();
     
@@ -113,7 +113,7 @@ function attachGameMenuHandlers() {
 
 // NOTE:
 // The actual game-specific implementations are provided by
-// games/shengji/shengji_game_controller.js and shengji_recap.js.
+// games/shengji/shengji_game_controller.js and the legacy monolith bridge.
 // Do not redefine dispatch wrappers here, otherwise global handlers
 // such as goToNextMove/goToPreviousMove/saveAsUpg are overridden.
 
@@ -123,7 +123,7 @@ function attachGameMenuHandlers() {
 // with the old single-file structure during migration
 // ============================================================================
 
-// Reuse hand elements array from recap_view.js (already declared there)
+// Reuse hand elements array from review_view.js (already declared there)
 
 // Pass through functions to view update logic
 function testFnc() {
@@ -135,23 +135,15 @@ function testFnc() {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', function() {
-    initializeRecapPage();
+    initializeReviewPage();
 
-    const btnGotoGame = document.getElementById('btn-goto-game');
-    if (btnGotoGame) {
-        btnGotoGame.addEventListener('click', function (e) {
-            e.preventDefault();
-            window.location.href = 'game.html';
-        });
-    }
-
-    console.log("Shengji Recap Page Initialized");
+    console.log("Shengji Review Page Initialized");
 });
 
 // ============================================================================
 // MIGRATION NOTE
 // This file serves as the entry point after refactoring the monolithic
-// recap.js and shengji_recap.js files into a modular two-layer architecture:
+// review.js and the legacy Shengji monolith files into a modular two-layer architecture:
 //
 // GENERIC LAYER (core/):
 //   - Replay timeline management
